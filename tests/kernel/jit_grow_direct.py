@@ -1,13 +1,13 @@
-# A hot callee compiled code enters directly, which leaves a call out of
-# line for want of budget: at its unit's HOT_ENTRIES-th direct entry the
-# unit dies and its code is built again with more budget, while that
-# entry's activation runs on in the dead unit. Values and errors stay as
-# the interpreter's.
+# A large callee that compiled code enters directly (a call site with
+# seven callees takes none in line), raising now and then from the direct
+# entry, its unit killed and rebuilt while the loop keeps entering it.
+# Values and errors stay as the interpreter's. (It was written for the
+# fixed growth trigger, now gone: the callee's first build takes big in
+# line, so it is not grown here.)
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 40000
 
-# Too big to take in line at the first budget.
 src = "def big(x):\n" + "".join(f"    x = (x * {i % 7 + 2} + {i}) % 1000003\n" for i in range(240)) + "    return x\n"
 ns = {}
 exec(src, ns)

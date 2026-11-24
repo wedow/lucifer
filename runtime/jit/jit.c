@@ -90,6 +90,7 @@
    out is built again with twice that once the calls it made out of line
    have cost what that larger build will (hot_exit). */
 #define INLINE_BUDGET 1000
+#define MAX_GROWN 4                 /* doublings of the inlining budget: at most 16,000 */
 /* The calls per entry of a unit that show a site in a loop it runs. */
 #define LOOP_CALLS 64
 
@@ -1141,7 +1142,8 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     f.entry_pc = (int)(frame->instr - lu_code_start(frame->code));
     /* What the evaluator may inline, in code units: a unit that stayed hot
        with calls left out is built again with twice as much. */
-    f.budget = jc->grown < 21 ? INLINE_BUDGET << jc->grown : INT_MAX;     /* what an int holds */
+    /* The ceiling is master's (MAX_GROWN), kept until the owner decides whether growth may be unbounded. */
+    f.budget = INLINE_BUDGET << jc->grown;
     f.stress = _PyRuntime.stress.deopt != 0;
     if (f.stress) {
         u->stress_counter = malloc(sizeof(long));
@@ -1868,11 +1870,14 @@ handling_frame(struct lu_deopt *d)
    frame's handler keeps taking (compiled code takes only the root's and
    kernel frames', which make no traceback entry) is treated as a side
    exit there: the function is called instead, and its own unit takes it. */
-/* Calls made at site i of the unit's out-of-line calls. */
+/* Calls made at site i of the unit's out-of-line calls. Read under
+   another root's lock while the owner re-arms them, so a torn read is
+   possible: never below 0. */
 static int64_t
 out_calls(const struct lu_out *o)
 {
-    return o->before + o->armed + __atomic_load_n(&o->left, __ATOMIC_RELAXED);
+    int64_t n = o->before + o->armed + __atomic_load_n(&o->left, __ATOMIC_RELAXED);
+    return n > 0 ? n : 0;
 }
 
 /* What a unit has lost per entry: what its exits and generic paths lost
@@ -1890,10 +1895,17 @@ unit_losses(struct lu_unit *u)
         return (double)kept;
     }
     unsigned long upto = __atomic_load_n(&u->lost_entries, __ATOMIC_RELAXED);
-    double per = (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED) / (double)(upto != 0 ? upto : entries);
+    double lost = (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED);
+    double total = lost;
+    double per = lost / (double)(upto != 0 ? upto : entries);
     for (int i = 0; i < u->nouts; i++) {
-        per += CALL_COST * (double)out_calls(&u->outs[i]) / (double)entries;
+        double out = CALL_COST * (double)out_calls(&u->outs[i]);
+        total += out;
+        per += out / (double)entries;
     }
+    /* A torn read of a callee's counters must not stand for good: a loss
+       per entry is at least 0 and at most all that was recorded. */
+    per = per < 0 ? 0 : per > total ? total : per;
     __atomic_store_n(&u->per_entry, (uint64_t)per, __ATOMIC_RELAXED);
     return per;
 }
@@ -1966,7 +1978,7 @@ hot_exit(struct lu_deopt *d)
         }
     }
     const char *why = jc->nhot > was ? "hot-site"
-        : u->refused && total >= build_cost(2 * built) ? "grown" : NULL;
+        : u->refused && jc->grown < MAX_GROWN && total >= build_cost(2 * built) ? "grown" : NULL;
     free(cost);
     for (int i = 0; why == NULL && i < u->nouts; i++) {
         struct lu_out *o = &u->outs[i];

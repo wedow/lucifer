@@ -439,7 +439,7 @@ LEDGER = {'churn': ('jit_rebuild_churn.py', ('-X', 'lucifer_jit=on')), 'classtes
 LEDGER_SLACK = 2
 # lane: the most its count may be at GROWTH_N: twice what the tier's ledger came to when the bound was set (a
 # polymorphic rotation the ledger learns over several rebuilds, where the interpreter-era policy rebuilt once).
-AT_MOST = {'classtests': 2 * 377636}
+AT_MOST = {'classtests': 2 * 164529}
 # lane: (the counts, summed, that must grow by at least this many per iteration): work compiled code does.
 AT_LEAST = {'sharedcode': (r'jit: executed:.* poll (\d+)', 0.9)}
 PERF_RESOLVED = 0.95
@@ -533,15 +533,18 @@ def check_ledger(args, lane):
         problems.append('output differs')
     build_ins = int(re.search(r'^#define BUILD_INS (\d+)', (ROOT / 'runtime' / 'jit' / 'jit.c').read_text(), re.M)[1])
     first = later = paid = 0
+    bought = set()      # a purchase prints the same paid on every unit of its root it kills: count it once
     for line in p.stderr.splitlines():
         b = re.match(r'jit-ev \S+ build \S+ \S+ ins (\d+) .*: (\S+)', line)
-        k = re.match(r'jit-ev \S+ kill (\S+) .* paid (\d+) cost (\d+): (.*)', line)
+        k = re.match(r'jit-ev \S+ kill (\S+?)@\d+ .* paid (\d+) cost (\d+): (.*)', line)
         if b and b[2] == 'first':
             first += int(b[1])
         elif b and not b[2].startswith('dep-'):
             later += int(b[1])      # a dependency that changed (dep-keys, dep-value) rebuilds whatever was paid
         elif k:
-            paid += int(k[2])
+            if k.groups() not in bought:
+                bought.add(k.groups())
+                paid += int(k[2])
             if int(k[3]) > int(k[2]):
                 problems.append(f'{k[1]} rebuilt for {k[4]}: paid {k[2]}, predicted {k[3]}')
     bound = first + LEDGER_SLACK * paid / build_ins
