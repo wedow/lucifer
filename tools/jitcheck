@@ -112,6 +112,12 @@ require that a count of the tier's does not grow with the iterations:
          and tuple items nothing can free before their last use: no INCREF
          or DECREF per item (-X lucifer_jit_stats' incref, decref): only the
          inner loop's list iterator is released, once per outer turn.
+  entryfails tests/kernel/jit_borrow_entry_fails.py, whose loop is entered
+         in compiled code while a local its list read writes holds a value
+         no container holds: the entry's check fails as a guard does, and
+         the loop is built again to count that local, so exits from
+         compiled code (-X lucifer_jit_stats' guard and poll exits) stay
+         flat.
   classes  tests/kernel/jit_class_calls.py, whose hot loop calls classes
          with Python initializers: entries into compiled code, direct and
          compiled calls (the instance is made in line, __init__ inlines).
@@ -335,6 +341,7 @@ GROWTH = {
               r'jit: executed:[^\n]* truth (\d+)', 0),
     'typed': ('jit_typed_items.py', r'jit: executed:.* helper (\d+)', 0),
     'borrowed': ('jit_borrowed_counts.py', r'jit: executed:.* incref (\d+) decref (\d+)', 1 / 2),
+    'entryfails': ('jit_borrow_entry_fails.py', r'exits guard (\d+) stress \d+ poll (\d+)', 0),
     'strs': ('jit_str_chars.py', r'jit: executed:.* helper (\d+)', 0),
     'positional': ('jit_positional_args.py', r'(?s)jit: unit scan@\d+ entries [1-9]\d* .*?'
                    r'jit: allocations by kind:[^\n]* tuple (\d+), list (\d+)', 0),
