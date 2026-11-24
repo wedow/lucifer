@@ -126,3 +126,58 @@ for i in range(N):
     if i == N // 2:
         sub['value'] = 6
 print('dict subclass', sorted(seen))
+
+
+# The globals turned into a general-keys table (a non-str key) mid-loop.
+def add_int_key():
+    globals()[1] = 'int key'
+
+
+print('general keys', read_both(N, N // 2, add_int_key), globals()[1])
+del globals()[1]
+print('int key gone', read_both(N, N // 2, lambda: None))
+
+LOOP = '''
+def loop(n, at, change):
+    total = 0
+    for i in range(n):
+        if i == at:
+            change()
+        total += len('abc')
+    return total
+'''
+
+
+# A dict subclass as builtins: its __getitem__ answers.
+class Builtins(dict):
+    def __getitem__(self, key):
+        if key == 'len':
+            return lambda s: 10
+        return dict.__getitem__(self, key)
+
+
+ns = {'__builtins__': Builtins(vars(builtins))}
+exec(LOOP, ns)
+print('builtins subclass', ns['loop'](N, N // 2, lambda: None))
+
+# exec with a builtins dict of its own, changed mid-loop.
+own = {'range': range, 'len': len}
+ns = {'__builtins__': own}
+exec(LOOP, ns)
+
+
+def own_len():
+    own['len'] = lambda s: 20
+
+
+print('own builtins', ns['loop'](N, N // 2, own_len))
+
+# __builtins__ rebound: functions made before keep the builtins they were
+# made with; functions made after take the new ones.
+ns = {'__builtins__': builtins}
+exec(LOOP, ns)
+before = ns['loop']
+ns['__builtins__'] = {'range': range, 'len': lambda s: 30}
+print('rebound, made before', before(N, N // 2, lambda: None))
+exec(LOOP, ns)
+print('rebound, made after', ns['loop'](N, N // 2, lambda: None))

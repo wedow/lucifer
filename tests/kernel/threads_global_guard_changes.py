@@ -1,6 +1,7 @@
 """Readers load a global and a builtin in hot loops while another thread
 deletes and re-adds the global, shadows the builtin with a global and
-unshadows it, grows the module dict past resizes, and replaces the builtin.
+unshadows it, grows the module dict past resizes, replaces the builtin, and
+resizes the builtins dict.
 Every load must give a value one of those states holds, or NameError while
 the global is deleted."""
 import builtins
@@ -25,6 +26,10 @@ def churn():
         for _ in range(40):
             globals()['grown_%d' % k] = k
             k += 1
+        for j in range(40):
+            setattr(builtins, 'thread_grown_%d' % (k + j), j)
+        for j in range(40):
+            delattr(builtins, 'thread_grown_%d' % (k + j))
 
 
 def read(out):
