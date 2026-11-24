@@ -441,27 +441,51 @@ C. Rule changes, in order:
   - richards and deltablue whole: the branch builds less IR than master (richards 44.5k first, 21.5k learned against master's 25.2k; marks 64 against 79); changes 2 to 3 do not change richards' builds (identical logs). The extra is fewer and later learned rebuilds and marks under the ledger, which change 1 priced up (whole +1.7% and +0.8% in the earlier table).
   - regex windows: the remaining compile is new code's first builds and learned rebuilds; growth chains are gone.
 
+**2026-11-24 change 3 dropped; sum price kept; table (e4982587)**
+
+- Coordinator's ruling: change 3 is reverted (e4982587). CD shows the loss counters cannot see what a doubling saves in run code: the second doublings it refused cut counted out-of-line losses by 39k of 180k per entry while the run got 17 points better. With growth per entry, the doubling priced at twice the unit's own build and master's ceiling of four doublings per entry, a growth chain is finite. regex_v8's compiled code is level with master's, so its remaining window cost is a bounded convergence cost, accepted as an explained loss.
+- The sum price stays: a purchase is never priced below what it builds.
+- Gate on e4982587: kernel 68/68 in jit-off, plain, jit, jit-deopt; handoff 7/7; full tools/jitcheck 0 failing; tools/jitcost PASS.
+- Table: branch e4982587, two runs on core leases, min; master rows from the previous table (same binary, two runs).
+
+| program | whole | long window | per call/it. m/b | long | compile ms m/b | IR m/b |
+|---|---|---|---|---|---|---|
+| regex_v8 | -16.1% | calls 64-128 | 794.9M/851.0M | +7.0% | | |
+| regex_v8 | | calls 128-256 | 781.5M/823.0M | +5.3% | | |
+| pyflakes | -10.4% | | | | 712/333 | 302k/197k |
+| pygments | -10.3% | | | | 839/364 | 194k/157k |
+| imports | -0.8% | | | | 55/46 | 29k/28k |
+| black | -5.1% | | | | 697/511 | 292k/261k |
+| AWFY Json | -22.3% | it. 20-60 | 65.29M/42.45M | -35.0% | | |
+| AWFY CD (10) | +4.9% | it. 20-60 | 263.87M/234.34M | -11.2% | | |
+| AWFY DeltaBlue | -0.0% | it. 20-60 | 5.76M/5.31M | -7.8% | | |
+| AWFY Richards | +0.9% | it. 20-60 | 119.97M/120.17M | +0.2% | | |
+| richards | +2.4% | calls 96-192 | 122.56M/122.34M | -0.2% | | |
+| deltablue | +1.2% | calls 1024-2048 | 32.42M/32.08M | -1.0% | | |
+| json_loads | -4.4% | calls 768-1536 | 21.91M/21.89M | -0.1% | | |
+| deepcopy | -2.4% | calls 128-256 | 5.88M/6.12M | +4.1% | | |
+
+- regex_v8 split: calls 64-128 compile 14.1M/61.5M a call, run 780.8M/789.4M (+1.1%); calls 128-256 compile 7.2M/44.2M, run 774.3M/778.8M (+0.6%). Grown kills: 20 by call 64, 32 by 128, 43 by 256 (block0, block2, Pattern.sub, _subx still doubling in 128-256). The last doubling is after call 256; not measured past it.
+- Misses: CD whole +4.9% (its window -11.2%), deepcopy window +4.1%, richards whole +2.4%, deltablue whole +1.2%, regex windows (compile of the growth chain, above).
+- deepcopy, from the event log (not yet built or measured directly): the window's extra exits are _deepcopy_tuple@1's error exits at @35, which its handler catches (3,839 in calls 128-256, about 30 a call), and 829 guard exits. They buy nothing. By the code path, lu_jit_note_exit returns for an error handled in frame 0 when kernel_handler finds no handler (handled == 0, caught < 0): the exit counts only as a leave, never into fails, so no mark can pay (unverified that this is the path taken). The 667 exits of the @7 entry, the one that bought mark-catch before, no longer cover the price, which now includes the live 1,061-IR @1 unit. The window's gap over its exits implies about 6k instructions per exit against the model's 3,800 + 100 x rest: within 2x on this estimate. json_loads' window has no extra exits and is level.
+
 ## State
 
-Branch luc-1kz0-land, on origin/master dbb9b594, head after the note commit. Measured binary fcf5f177.
+Branch luc-1kz0-land, on origin/master dbb9b594. Measured binary e4982587.
 
-Built:
-1. (4b477b47) a learned rebuild is predicted at the unit's own build.
-2. (1e23eebd) growth is per entry.
-3. (dd6d2f69) a purchase is priced at the builds it kills (sum of the killed units' own builds; one unit's for hot site and growth); the kill event prints the unit's IR; the ledger lanes check every purchase against it.
-4. (fcf5f177) a doubling must deliver (per-entry bar); lane delivers.
+Built: (4b477b47) a learned rebuild is predicted at the unit's own build; (1e23eebd) growth per entry; (dd6d2f69) a purchase is priced at the builds it kills, and the kill event prints the unit's IR. The delivery rule (fcf5f177) is reverted (e4982587). Its lane program is kept out of the tree.
 
-Gate on fcf5f177: kernel 69/69 in four lanes, handoff 7/7, jitcheck 0 failing, jitcost PASS. Table in the last note.
+Gate on e4982587: kernel 68/68 in four lanes, handoff 7/7, jitcheck 0 failing, jitcost PASS. Table in the last note.
 
-Not landable on the acceptance: CD (+7.8% whole, +5.8% a iteration: change 3 refuses second doublings that pay), json_loads window +8.8% and deepcopy window +3.8% (marks and learned-type-fails priced at the sum of several units are bought later or not at all), richards +2.5% and deltablue +1.3% whole, regex windows +2.2%/+1.4% (compile), imports compile ms 58/55 (one run). Gains kept: pyflakes -10.2%, pygments -9.7%, regex_v8 whole -17.3%, Json -28.6% whole and -39.7% a iteration, black -5.2%.
-
-Open for the coordinator: (a) the delivery measure: CD's second doublings deliver in run code while counted losses per entry fall by less than half their reason; (b) the sum price for marks: _new_match's and _deepcopy_tuple's marks kill several small units whose sum delays the mark past the window, where one unit's own build bought it before.
+Open (coordinator's item 2, not built):
+1. Exit losses the ledger never counts. An error exit handled in the unit's root frame with no kernel handler (lu_jit_note_exit: handled == 0, caught < 0) counts only as a leave. deepcopy's _deepcopy_tuple@1 takes about 30 such exits a call at @35 and never buys a mark. Decide whether such exits should accrue to a site's fails (a mark-catch for the root's own handler) or to the retire ledger.
+2. Validate the exit charge. Validate 3,800 + 100 x rest against measurement on real units: _deepcopy_tuple@7/@35, _deepcopy_list@30, _new_match@169/@202, _parse_object@103. Measure the per-call instruction difference between a build with the site marked from the start and one where it keeps leaving, divided by exits per call. If the charge is low by more than 2x, fix the estimate in general form: for example, count downstream loop bodies by the unit's recorded trip counts, or keep a running mean of interpreted bytecodes per exit off the fast path. Extend tools/jitcost with a real-unit exit check. The window estimate above (about 6k per exit) suggests the charge is within 2x for deepcopy.
+3. After that, re-run the gate and the missed rows: CD whole, deepcopy window, richards and deltablue whole, regex windows past call 256 (when the last doubling happens).
 
 Lanes and sizes (tools/jitcheck):
 - Helpers and count lanes at N and 2N (N = 20,000), except typed at 4N and 8N (START).
 - Ledger lanes (churn, classtests, learnprice, typed) at 2N: every purchase paid at least its predicted cost and predicted at least at the killed unit's own build; total IR within first builds plus LEDGER_SLACK x paid / BUILD_INS.
 - entrygrowth at 2N: the start grew; loop entries built after that are at grown 0.
-- delivers at 2N: jit_grown_generic's start grows exactly once.
 
 Compile/run split for regex_v8:
 - Record the pyperf worker at -l 32, 64, 128, one run per core lease, pinned: `perf record -e instructions:u -c 1000003 --call-graph fp`.
