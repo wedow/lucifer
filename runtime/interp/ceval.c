@@ -263,13 +263,14 @@ global_get(struct lu_frame *frame, PyObject *name)
 }
 
 /* A new reference to the value at entry `index` of exact dict d's keys table,
-   if the table has `version` (nonzero) and is still d's after the value is
-   taken; NULL otherwise. */
+   if the table has `version` and is still d's after the value is taken; NULL
+   otherwise. `version` is a specialization's, never 0: the specializer does
+   not store an unversioned table's. */
 static inline Py_ALWAYS_INLINE PyObject *
 versioned_entry(PyObject *d, uint16_t version, Py_ssize_t index)
 {
     PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)d)->ma_keys, __ATOMIC_ACQUIRE);
-    if (dk->dk_version != version) {
+    if (__atomic_load_n(&dk->dk_version, __ATOMIC_RELAXED) != version) {
         return NULL;
     }
     PyObject *v = lu_try_xget_ref(&((PyDictUnicodeEntry *)lu_dk_entries(dk))[index].me_value);
@@ -1777,7 +1778,8 @@ op_LOAD_GLOBAL_BUILTIN: {
     PyObject *v = NULL;
     if (lu_site_unchanged(next_instr - 1, LOAD_GLOBAL_BUILTIN, seq)
         && PyDict_CheckExact(frame->globals) && PyDict_CheckExact(frame->builtins)
-        && __atomic_load_n(&((PyDictObject *)frame->globals)->ma_keys, __ATOMIC_ACQUIRE)->dk_version == globals_version) {
+        && __atomic_load_n(&__atomic_load_n(&((PyDictObject *)frame->globals)->ma_keys, __ATOMIC_ACQUIRE)->dk_version,
+                           __ATOMIC_RELAXED) == globals_version) {
         v = versioned_entry(frame->builtins, version, index);
     }
     if (v == NULL) {

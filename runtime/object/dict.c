@@ -829,7 +829,7 @@ lu_dict_insert(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
         ((PyDictKeyEntry *)lu_dk_entries(dk))[n] = (PyDictKeyEntry){ hash, Py_NewRef(key), Py_NewRef(value) };
     }
     lu_dk_set_index(dk, find_empty_slot(dk, hash), n);
-    dk->dk_version = 0;
+    __atomic_store_n(&dk->dk_version, 0, __ATOMIC_RELAXED);
     dk->dk_usable--;
     dk->dk_nentries = n + 1;
     __atomic_store_n(&mp->ma_used, mp->ma_used + 1, __ATOMIC_RELAXED);
@@ -893,7 +893,7 @@ remove_entry(PyDictObject *mp, Py_ssize_t ix, int *watched)
     else {
         ((PyDictKeyEntry *)lu_dk_entries(dk))[ix] = (PyDictKeyEntry){ -1, NULL, NULL };
     }
-    dk->dk_version = 0;
+    __atomic_store_n(&dk->dk_version, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&mp->ma_used, mp->ma_used - 1, __ATOMIC_RELAXED);
     *watched = changed(mp, -1);
     Py_DECREF(key);
