@@ -104,3 +104,78 @@ class D(dict):
 
 
 print(D(a=1), D([(1, 2)], b=3))
+
+
+# More kinds, each swapped in mid-loop: a method descriptor, a builtin
+# function, a __get__ that raises, a bound method stored on the class.
+class Raising:
+    def __get__(self, obj, owner):
+        raise ValueError('no binding')
+
+
+class Holder:
+    def method(self, *args):
+        return ('bound method', type(self).__name__, len(args))
+
+
+more = {
+    'method descriptor': dict.get,
+    'builtin': abs,
+    'raising get': Raising(),
+    'bound method': Holder().method,
+}
+# dict.get only where it gets its key: called with none, its arity error is
+# worded differently here.
+for name in ('__getitem__', '__len__', '__neg__', '__contains__'):
+    labels = list(more) if name in ('__getitem__', '__contains__') else list(more)[1:]
+    for i in range(2 * len(labels) + 2):
+        label = labels[i % (len(labels) + 1)] if i % (len(labels) + 1) < len(labels) else 'none'
+        if label == 'none':
+            if name in Box.__dict__:
+                delattr(Box, name)
+        else:
+            setattr(Box, name, more[label])
+        r = ops[name](Box({1: 'one'}))
+        if i <= len(labels):
+            print(name, label, r)
+    if name in Box.__dict__:
+        delattr(Box, name)
+
+# __init__ as a classmethod and a partial, __new__ returning another class's
+# instance (its __init__ not called), and a metaclass __call__.
+more_inits = {
+    'classmethod': classmethod(lambda cls, *args, **kwargs: print('  init class', cls.__name__, len(args), sorted(kwargs))),
+    'partial': functools.partial(lambda tag, *args, **kwargs: print('  init partial', tag, [type(a).__name__ for a in args], sorted(kwargs)), 'first'),
+}
+for i in range(4):
+    label = list(more_inits)[i % 2]
+    Init.__init__ = more_inits[label]
+    print(label, attempt(lambda: type(Init(1, k=2)).__name__), attempt(lambda: type(Init()).__name__))
+
+
+class Other:
+    def __init__(self, *args):
+        print('  Other init', args)
+
+
+class NewOther:
+    def __new__(cls, *args):
+        return Other()
+
+    def __init__(self, *args):
+        print('  NewOther init', args)
+
+
+class Meta(type):
+    def __call__(cls, *args, **kwargs):
+        print('  Meta call', cls.__name__, args, sorted(kwargs))
+        return super().__call__(*args)
+
+
+class Metered(metaclass=Meta):
+    def __init__(self, *args):
+        print('  Metered init', args)
+
+
+for i in range(3):
+    print(type(NewOther(i)).__name__, type(Metered(i, k=i)).__name__)
