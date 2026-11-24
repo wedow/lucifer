@@ -16,7 +16,28 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp. Stages 0-2 done. Next: stage 3 (exact-arguments calls), started: CALL_PY_EXACT_ARGS/CALL_BOUND_METHOD_EXACT_ARGS in place in op_CALL (lu_frame_push_exact), PUSH_RETURNED tests the plain push first; test tests/kernel/call_exact_args.py.
+Branch luc-interp, rebased on master after stage 2. Stages 0-2 landed. Stage A (calls and returns, replacing the
+unlanded stage 3 commit) committed for review. Successor order, from the coordinator's brief:
+
+1. B, the costs every opcode pays: the count-down step of Py_DECREF/Py_XDECREF and Py_NewRef are out-of-line calls in
+   eval_frame (gcc inlines neither into the function); make the owner-thread step inline there, the merge and shared
+   paths calls. Dispatch is 10 instructions against CPython's 6 plus its instr_ptr store and next_instr step: the
+   targets table and localsplus are reloaded from the stack, opcode and oparg are sign-extended at each use, and
+   prev_instr is spilled. GETLOCAL can index frame->localsplus (the local goes); opcode/oparg as word-sized values.
+2. C, the kernel wrappers' forwarding: call_special(descr, obj, *args, **kwargs) (lib/kernel/_boot.py) is called
+   1.87M times in pyflakes and its descr(obj, *args, **kwargs) builds a list, a tuple and a dict for
+   CALL_FUNCTION_EX, which then calls a wrapper_descriptor (1.85M) through lu_wrapper_descr_call (8.6% of the run,
+   inclusive). Find its hot callers (getattr_hook's __getattribute__, operators) and pick the interpreter or the
+   kernel-source fix.
+3. D, LOAD_GLOBAL_MODULE/BUILTIN (44.5M executions in pyflakes, 59 instructions each, 9.8% of the run after A).
+4. E, the remaining forms by the census (POP_JUMP_IF_*, RESUME, IS_OP, attribute forms).
+
+Tools (scratch, untracked; rebuild them from these notes): a counting build is ceval.c with
+`lu_opc[kernel][opcode]++` in DISPATCH dumped at exit, and a call census at call_tail's entry (caller kernel or not,
+callee kind: function exact/defaults/varargs/keywords, through CALL_FUNCTION_EX, type, METH flags of C functions,
+the type of anything else); per-opcode instructions come from `perf record --call-graph fp` with the JIT off, each
+sample charged to the opcode label around its innermost eval_frame frame (addr2line, the dispatch table mapping
+aliased opcodes to labels, stacked labels to the last), and the callee eval_frame called for a label's share.
 Measuring: instructions per bytecode with the JIT off from two sizes of each workload (fib 25/27, the arith loop 1M/2M,
 the attribute loop 750k/1.5M; 4.52M, 15M, 15M bytecodes apart, counted with CPython's opcode tracing); whole-run
 `perf stat -e instructions:u` with the JIT on for `-c pass`, `-c "import <STARTUP_IMPORTS>"`, pyflakes as the corpus runs it
@@ -102,3 +123,101 @@ division by zero, bools, a compiled loop whose operands change size).
 
 What is left of int arithmetic is the opcode body: two out-of-line Py_DECREF calls per operator (gcc does not inline
 it into eval_frame), the bool and bitwise tests, the switch in lu_long_binary; stage 4's BINARY_OP_*_INT forms.
+
+### 2026-11-24 opcode census, JIT off (lucifer at stage 3)
+
+Executed bytecodes (counting build) and instructions per execution (perf, inclusive of callees):
+
+| | bytecodes | kernel code | instructions | per bytecode |
+|---|---|---|---|---|
+| stdlib imports | 11.9M | 90% | 1.52G | 128 |
+| pyflakes | 273.4M | 90% | 32.26G | 118 |
+| fib / arith / attributes | 4.1M / 16.1M / 16.1M | 24% / 6% / 6% | | |
+
+pyflakes, the top rows (opcode: executions, kernel share, instructions each, share of the run). Shared paths, inclusive:
+call_tail 35.6%, return_frame 8.5%, call_done 4.0%, call_stack_args 1.9%, push_callee 1.1%, not under the loop 5.6%.
+
+| opcode | executions | kernel | instr each | share |
+|---|---|---|---|---|
+| LOAD_GLOBAL_MODULE/BUILTIN | 44.5M | 95% | 59 | 8.2% |
+| LOAD_FAST(_BORROW) | 51.9M | 91% | 23 | 3.7% |
+| CALL (its own part) | 28.7M | 93% | 34 | 3.0% |
+| CALL_FUNCTION_EX | 1.95M | 99% | 413 | 2.5% |
+| LIST_EXTEND | 1.95M | 100% | 366 | 2.2% |
+| CALL_INTRINSIC_1 | 1.94M | 100% | 367 | 2.2% |
+| POP_JUMP_IF_FALSE | 14.4M | 91% | 43 | 1.9% |
+| LOAD_CONST | 13.0M | 88% | 39 | 1.6% |
+| BUILD_LIST | 2.0M | 98% | 234 | 1.4% |
+| LOAD_ATTR (generic) | 0.5M | 2% | 806 | 1.3% |
+| RESUME | 11.8M | 90% | 34 | 1.3% |
+| STORE_FAST | 15.6M | 92% | 25 | 1.2% |
+| POP_JUMP_IF_TRUE | 8.0M | 94% | 44 | 1.1% |
+| DICT_MERGE | 1.95M | 99% | 146 | 0.9% |
+| IS_OP | 15.5M | 99% | 17 | 0.8% |
+| TO_BOOL | 7.0M | 79% | 33 | 0.7% |
+| FOR_ITER | 1.1M | 18% | 150 | 0.5% |
+| BINARY_OP | 0.85M | 33% | 179 | 0.5% |
+
+The imports run has the same shape (call_tail 36.4%, return_frame 8.1%, LOAD_GLOBAL 6.0%, IMPORT_NAME 6.8%).
+Nine in ten interpreted bytecodes of these programs are kernel code: the builtins' Python, run interpreted until hot.
+
+### 2026-11-24 stage A: calls and returns, kernel code included
+
+Stage 3 (exact-arguments calls of non-kernel functions) cut fib 97.4 to 82.5 instructions per bytecode but made
+pyflakes JIT off 0.8% worse. Per function (s2 against s3, pyflakes, self samples): alloc_frame had become a call (it
+had been inlined into lu_frame_push, its only caller; lu_frame_push_exact was a second), +2.2k samples of 320k, and
+the failed checks of kernel calls a little more. Kernel code had been excluded for its frames, which count against
+kernel_room rather than the recursion limit; lu_depth_room serves both counts.
+
+What CALL meets in pyflakes, JIT off (call census at call_tail's entry, 30.6M calls):
+
+| callee | caller kernel | caller user |
+|---|---|---|
+| METH_FASTCALL primitive | 12.19M | 0 |
+| type(x), bool(x) | 7.98M | 0.01M |
+| kernel function, exact positional arguments | 4.38M | 0.01M |
+| wrapper_descriptor (2.12M), method_descriptor, method-wrapper | 2.15M | 0.10M |
+| kernel function with *args (call_special: 1.87M) | 1.87M | 0 |
+| C function METH_FASTCALL\|METH_KEYWORDS (kernel defs: len, isinstance...) | 0.02M | 1.04M |
+| user function, exact positional arguments (stage 3's form) | 0 | 0.61M |
+| through CALL_FUNCTION_EX | 0.04M | 0.02M |
+
+So "93% of CALLs are kernel code calling kernel functions" was kernel code calling: primitives, type/bool, then
+kernel functions. CALL now has, ahead of call_tail and only for an uninstrumented CALL:
+- a METH_FASTCALL C function (LU_METH_NOPY allowed) is called directly, the task pinned as lu_call does; its result
+  is checked against the pending exception by one compare, _Py_CheckFunctionResult only on a mismatch;
+- type(x) and bool(x) of an object whose truth needs no code;
+- a function, or a bound method's function with its self put in the free slot, whose code takes exactly the
+  positional arguments given (no star parameters, no keyword-only ones) gets a frame in place
+  (lu_frame_push_exact, inline: depth and chunk room checked, kernel frames charged to kernel_room), when no
+  frame-evaluation hook is set. The native forms of ten kernel functions (lu_native_call) are skipped for direct
+  calls of their Python function, which kernel code makes 19k times in pyflakes; calls through their descriptors
+  and builtins still take them.
+A return skips lu_frame_retire's call when the frame has no frame object.
+
+Test tests/kernel/call_kernel_exact.py: builtins' own calls (str, list, dict, sorted, join, index), their errors,
+defaults replaced mid-loop at one site, a builtin shadowed and then rebound mid-loop, another thread replacing a
+function's code and defaults between two halves of a loop, a recursive __repr__/__eq__ through builtins to the
+recursion limit, sys._getframe and a traceback from a sort key, a profiler switched on mid-loop, generators and a
+coroutine. Gate: that test, call_exact_args and 23 call, frame, recursion, profiling and JIT-call programs in
+jit-off, plain, jit and jit-deopt, four programs in handoff, jitcheck: all pass but c_recursion_limit, which fails
+the same way on master.
+
+pyflakes JIT off, by label (inclusive): CALL and its calls 174.5k of 322.6k samples at stage 3 (54%), 136.1k of
+280.3k after (49%); call_tail + return_frame + call_done 48.1% to 25.3% of the run, the rest moved into CALL.
+What call_tail still does is mostly lu_wrapper_descr_call (8.6% of the run) and lu_frame_call with bind (2.9%).
+
+| row | master (stage 2) | stage A |
+|---|---|---|
+| fib, instr/bc, JIT off | 97.4 | 77.4 |
+| arith loop | 98.5 | 97.5 |
+| attribute loop | 96.7 | 95.7 |
+| -c pass, JIT off | 149.49M | 135.22M |
+| stdlib imports, JIT off | 1.500G | 1.349G |
+| pyflakes, JIT off | 32.03G | 28.02G |
+| -c pass, JIT on | 170.19M | 156.36M |
+| stdlib imports, JIT on | 1.559G | 1.462G |
+| pyflakes, JIT on | 16.18G | 15.22G |
+| Richards (harness 5x20) | 12.314G | 12.291G |
+| DeltaBlue (harness 5x2000) | 5.916G | 5.703G |
+
