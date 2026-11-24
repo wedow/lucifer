@@ -2066,12 +2066,19 @@ lu_jit_note_exit(struct lu_deopt *d)
        has failed on what its places know, and its exits buy the mark. Each
        diverted rebuild needs a place to have learned since the unit's
        build, so there are at most as many as its root's places learn. */
-    /* An exit at a site marked since the unit's build is not diverted:
-       the mark is bought, and the unit dies at once (below). */
+    /* The diverted exit pays its site's mark ledger too: if the rebuild
+       with what was learned keeps the guard, which then fails, the mark is
+       bought on what the guard already lost, not paid for again from
+       nothing. The mark is still decided only by an exit of a unit that is
+       not stale, below. An exit at a site marked since the unit's build is
+       not diverted: the mark is bought, and the unit dies at once. */
     if (d->reason == EXIT_GUARD && __atomic_load_n(&d->unit->unlearned, __ATOMIC_RELAXED) != 0) {
         int pc;
         struct lu_jit_code *sc = guard_site(d, &pc);
         if (sc == NULL || !marked_since(sc, pc, d)) {
+            if (sc != NULL) {
+                __atomic_add_fetch(&sc->fails[pc], exit_cost(d), __ATOMIC_RELAXED);
+            }
             if (!stale_pass(d->unit, exit_cost(d)) && !__atomic_load_n(&d->unit->dead, __ATOMIC_RELAXED)) {
                 relearn(state_of(d->unit->code), d);
             }
