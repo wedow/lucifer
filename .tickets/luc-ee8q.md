@@ -407,3 +407,15 @@ Each stage is test first and passes `tools/floor quick` (kernel programs in plai
 
 ### Files
 runtime/jit/eval_prims.c, runtime/jit/helpers.c, runtime/jit/eval_call.c, runtime/jit/target.h, runtime/thread/critical_section.c.
+
+### 2026-11-24 the interpreter's primitive calls (from luc-2r1l, pyflakes JIT off)
+
+CALL's direct METH_FASTCALL path ran 7.52M primitive calls, all from kernel code: type_lookup 2.80M, kind 1.64M,
+instance_store 0.69M, instance_load 0.57M, dict_find 0.31M, generic_wrapper 0.24M, size 0.14M, gen_state 0.11M,
+gen_yieldfrom and gen_close_quietly 84k each. Instructions per call inside the primitive (frame-pointer profile):
+type_lookup 102 (about 55 in _PyType_LookupRef, the rest glue: TYPE_ARG/STR_ARG, the try-incref, TLS lu_tstate and
+lu_current_task, the decref); kind 59, nearly all glue (PyUnicode_AsUTF8 of the kind name, then a strcmp chain over
+about 15 names); instance_load 200 (probe, ns_find_ref, lu_attr_lookup); instance_store 480 (dict insert machinery);
+dict_find 235 (probe_keys, hash_native); generic_wrapper 186 (name compares, a subtype test, TLS). CALL's own path
+to a primitive is about 100 instructions with two arguments; the interpreter's fast call and the JIT's should share
+the leaf bodies of section 3.2.

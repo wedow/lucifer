@@ -16,27 +16,72 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp, on master 85255bc6. Stages 0-2, A-D landed; E (dispatch) and D's review follow-ups committed
-for review; next (coordinator): split CALL's 265 instructions per execution (its path to the primitive, glue
-inside primitives, real work, top ten primitives; luc-ee8q sections 1 and 3 first), report, then the call path;
-F (remaining forms) after. Earlier order and evidence:
+Branch luc-interp, on master dbb9b594. Stages 0-2, A-E landed; the CALL primitive-path trims committed for review
+(below, 2026-11-24 "CALL's primitive path"). This builder stopped there (coordinator). Next, for a builder with a full
+context: (b) the Python call and return paths, then the operand reference counts as their own item, then F.
 
-1. B done (count steps inline, locals through the frame, word-sized opcode/oparg). Dispatch is still 10 instructions
-   against CPython's 8 (6 plus its instr_ptr store and next_instr step): opcode is live across calls in many handlers
-   (SKIP_CACHES, the specialized forms' guards), so gcc stores it to the stack at every dispatch, and keeps one
-   register zeroed there; prev_instr/cur_instr are two register moves.
-2. C, call_special's forwarding. Census (pyflakes, JIT off, after A): call_special is called 1.87M times, from
-   getattr_hook 0.80M and setattr_hook 0.65M with ast.AST's own __getattribute__/__setattr__ slot wrappers (C
-   tp_getattro/tp_setattro = the generic ones; CPython's ast.AST has those wrappers too), contains 0.16M,
-   getitem 0.12M, get_iter, setitem, next (kernel wrappers of dict, str, tuple...). Each builds a list, a tuple and a
-   dict for descr(obj, *args, **kwargs) and the non-kernel wrapper then goes through lu_wrapper_descr_call ->
-   call_wrapper (another tuple) -> the C slot: about 8.6% of the run. The largest general lever is not the forwarding
-   but the route: an object whose type's tp_getattro/tp_setattro is foreign C (not the kernel's slot functions)
-   should have it called directly, as CPython's PyObject_GetAttr does, instead of the kernel hook reaching it through
-   call_special and the slot wrapper; then call_special keeps the rare cases, and its *args/**kwargs build (BUILD_LIST,
-   LIST_EXTEND, CALL_INTRINSIC_1, BUILD_MAP, DICT_MERGE, CALL_FUNCTION_EX: 2M each) can be weighed again.
-3. D, LOAD_GLOBAL_MODULE/BUILTIN (44.5M executions in pyflakes, 59 instructions each, 9.8% of the run after A).
-4. E, the remaining forms by the census (POP_JUMP_IF_*, RESUME, IS_OP, attribute forms).
+(b) Python call and return, pyflakes JIT off, profile of the stage-E build (13.17G instructions; 3.12M exact
+Python calls through CALL's in-line push, 6.4M returns). CPython's CALL_PY_EXACT_ARGS + RETURN_VALUE is about 208
+together. Here:
+- Push, in CALL (4.0% of the run, about 170 per call, then RESUME's 30): bound-method unpacking (two increfs, a
+  decref; CPython: the same, as stackrefs); the argument count from the NULL-or-self slot; the code taken with
+  lu_try_incref_compare on func_code (an atomic increment on a shared object at every call; CPython reads
+  func_version from the cache and holds the code as a deferred stackref, no count); co_argcount, CO_VARARGS/
+  CO_VARKEYWORDS, kwonly and the eval_frame hook tested per call (CPython: once, at specialization, then one
+  func_version guard); lu_depth_room / lu_depth_take, the kernel-room recursion charge (CPython: a C recursion
+  check in _Py_EnterRecursivePy only); the datastack room test (CPython: the same, _PyThreadState_HasStackSpace);
+  lu_frame_fill, about 14 stores (code, previous, func, globals, builtins, locals, frame_obj, instr, last, owner,
+  ret, jit_desc, jit_forced, stackpointer; CPython's _PyFrame_Initialize stores 9: f_executable, f_funcobj,
+  f_globals, f_builtins, f_locals, frame_obj, instr_ptr, stackpointer, owner, plus return_offset and visited);
+  the argument copy and a NULL store into every other local (both as CPython); previous, current_frame, LOAD_FRAME
+  (CPython: the same three); the dispatch. Lines with the most samples: the try-incref of the code (1928, 0.39%),
+  the push (1932, 1.38% with frame.h 325-346 inlined), the method unpacking (1909-1913, 0.6%).
+- return_frame (10.3% of the run, about 210 per return): lu_frame_pop is an out-of-line call and 5.5% of the run.
+  Inside it: release_refs 28% (a decref of each local and stack slot, CPython's _PyFrame_ClearLocals does the
+  same, but here each local is also stored back to NULL, which CPython does not), _Py_ThreadId 20% and Py_DECREF
+  12% (frame.c's decrefs are the header's out-of-line ones: one call to _Py_ThreadId per decref; ceval.c has the
+  inline lu_decref, frame.c does not), lu_frame_release 10% (the frame_obj test), free_frame 8% (the chunk test),
+  lu_frame_unlink 4% (a current_frame compare-and-store CPython does not need: it sets it once), lu_depth_leave,
+  and Py_DECREF of the code (CPython: none, the code is a deferred stackref). lu_poll_slow is 1.9% of the run
+  under return_frame: the poll after a kernel function returns to user code, which runs the collections the
+  allocations scheduled (GC work, not the return's own cost). The in-line part (2.4%): the generator owner test,
+  the C-entry test, current_frame, LOAD_FRAME, the SEND test, PUSH_RETURNED's switch on ret (CPython's
+  RETURN_VALUE has no return kinds), the kernel-to-user poll test.
+  Contained first steps: frame.c's decrefs inline with one thread-id load per frame (about 20% of lu_frame_pop),
+  no NULL stores into released locals, lu_frame_pop inlined into return_frame, the code held without a count.
+
+Operand reference counts (its own item; not started). Today LOAD_FAST and LOAD_FAST_BORROW are one handler
+(targets[LOAD_FAST_BORROW] = op_LOAD_FAST): both take a count (about 9 instructions: immortal test, owner test,
+local increment, or an atomic shared increment), and every consumer drops it (about 8-11). CPython 3.14: the
+compiler emits LOAD_FAST_BORROW (and LOAD_FAST_BORROW_LOAD_FAST_BORROW) where the local cannot be rebound while the
+value is on the stack (flowgraph.c optimize_load_fast); the stack holds _PyStackRef words whose low bit
+(Py_TAG_REFCNT) says "no count owned"; PyStackRef_CLOSE skips the decrement for a tagged word; a borrowed or deferred
+reference is made owned (PyStackRef_AsPyObjectSteal / _PyStackRef_MakeHeapSafe / PyStackRef_DUP) where it outlives
+the frame's own reference: stored to the heap (STORE_ATTR, STORE_SUBSCR, BUILD_*, LIST_APPEND, STORE_GLOBAL,
+cells), returned (RETURN_VALUE makes it heap-safe), yielded (YIELD_VALUE), passed to C that may keep it (a vectorcall
+gets PyObject pointers: the callee increments what it keeps). Deferred references: objects with deferred counting
+in the free-threaded build (functions, code, modules, type objects' heap types with _PyObject_SetDeferredRefcount)
+are pushed tagged by LOAD_GLOBAL, LOAD_ATTR of methods and LOAD_CONST; the collector scans every thread's stacks for
+them. Here the value stack would need the same tag bit in the stack word, and every reader of a stack entry
+would have to tell borrowed from owned: each handler's POP/consume (Py_DECREF of operands becomes the tagged close),
+the frame walker and frame objects (f_locals, tracebacks), the JIT's exit and deopt materialization (it rebuilds
+stack words: they must carry the tag), the collector's stack scan (deferred objects reachable only from stacks),
+generators' saved stacks, and call_stack_args / call_tail, which move stack words into callees' locals (a callee's
+local must own its count: arguments made owned at the call). Estimate from the census after C2 (pyflakes, JIT
+off): about 39M borrow loads (LOAD_FAST_BORROW 27.4M, LOAD_FAST_BORROW_LOAD_FAST_BORROW 5.7M x2) at about 17
+instructions saved each (the count and its drop) is about 0.66G, 5% of the run; LOAD_GLOBAL of deferred objects
+(26M, mostly functions and types) about 0.45G more, 3%; arguments made owned at calls give part back.
+
+F, the remaining forms after C2's census (pyflakes JIT off, instructions each with dispatch, share of the run):
+POP_JUMP_IF_FALSE 11.4M x 43 (3.5%) and _TRUE 3.5M x 48 (1.2%): SKIP_CACHES through the opcode table, the
+branch-count feedback write (lu_jit_observe_branch) with the JIT off; RESUME 6.8M x 30 (1.4%): the instrumentation
+version compare, the poll, the JIT hotness test (CPython's RESUME_CHECK: one eval-breaker compare); TO_BOOL 5.0M
+x 32 (1.1%) and IS_OP 9.3M x 15 (1.0%); LOAD_CONST 8.1M x 28 (1.6%); STORE_FAST 9.5M x 16; POP_TOP 2.9M x 42;
+NOP/NOT_TAKEN 6.7M x 15 (dispatch only); LOAD_ATTR / STORE_ATTR for classes inheriting a C generic slot
+(default_getattribute and the STORE_ATTR specializer, runtime/interp/specialize.c, compare against object's lookup
+only): LOAD_ATTR generic 0.5M x 490 (1.7%), STORE_ATTR_FAST 0.37M x 280, DELETE_ATTR 0.21M x 493; COMPARE_OP
+0.82M x 119; BINARY_OP 0.85M x 213; FOR_ITER 1.0M x 151. kind and type_lookup's glue go to luc-ee8q (its file
+has the per-primitive numbers).
 
 Tools (scratch, untracked; rebuild them from these notes): a counting build is ceval.c with
 `lu_opc[kernel][opcode]++` in DISPATCH dumped at exit, and a call census at call_tail's entry (caller kernel or not,
@@ -436,3 +481,38 @@ its own changed mid-loop, __builtins__ rebound; the thread program resizes the b
 Gate: global_guard_changes and 11 global, builtin, monitoring and profiling programs in jit-off, plain, jit,
 jit-deopt; threads_global_guard_changes, threads_global_churn, trace_thread_exit in handoff; jitcheck: pass, except
 cprofile_stats, which fails the same way on D (No module named '_lsprof' in this tree's build).
+
+### 2026-11-24 CALL's primitive path
+
+Census split of CALL (pyflakes JIT off, 32% of the run, 16.18M executions): 7.52M go straight to a primitive (all
+from kernel code), 3.12M push a Python frame in line, the rest go through call_tail. CALL's own code is 10.65% of
+the run: the head 0.75%, the primitive path 5.9% (about 100 instructions a call with two arguments: about 25 to the
+call, 14 after it, about 11 per argument decref, about 10 for the decref of the primitive object, about 10 for the
+poll, 9 for the dispatch), the in-line Python push 4.0%. Inside primitives: compile() 9.6% (the parser), and the
+per-primitive numbers in luc-ee8q's file.
+Trims: the kernel primitive objects are immortal (LOAD_GLOBAL's take and CALL's drop end at the immortal test); the
+result check tests NULL or a pending exception first (4 instructions on the common path); CALL skips its three cache
+words by a constant. The poll stays after every primitive call. A thread-id load hoisted out of the argument
+decrefs made lu_decref load the id before its immortal test everywhere (pyflakes off +1.4%) and was dropped.
+Tests: exc_cross_run (a C function returning NULL without an exception gives CPython's SystemError at an
+unspecialized site; CPython's specialized sites word it differently and do not check a result returned with an
+exception set, so the test runs each site once), signal_in_primitive_calls (a timer signal during a loop of builtin
+calls runs its handler at the next poll: after the primitive call that is running, or the next RESUME or back-edge),
+call_args_finalizers (temporaries whose finalizers call functions, rebind globals and raise).
+
+| row | E | trims |
+|---|---|---|
+| fib / arith / attribute loop, instr/bc, JIT off | 70.6 / 94.6 / 91.8 | 70.4 / 94.6 / 91.8 |
+| -c pass, JIT off | 117.36M | 116.30M |
+| stdlib imports, JIT off | 1.148-1.155G | 1.142G |
+| pyflakes, JIT off | 13.16-13.17G | 12.99-13.00G |
+| -c pass, JIT on | 142.24M | 143.29M |
+| stdlib imports, JIT on | 1.380G | 1.386G |
+| pyflakes, JIT on | 10.86-10.87G | 10.85-10.88G |
+| Richards | 12.263G | 12.264G |
+| DeltaBlue | 5.582-5.586G | 5.579G |
+
+The JIT-on startup rows lose 1M (pass) and 6M (imports); not explained yet (the immortal walk over _lucifer's
+dict is a few hundred entries).
+Gate: the two new programs and 14 call, refcount, signal and global programs in jit-off, plain, jit, jit-deopt;
+three thread programs in handoff; jitcheck; exc_cross_run: pass.
