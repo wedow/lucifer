@@ -57,3 +57,9 @@ Nothing running. Next step: report; the three designs above if wanted.
 Scratch tools (untracked, .scratch/): keep/ (k.py, kk.py with alloc_kwinit and oo rows; tr.sh, trace_gdb.py, trsum.py: exact traces under the host lock, test class; dis.sh, ann.py: disassembly); gate.sh: the focused gate; s1.sh to s4.sh: build, gate and traces per step; kw.sh: the alloc_kwinit firing check; vdel/: the luc-020h probes; bin/lucifer-base (8c183450), -1 to -4: the arms.
 
 Not obvious from the code: rm of tr.* in keep/ deletes tr.sh itself; tk names tickets after the worktree directory (lr-*), rename them to luc-*.
+
+## 2026-11-24: follow-ups, unbuilt, in order of value
+
+1. A heap type's references from its instances counted per thread, as free-threaded CPython does (_Py_INCREF_TYPE: a per-thread array indexed by the type's id, merged into the type's count when a thread exits or the type dies). It removes the type's count check and drop from every release (about 10 instructions) and the type's incref from every allocation.
+2. The free finding the block's page without the lookup: the in-line free derives the segment, the page index and the page from the block (about 15 of its 22 instructions); the allocation side could leave the page where the release finds it, or the release could use a per-size-class page cache.
+3. The collector's per-object count batched per release site instead of per object (about 5).
