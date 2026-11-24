@@ -931,8 +931,10 @@ subclass_flags(struct ctx *c, const struct classes *cs)
 /* Whether class t (an instance's for isinstance, the class itself for
    issubclass) is a subclass of one of the classes, relied on as of t's
    version: 1 or 0, or -1 when that cannot be told here. A negative
-   isinstance answer stands only where t keeps object's __class__ and
-   __getattribute__ (else obj.__class__ is asked). */
+   isinstance answer stands only where obj.__class__ is t: t keeps
+   object's __class__, and object's attribute lookup (its slot, as
+   runtime/interp/ceval.c's object_attr_hook reads it, or object's
+   __getattribute__ by lookup). */
 static int
 known_subclass(struct ctx *c, PyTypeObject *t, const struct classes *cs, int instance)
 {
@@ -945,6 +947,9 @@ known_subclass(struct ctx *c, PyTypeObject *t, const struct classes *cs, int ins
         sub = PyType_IsSubtype(t, class_at(c, cs, i));
     }
     for (int i = 0; !sub && instance && i < 2; i++) {
+        if (i == 1 && t->tp_getattro == PyObject_GenericGetAttr) {
+            break;
+        }
         PyObject *name = i == 0 ? LU_ID(__class__) : LU_ID(__getattribute__);
         PyObject *own = _PyType_LookupRef(t, name), *base = _PyType_LookupRef(&PyBaseObject_Type, name);
         int plain = own == base;
@@ -957,26 +962,40 @@ known_subclass(struct ctx *c, PyTypeObject *t, const struct classes *cs, int ins
     return lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)t), version) ? sub : -1;
 }
 
-/* The bit that says whether r's class (Py_TYPE(r), or r itself) has one
-   of the flags. */
 static lu_v
-flags_test(struct ctx *c, lu_v r, int of_type, unsigned long flags)
+type_of(struct ctx *c, lu_v r)
 {
-    lu_v t = of_type ? lu_ev_emit(c, OP_LOAD, REP_OBJ, r, LU_NOV, LU_NOV, offsetof(PyObject, ob_type)) : r;
+    return lu_ev_emit(c, OP_LOAD, REP_OBJ, r, LU_NOV, LU_NOV, offsetof(PyObject, ob_type));
+}
+
+/* The bit that says whether class t has one of the flags. */
+static lu_v
+flags_test(struct ctx *c, lu_v t, unsigned long flags)
+{
     lu_v f = lu_ev_emit(c, OP_LOAD, REP_I64, t, LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_flags));
     lu_v has = lu_ev_emit(c, OP_AND_I, REP_I64, f, lu_ev_const_i(c, (int64_t)flags), LU_NOV, 0);
     return lu_ev_emit(c, OP_CMP_I, REP_BIT, has, lu_ev_const_i(c, 0), LU_NOV, Py_NE);
 }
 
-/* The CALL goes two ways on bit: answered `answer` where it is 1, built
-   again as it is where it is 0, the class test left out. */
+/* The bit that says whether class t's metaclass is exactly type, whose
+   mro() is the one the flags follow (another's may leave a base out). */
+static lu_v
+plain_meta(struct ctx *c, lu_v t)
+{
+    return lu_ev_emit(c, OP_IS, REP_BIT, type_of(c, t), lu_ev_konst(c, (PyObject *)&PyType_Type), LU_NOV, 0);
+}
+
+/* The CALL goes two ways on bit: where it is 1, answered True, or for
+   issubclass (cls the class x, flags nonzero) by cls's own flags, read
+   only there; where it is 0, built again as it is, the class test left
+   out. */
 static int
-class_test_split(struct ctx *c, lu_v bit, lu_v answer, int nops)
+class_test_split(struct ctx *c, lu_v bit, lu_v cls, unsigned long flags, int nops)
 {
     struct gctx *g = c->g;
     struct split s;
     lu_ev_split(c, bit, &s);
-    call_result(c, nops, answer);
+    call_result(c, nops, flags != 0 ? lu_ev_bool(c, flags_test(c, cls, flags), 0) : lu_ev_konst(c, Py_True));
     lu_ev_split_else(c, &s);
     g->classtest = 1;
     int r = lu_ev_instruction(c);
@@ -1032,12 +1051,16 @@ class_test(struct ctx *c, int instance, lu_v *a, int nops)
     }
     lu_v x = lu_ev_val(c, a[0]);
     if (instance) {
-        /* A negative answer asks obj.__class__ of a class not known. */
-        return class_test_split(c, flags_test(c, x, 1, flags), lu_ev_konst(c, Py_True), nops);
+        /* Yes where x's class has a flag and its metaclass is type; a
+           negative answer asks obj.__class__ of a class not known. Every
+           word read is a class's. */
+        lu_v t = type_of(c, x);
+        lu_v bit = lu_ev_emit(c, OP_AND_I, REP_BIT, flags_test(c, t, flags), plain_meta(c, t), LU_NOV, 0);
+        return class_test_split(c, bit, LU_NOV, 0, nops);
     }
-    /* A class: its own flags tell, both ways. */
-    return class_test_split(c, flags_test(c, x, 1, Py_TPFLAGS_TYPE_SUBCLASS),
-                            lu_ev_bool(c, flags_test(c, x, 0, flags), 0), nops);
+    /* A class whose metaclass is type: its own flags tell, both ways, read
+       once x is known to be one. */
+    return class_test_split(c, plain_meta(c, x), x, flags, nops);
 }
 
 /* A call of `callable` (the self beside it, or LU_NOV) with n positional
