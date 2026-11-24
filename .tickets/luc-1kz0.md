@@ -533,7 +533,8 @@ Gate, table, rules in force, known losses and follow-ups: the last two notes.
 Lanes and sizes (tools/jitcheck):
 - Helpers and count lanes at N and 2N (N = 20,000), except typed at 4N and 8N (START).
 - Ledger lanes (churn, classtests, learnprice, typed) at 2N: every purchase paid at least its predicted cost and predicted at least at the killed unit's own build; total IR within first builds plus LEDGER_SLACK x paid / BUILD_INS.
-- entrygrowth at 2N: the start grew; loop entries built after that are at grown 0.
+- entrygrowth at 2N: the start grew, at least one loop entry was built after that, and every loop entry is at grown 0. learnprice also fails without a learned rebuild.
+- typed's absolute slack scales with its size: n // 20 is 4,000 helpers at 80,000 iterations; the per-iteration slack is unchanged.
 
 Compile/run split for regex_v8:
 - Record the pyperf worker at -l 32, 64, 128, one run per core lease, pinned: `perf record -e instructions:u -c 1000003 --call-graph fp`.
