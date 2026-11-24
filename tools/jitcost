@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""The tier's cost model against the machine (runtime/jit/jit.c, the ledger).
+
+The tier buys a rebuild when the losses it has already paid cover the
+predicted cost of the build, both in machine instructions estimated from
+counts. This check measures the model's constants with perf (user-space
+instructions, which are steady run to run) on small generated programs and
+fails when one is off by more than a factor of two:
+  bytecode  a loop of plain arithmetic at two sizes, interpreted and
+            compiled: instructions per bytecode in each, whose difference
+            is BYTECODE_INS (what an exit's interpreted stretch loses per
+            bytecode). The oracle counts the loop's bytecodes.
+  exit      the same loop compiled with every Kth guard failing, at two
+            rates: instructions per exit, against DEOPT_INS plus
+            BYTECODE_INS times the bytecodes the interpreter runs until the
+            loop's unit is entered again (half an iteration on average).
+  build     functions of straight-line arithmetic, one build each, at
+            sizes from tens to thousands of IR instructions: instructions
+            per build, against BUILD_INS n + BUILD_INS2 n^2 for the IR
+            instructions the builds made.
+  call      a small function called once per entry of its caller's unit,
+            in line and out of line (the caller's budget spent before the
+            call): the extra instructions per call, against CALL_COST.
+  generic   a loop that steps an iterator, loads an attribute, applies an
+            operator or calls an object, of a user class, at two sizes:
+            once of one class, which the build takes in line, and once of
+            eight subclasses in turn, which it reaches through a generic
+            helper: the extra instructions per generic pass (-X
+            lucifer_jit_stats counts them), against
+            ITER_INS, ATTR_INS, OP_INS and ANYCALL_INS.
+Usage: tools/jitcost [--lucifer BIN] [--oracle PYTHON]
+"""
+import argparse, os, re, subprocess, sys, tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LOOP = '''import sys
+def run(n):
+    s = 0
+    for i in range(n):
+        s = (s + i * 3 - (i >> 1)) & 0xFFFF
+        s ^= i & 7
+    return s
+if __name__ == '__main__':
+    print(run(int(sys.argv[1])))
+'''
+COUNT = '''import sys
+ns = {'__name__': 'loop'}
+exec(open(sys.argv[1]).read(), ns)
+n = 0
+def tracer(frame, event, arg):
+    global n
+    frame.f_trace_opcodes = True
+    n += event == 'opcode'
+    return tracer
+sys.settrace(tracer)
+ns['run'](int(sys.argv[2]))
+sys.settrace(None)
+print(n)
+'''
+GENERIC = '''import sys
+class Base:
+    def __init__(self, v):
+        self.v = v
+        self.n = 0
+    def __add__(self, o):
+        return self.v + o
+    def __call__(self, x):
+        return self.v + x
+    def __iter__(self):
+        self.n = 4
+        return self
+    def __next__(self):
+        if self.n == 0:
+            raise StopIteration
+        self.n -= 1
+        return self.n
+kinds = [type('K%d' % i, (Base,), {}) for i in range(8)]
+def iter_(objs, n):
+    s = 0
+    for i in range(n):
+        for v in objs[i & 7]:
+            s += v
+    return s
+def attr(objs, n):
+    s = 0
+    for i in range(n):
+        s = (s + objs[i & 7].v) & 0xFFFF
+    return s
+def op(objs, n):
+    s = 0
+    for i in range(n):
+        s = (objs[i & 7] + s) & 0xFFFF
+    return s
+def call(objs, n):
+    s = 0
+    for i in range(n):
+        s = objs[i & 7](s) & 0xFFFF
+    return s
+objs = [kinds[i if sys.argv[2] == 'mega' else 0](i) for i in range(8)]
+print(globals()[sys.argv[1]](objs, int(sys.argv[3])))
+'''
+CALL = '''import sys
+def f(x):
+    return (x * 3 + 1) & 0xFFFF
+def big(x):
+%s    return x
+def out(x):
+    return f(big(x))
+def inl(x):
+    return big(f(x))
+w = out if sys.argv[1] == 'out' else inl
+s = 0
+for i in range(int(sys.argv[2])):
+    s = w(s + i)
+print(s)
+''' % ''.join(f'    x = (x * 5 + {j}) & 0xFFFF\n' for j in range(1000))
+CALL_N = 20000
+GENERIC_N = 100000
+LOOP_N = 400000
+BUILDS = 20                     # functions per program, each built once
+SIZES = (1, 4, 16, 64, 256)   # statements per function
+
+
+def constants():
+    src = (ROOT / 'runtime' / 'jit' / 'jit.c').read_text()
+    return {k: int(v) for k, v in re.findall(r'^#define (BUILD_INS2?|DEOPT_INS|BYTECODE_INS|ITER_INS|ATTR_INS|OP_INS'
+                                             r'|ANYCALL_INS|CALL_COST) (\d+)', src, re.M)}
+
+
+def measure(lucifer, program, n, *flags, only=None, args=()):
+    """User-space instructions of one run, and its -X lucifer_jit_stats report; with `only`, the tier
+    compiles only the code of those names (LUCIFER_JIT_ONLY)."""
+    with tempfile.NamedTemporaryFile('r', suffix='.perf') as out:
+        p = subprocess.run(['perf', 'stat', '-x,', '-e', 'instructions:u', '-o', out.name, '--', lucifer,
+                            '-X', 'lucifer_jit_stats', *flags, program, *args, str(n)],
+                           capture_output=True, text=True, timeout=600,
+                           env=dict(os.environ, PYTHONHASHSEED='0', **({'LUCIFER_JIT_ONLY': only} if only else {})))
+        if p.returncode != 0:
+            sys.exit(f'{program} {n} {" ".join(flags)}: exit {p.returncode}\n{p.stderr[-2000:]}')
+        ins = int(next(l for l in out.read().splitlines() if 'instructions' in l).split(',')[0])
+    return ins, p.stderr
+
+
+def stat(err, pattern):
+    return sum(int(x) for x in re.findall(pattern, err))
+
+
+def functions(path, k, size):
+    """A program of k functions of `size` statements each, calling helpers the build takes in line (so
+    that exits carry the frames of calls, as in real code), which module code (not compiled) calls 60
+    times each: enough for the tier to build each once, past the put-off build of an entry whose sites
+    never ran."""
+    body = ''.join(f'    x = g(x, o.a{j % 4}) + {j}\n    if x & 1:\n        y = (y ^ x) & 0xFFFFFF\n'
+                   for j in range(size))
+    defs = ''.join(f'def f{i}(x, y, o):\n{body}    return x + y\n' for i in range(k))
+    calls = ''.join(f'    s = f{i}(s, 3, o) & 0xFFFFFF\n' for i in range(k))
+    path.write_text(f'import sys\nclass O:\n    a0, a1, a2, a3 = 1, 2, 3, 4\no = O()\n'
+                    f'def h(a, b):\n    return (a * 3 + b) & 0xFFFFFF\ndef g(a, b):\n    return h(a, b) ^ h(b, a)\n'
+                    f'{defs}s = int(sys.argv[1])\nfor _ in range(60):\n{calls}print(s)\n')
+
+def check(name, measured, predicted, detail):
+    ratio = predicted / measured if measured > 0 else float('inf')
+    ok = 0.5 <= ratio <= 2
+    print(f"{'PASS' if ok else 'FAIL'} {name}: measured {measured:,.0f}, model {predicted:,.0f} "
+          f"(model/measured {ratio:.2f}){detail}")
+    return ok
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--lucifer', default=str(ROOT / 'bin' / 'lucifer'))
+    ap.add_argument('--oracle', default='python3')
+    args = ap.parse_args()
+    if subprocess.run(['perf', 'stat', '-e', 'instructions:u', 'true'], capture_output=True).returncode != 0:
+        print('SKIP jitcost: perf cannot count instructions here')
+        return 0
+    c = constants()
+    ok = True
+    with tempfile.TemporaryDirectory() as d:
+        loop, count = Path(d, 'loop.py'), Path(d, 'count.py')
+        loop.write_text(LOOP)
+        count.write_text(COUNT)
+        per_iter = [int(subprocess.run([args.oracle, str(count), str(loop), str(n)], capture_output=True, text=True,
+                                       check=True).stdout) for n in (1000, 2000)]
+        bc = (per_iter[1] - per_iter[0]) / 1000
+        per = {}
+        for mode in ('off', 'always'):
+            a, b = (measure(args.lucifer, str(loop), n, '-X', f'lucifer_jit={mode}')[0] for n in (LOOP_N, 2 * LOOP_N))
+            per[mode] = (b - a) / (LOOP_N * bc)
+        ok &= check('bytecode', per['off'] - per['always'], c['BYTECODE_INS'],
+                    f" per bytecode: interpreted {per['off']:.1f}, compiled {per['always']:.1f} ({bc:.0f} a pass)")
+        runs = [measure(args.lucifer, str(loop), LOOP_N, '-X', 'lucifer_jit=always', '-X', f'lucifer_stress=deopt:{k}')
+                for k in (16, 64)]
+        exits = [stat(err, r'exits guard \d+ stress (\d+)') for _, err in runs]
+        ok &= check('exit', (runs[0][0] - runs[1][0]) / (exits[0] - exits[1]), c['DEOPT_INS'] + c['BYTECODE_INS'] * bc / 2,
+                    f' per exit ({exits[0] - exits[1]} exits)')
+        for size in SIZES:
+            # The functions compiled and not (LUCIFER_JIT_ONLY names none of them): the difference is their
+            # builds (put-off ones included, as the tier pays them) and a few calls run compiled.
+            prog = Path(d, f'f{size}.py')
+            functions(prog, BUILDS, size)
+            names = ','.join(f'f{i}' for i in range(BUILDS))
+            (on, err), (off, _) = (measure(args.lucifer, str(prog), 3, '-X', 'lucifer_jit=always', only=o)
+                                   for o in (names, 'none'))
+            builds = stat(err, r'jit: compiles (\d+)')
+            n = stat(err, r'ir instructions (\d+)') / builds
+            ok &= check(f'build {n:.0f}', (on - off) / builds, n * (c['BUILD_INS'] + c['BUILD_INS2'] * n),
+                        f' per build ({builds} builds)')
+        prog = Path(d, 'generic.py')
+        prog.write_text(GENERIC)
+        for kind, const in (('iter_', 'ITER_INS'), ('attr', 'ATTR_INS'), ('op', 'OP_INS'), ('call', 'ANYCALL_INS')):
+            # Per extra iteration, in each mode: instructions and helper calls.
+            per = {}
+            for mode in ('one', 'mega'):
+                (a, ea), (b, eb) = (measure(args.lucifer, str(prog), n, '-X', 'lucifer_jit=always', args=(kind, mode))
+                                    for n in (GENERIC_N, 2 * GENERIC_N))
+                helpers = [stat(e, r'generic passes (\d+)') for e in (ea, eb)]
+                per[mode] = ((b - a) / GENERIC_N, (helpers[1] - helpers[0]) / GENERIC_N)
+            extra = per['mega'][1] - per['one'][1]
+            ok &= check(f'generic {kind.rstrip("_")}', (per['mega'][0] - per['one'][0]) / extra if extra > 0 else 0,
+                        c[const], f' per generic pass ({extra:.1f} more an iteration)')
+        prog = Path(d, 'call.py')
+        prog.write_text(CALL)
+        per, calls = {}, {}
+        for way in ('out', 'inl'):
+            # big's straight line, taken in line first, spends the budget: f is called out of line (out), or
+            # is in line before it (inl). The loop is module code, so each pass enters w's unit once: the
+            # out-of-line call is never one a loop of the unit makes, and the unit is not rebuilt for it.
+            (a, ea), (b, eb) = (measure(args.lucifer, str(prog), n, '-X', 'lucifer_jit=always', args=(way,))
+                                for n in (CALL_N, 2 * CALL_N))
+            per[way] = (b - a) / CALL_N
+            calls[way] = (stat(eb, r'compiled calls (\d+)') - stat(ea, r'compiled calls (\d+)')) / CALL_N
+        if abs(calls['out'] - 1) > 0.01 or calls['inl'] > 0.01:
+            print(f"FAIL call: compiled calls an iteration out {calls['out']:.2f}, in line {calls['inl']:.2f}")
+            ok = False
+        else:
+            ok &= check('call', per['out'] - per['inl'], c['CALL_COST'], ' per call made out of line')
+    print('jitcost: ' + ('PASS' if ok else 'FAIL'))
+    return 0 if ok else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
