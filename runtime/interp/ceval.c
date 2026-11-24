@@ -1367,7 +1367,10 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
 #define ERROR_IF(cond) do { if (cond) goto error; } while (0)
 /* A returned value, per the callee's enum lu_frame_return. */
 #define PUSH_RETURNED(ret, v) do { \
-        if ((ret) == LU_RETURN_DISCARD) { \
+        if ((ret) == LU_RETURN_PUSH) { \
+            PUSH(v); \
+        } \
+        else if ((ret) == LU_RETURN_DISCARD) { \
             Py_DECREF(v); \
         } \
         else if ((ret) == LU_RETURN_PAIR) { \
@@ -1779,6 +1782,77 @@ op_CALL:
         }
     }
     SKIP_CACHES();
+    if (monitored == NULL) {
+        /* CPython's CALL_BUILTIN_FAST, CALL_PY_EXACT_ARGS and
+           CALL_BOUND_METHOD_EXACT_ARGS, chosen at each call: a METH_FASTCALL
+           primitive is called directly; a Python function (a bound method's,
+           its self put in the free slot) called with exactly its positional
+           parameters gets them as its first locals, and its frame takes the
+           stack's reference to it. Kernel functions too: they count against
+           kernel_room, which lu_frame_push_exact charges. */
+        PyObject *fn = sp[-oparg - 2];
+        if (Py_IS_TYPE(fn, &PyCFunction_Type)) {
+            PyMethodDef *ml = ((PyCFunctionObject *)fn)->m_ml;
+            if ((ml->ml_flags & ~LU_METH_NOPY) == METH_FASTCALL) {
+                PyObject **a = sp - oparg;
+                int n = oparg + (a[-1] != NULL);
+                a -= a[-1] != NULL;
+                SAVE_FRAME();
+                struct lu_task *t = (struct lu_task *)ts;
+                t->pin++;
+                result = ((_PyCFunctionFast)(void (*)(void))ml->ml_meth)(((PyCFunctionObject *)fn)->m_self, a, n);
+                t->pin--;
+                if ((result == NULL) != (ts->current_exception != NULL)) {
+                    result = _Py_CheckFunctionResult(ts, fn, result, NULL);
+                }
+                for (int i = 0; i < n; i++) {
+                    Py_DECREF(a[i]);
+                }
+                Py_DECREF(fn);
+                sp -= oparg + 2;
+                ERROR_IF(result == NULL);
+                PUSH(result);
+                POLL();
+                DISPATCH();
+            }
+        }
+        else if ((fn == (PyObject *)&PyType_Type || fn == (PyObject *)&PyBool_Type)
+                 && oparg == 1 && sp[-2] == NULL) {
+            /* CALL_TYPE_1 and CALL_BOOL's answer when it needs no code run. */
+            PyObject *arg = sp[-1];
+            int truth = fn == (PyObject *)&PyType_Type ? -2 : lu_truth_exact(arg);
+            if (truth != -1) {
+                result = truth == -2 ? Py_NewRef((PyObject *)Py_TYPE(arg)) : Py_NewRef(truth ? Py_True : Py_False);
+                Py_DECREF(arg);
+                sp -= 3;            /* type and bool are immortal */
+                PUSH(result);
+                DISPATCH();
+            }
+        }
+        else {
+            if (Py_IS_TYPE(fn, &PyMethod_Type) && sp[-oparg - 1] == NULL) {
+                sp[-oparg - 1] = Py_NewRef(((PyMethodObject *)fn)->im_self);
+                sp[-oparg - 2] = Py_NewRef(((PyMethodObject *)fn)->im_func);
+                Py_DECREF(fn);
+                fn = sp[-oparg - 2];
+            }
+            int n = oparg + (sp[-oparg - 1] != NULL);
+            PyCodeObject *co;
+            if (Py_IS_TYPE(fn, &PyFunction_Type)
+                && (co = (PyCodeObject *)((PyFunctionObject *)fn)->func_code)->co_argcount == n
+                && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS)) && co->co_kwonlyargcount == 0
+                && ts->interp->eval_frame == NULL
+                && (callee = lu_frame_push_exact(ts, (PyFunctionObject *)fn, sp - n, n)) != NULL) {
+                sp -= oparg + 2;
+                SAVE_FRAME();
+                callee->previous = frame;
+                ts->current_frame = (struct _PyInterpreterFrame *)callee;
+                frame = callee;
+                LOAD_FRAME();
+                DISPATCH();
+            }
+        }
+    }
     kwnames = NULL;
 call_stack_args:
     /* callable, self_or_null, args[oparg] */

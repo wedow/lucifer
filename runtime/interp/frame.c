@@ -50,21 +50,7 @@ alloc_frame(PyThreadState *ts, PyFunctionObject *func)
         }
     }
     ts->datastack_top = base + words;
-    struct lu_frame *f = (struct lu_frame *)base;
-    f->code = code;
-    f->previous = NULL;
-    f->func = (PyObject *)func;
-    f->globals = func->func_globals;
-    f->builtins = func->func_builtins;
-    f->locals = NULL;
-    f->frame_obj = NULL;
-    f->instr = f->last = lu_code_start(code);
-    f->owner = lu_frame_owner_for(code);
-    f->ret = LU_RETURN_PUSH;
-    f->jit_desc = NULL;
-    f->jit_forced = NULL;
-    f->stackpointer = f->localsplus + code->co_nlocalsplus;
-    return f;
+    return lu_frame_fill((struct lu_frame *)base, func);
 }
 
 /* Gives the topmost frame's datastack space back. */
@@ -191,7 +177,7 @@ lu_frame_unlink(PyThreadState *ts, struct lu_frame *f)
 void
 lu_frame_release(struct lu_frame *f)
 {
-    if (lu_frame_retire(f)) {
+    if (f->frame_obj != NULL && lu_frame_retire(f)) {
         f->stackpointer = f->localsplus;
         f->locals = NULL;
         f->func = NULL;

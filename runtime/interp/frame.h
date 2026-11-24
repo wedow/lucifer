@@ -256,12 +256,19 @@ lu_depth_take(PyThreadState *ts, PyCodeObject *code)
     }
 }
 
+/* Whether a frame of `code` may be counted. */
+static inline int
+lu_depth_room(PyThreadState *ts, PyCodeObject *code)
+{
+    return lu_frame_is_kernel(code) ? ((struct lu_task *)ts)->kernel_room >= code->co_framesize
+        : ts->py_recursion_remaining > 0;
+}
+
 /* A frame of `code` is counted: 0, or -1 with RecursionError. */
 static inline int
 lu_depth_enter(PyThreadState *ts, PyCodeObject *code)
 {
-    if (lu_frame_is_kernel(code) ? ((struct lu_task *)ts)->kernel_room < code->co_framesize
-        : ts->py_recursion_remaining <= 0) {
+    if (!lu_depth_room(ts, code)) {
         return lu_depth_error(ts, code);
     }
     lu_depth_take(ts, code);
@@ -283,6 +290,53 @@ lu_depth_leave(PyThreadState *ts, PyCodeObject *code)
 /* Pushes a frame for `func` on the current task's datastack, with every
    local unbound. Returns NULL with RecursionError or MemoryError set. */
 struct lu_frame *lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals);
+
+/* The fields of a new frame for func at f, borrowed; its locals not set. */
+static inline Py_ALWAYS_INLINE struct lu_frame *
+lu_frame_fill(struct lu_frame *f, PyFunctionObject *func)
+{
+    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    f->code = code;
+    f->previous = NULL;
+    f->func = (PyObject *)func;
+    f->globals = func->func_globals;
+    f->builtins = func->func_builtins;
+    f->locals = NULL;
+    f->frame_obj = NULL;
+    f->instr = f->last = lu_code_start(code);
+    f->owner = lu_frame_owner_for(code);
+    f->ret = LU_RETURN_PUSH;
+    f->jit_desc = NULL;
+    f->jit_forced = NULL;
+    f->stackpointer = f->localsplus + code->co_nlocalsplus;
+    return f;
+}
+
+/* CALL's exact-arguments frame (CPython's _INIT_CALL_PY_EXACT_ARGS): func's
+   code takes exactly the n positional arguments args[0..n), owned, which
+   become its first locals, and the frame takes the caller's reference to
+   func. NULL with nothing done when the depth or the current stack chunk
+   has no room: the general call raises or grows it. */
+static inline Py_ALWAYS_INLINE struct lu_frame *
+lu_frame_push_exact(PyThreadState *ts, PyFunctionObject *func, PyObject **args, int n)
+{
+    PyCodeObject *code = (PyCodeObject *)func->func_code;
+    PyObject **base = ts->datastack_top;
+    if (!lu_depth_room(ts, code) || base == NULL || ts->datastack_limit - base < code->co_framesize) {
+        return NULL;
+    }
+    lu_depth_take(ts, code);
+    ts->datastack_top = base + code->co_framesize;
+    struct lu_frame *f = lu_frame_fill((struct lu_frame *)base, func);
+    Py_INCREF(code);
+    for (int i = 0; i < n; i++) {
+        f->localsplus[i] = args[i];
+    }
+    for (int i = n; i < code->co_nlocalsplus; i++) {
+        f->localsplus[i] = NULL;
+    }
+    return f;
+}
 
 /* A stopping frame leaves the stack before its references go (GH-99729):
    a finalizer they run sees its caller on top, never the frame. */
