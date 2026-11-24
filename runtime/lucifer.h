@@ -1869,6 +1869,9 @@ PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
 int lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from);
 /* type.__text_signature__: the signature tp_doc starts with, or None. */
 PyObject *lu_type_text_signature(PyTypeObject *tp);
+/* The C function the slot wrapper tp finds under `name` wraps, when the slot
+   can be that function (update_one_slot's specific); NULL otherwise. */
+void *lu_wrapper_specific(PyTypeObject *tp, PyObject *name);
 /* Whether f is one of the slot thunks, which look the dunder up by name. */
 int lu_is_slot_thunk(void *f);
 /* Calls special method `name` of self's type, as vectorcall_method does. */

@@ -10,6 +10,7 @@ from _lucifer import (
     MISSING, error, attribute_error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
     instance_dict, instance_load, instance_store, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
     object_hash, type_flag, object_size, type_can_new, static_type, is_subtype, descr_type, member_peek,
+    generic_wrapper,
 )
 from _lucifer import _boot
 
@@ -127,9 +128,15 @@ def getattr_hook(obj, name):
     if getattr_ is MISSING:
         if getattribute is _object_getattribute:
             return generic_getattr(obj, name)
+        if getattribute is type_getattribute:
+            return type_getattr(obj, name)
+        if getattribute is module_getattribute:
+            return module_getattr(obj, name)
+        if generic_wrapper(getattribute, '__getattribute__'):
+            return generic_getattr(obj, name)
         return call_special(getattribute, obj, name)
     try:
-        if getattribute is _object_getattribute:
+        if getattribute is _object_getattribute or generic_wrapper(getattribute, '__getattribute__'):
             v = generic_getattr(obj, name, True)
             if v is not MISSING:
                 return v
@@ -159,17 +166,27 @@ def lookup_attr(obj, name):
                 return type_getattr(obj, name, True)
             if getattribute is module_getattribute:
                 return module_getattr(obj, name, True)
+            if generic_wrapper(getattribute, '__getattribute__'):
+                return generic_getattr(obj, name, True)
         return getattr_hook(obj, name)
     except AttributeError:
         return MISSING
 
 
 def setattr_hook(obj, name, value):
-    call_special(type_lookup(type(obj), '__setattr__'), obj, name, value)
+    """PyObject_SetAttr for every kernel type and class: a C type's generic
+    slot runs as its function does, without its wrapper."""
+    setattr_ = type_lookup(type(obj), '__setattr__')
+    if generic_wrapper(setattr_, '__setattr__'):
+        return generic_setattr(obj, name, value)
+    call_special(setattr_, obj, name, value)
 
 
 def delattr_hook(obj, name):
-    call_special(type_lookup(type(obj), '__delattr__'), obj, name)
+    delattr_ = type_lookup(type(obj), '__delattr__')
+    if generic_wrapper(delattr_, '__delattr__'):
+        return generic_setattr(obj, name, MISSING)
+    call_special(delattr_, obj, name)
 
 
 def merge_class_dict(d, cls):

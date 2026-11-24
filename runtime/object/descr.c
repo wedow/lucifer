@@ -1376,9 +1376,10 @@ lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
     if (PyType_Check(obj) && (tp->tp_setattro == lu_slot_tp_setattro || tp->tp_setattro == PyObject_GenericSetAttr)) {
         return type_setattr_native((PyTypeObject *)obj, name, value);
     }
-    if ((tp->tp_setattro != lu_slot_tp_setattro && tp->tp_setattro != PyObject_GenericSetAttr)
-        || !PyUnicode_CheckExact(name)
-        || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
+    if (!PyUnicode_CheckExact(name)
+        || (tp->tp_setattro != PyObject_GenericSetAttr       /* the slot says so (lu_set_slot) */
+            && (tp->tp_setattro != lu_slot_tp_setattro
+                || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))))) {
         return 0;
     }
     PyObject *descr = _PyType_LookupRef(tp, name);
@@ -1615,6 +1616,21 @@ prim_descr_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return NULL;
     }
     return Py_NewRef((PyObject *)((PyDescrObject *)args[0])->d_type);
+}
+
+/* generic_wrapper(d, name): whether d is a C type's slot wrapper `name`
+   (__getattribute__, __setattr__ or __delattr__) of PyObject_GenericGetAttr
+   or PyObject_GenericSetAttr, which the kernel's hooks run as generic access
+   (slot_tp_getattr_hook's test). */
+static PyObject *
+prim_generic_wrapper(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2);
+    PyWrapperDescrObject *d = (PyWrapperDescrObject *)args[0];
+    int generic = Py_IS_TYPE(args[0], &PyWrapperDescr_Type)
+        && (d->d_wrapped == (void *)PyObject_GenericGetAttr || d->d_wrapped == (void *)PyObject_GenericSetAttr)
+        && PyUnicode_EqualToUTF8(args[1], d->d_base->name);
+    return Py_NewRef(generic ? Py_True : Py_False);
 }
 
 /* bind(d, obj): a method descriptor bound to obj (a builtin method), a
@@ -1889,7 +1905,7 @@ prim_kernel_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
     FAST(install_kernel_body), PURE(getset_kernel), FAST(getset_get),
-    FAST(getset_set), FAST(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), FAST(bind),
+    FAST(getset_set), FAST(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), PURE(generic_wrapper), FAST(bind),
     FAST(method_new), FAST(instancemethod_new), PURE(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
     { NULL, NULL, 0, NULL },
 };

@@ -254,9 +254,11 @@ object_tp_richcompare(PyObject *self, PyObject *other, int op)
    object's __getattribute__; object's __setattr__ and __delattr__): its
    slot is object's own function, as update_one_slot gives a class the
    specific function of the wrapper it finds, so C tests the slot instead
-   of looking the hooks up. Object keeps its thunk, which static types
-   inherit: an extension type that sets PyObject_GenericGetAttr itself
-   still differs from its base and gets its own wrapper, as in CPython. */
+   of looking the hooks up; a C type's slot wrappers likewise give their C
+   function (an ast node class gets ast.AST's). Object keeps its thunk,
+   which static types inherit: an extension type that sets
+   PyObject_GenericGetAttr itself still differs from its base and gets its
+   own wrapper, as in CPython. */
 static int
 keeps_object_hook(PyTypeObject *tp, PyObject *a, PyObject *b, PyObject *absent)
 {
@@ -269,13 +271,20 @@ keeps_object_hook(PyTypeObject *tp, PyObject *a, PyObject *b, PyObject *absent)
 static void *
 attribute_thunk(PyTypeObject *tp, void *thunk)
 {
-    if (thunk == (void *)lu_slot_tp_getattro
-        && keeps_object_hook(tp, LU_ID(__getattribute__), NULL, LU_ID(__getattr__))) {
-        return (void *)PyObject_GenericGetAttr;
+    if (thunk == (void *)lu_slot_tp_getattro) {
+        if (keeps_object_hook(tp, LU_ID(__getattribute__), NULL, LU_ID(__getattr__))) {
+            return (void *)PyObject_GenericGetAttr;
+        }
+        void *specific = _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL
+            ? lu_wrapper_specific(tp, LU_ID(__getattribute__)) : NULL;
+        return specific != NULL ? specific : thunk;
     }
-    if (thunk == (void *)lu_slot_tp_setattro
-        && keeps_object_hook(tp, LU_ID(__setattr__), LU_ID(__delattr__), NULL)) {
-        return (void *)PyObject_GenericSetAttr;
+    if (thunk == (void *)lu_slot_tp_setattro) {
+        if (keeps_object_hook(tp, LU_ID(__setattr__), LU_ID(__delattr__), NULL)) {
+            return (void *)PyObject_GenericSetAttr;
+        }
+        void *specific = lu_wrapper_specific(tp, LU_ID(__setattr__));
+        return specific != NULL && specific == lu_wrapper_specific(tp, LU_ID(__delattr__)) ? specific : thunk;
     }
     return thunk;
 }

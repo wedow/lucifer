@@ -785,6 +785,22 @@ copied_dunder(PyTypeObject *tp, struct wrapperbase *p, void *thunk, PyObject *na
     return NULL;
 }
 
+/* update_one_slot's specific function: what the dunder `name` that tp
+   finds wraps when it is the C slot wrapper of that name (add_operators
+   makes them from slotdefs) made for a base of tp, so that the slot can be
+   the C function itself; NULL otherwise. */
+void *
+lu_wrapper_specific(PyTypeObject *tp, PyObject *name)
+{
+    PyObject *descr = _PyType_Lookup(tp, name);
+    if (descr == NULL || !Py_IS_TYPE(descr, &PyWrapperDescr_Type)) {
+        return NULL;
+    }
+    PyWrapperDescrObject *d = (PyWrapperDescrObject *)descr;     /* a kernel wrapper's base is named "kernel" */
+    return PyUnicode_EqualToUTF8(name, d->d_base->name) && PyType_IsSubtype(tp, PyDescr_TYPE(d))
+        ? d->d_wrapped : NULL;
+}
+
 /* Adds a wrapper descriptor to tp's dict for each slot tp has of its own
    (one its base does not have too) whose dunder the dict lacks, as
    add_operators does. A thunk in an extension's static type was copied from
