@@ -16,9 +16,14 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp, on master dbb9b594. Stages 0-2, A-E landed; the CALL primitive-path trims, the callee-table fix,
-the release-order fix and the return in line committed for review (notes below). Left of (b): the code object's
-count and the argcount/flags fold (see the 2026-11-24 note "the trims with the JIT on"). Next: F, then the operand
+Branch luc-interp-f, on master 898041c0. Stages 0-2, A-E, the CALL trims, the release order and the return in line
+landed. F (2026-11-24 night, notes below): the branch trims were dropped (smaller than eval_frame's register
+allocation swing); the build-flag measurement is reported (no change made); LOAD_COMMON_CONSTANT reads the booted
+objects (committed, awaiting review: its numbers are inside the allocation swing). Blocker for every further
+eval_frame trim: gcc's allocation of opcode/oparg/prev_instr flips between registers and the stack on unrelated
+edits (one store a dispatch plus reloads, about 1-2% on fib and 0.5-1% on pyflakes either way). Next: the heavy
+handlers of item 3 (BINARY_OP int results, STORE_ATTR_FAST, LOAD_ATTR_SLOT, FOR_ITER, COMPARE_OP, generic
+LOAD_ATTR/DELETE_ATTR, MAKE_FUNCTION) once a change can be measured outside that swing; then the operand
 reference counts (sized below).
 
 (b) Python call and return, pyflakes JIT off, profile of the stage-E build (13.17G instructions; 3.12M exact
@@ -592,3 +597,32 @@ exit_unwind and the JIT's raised_out); CPython pops it while the frame is curren
 (c) frame_dealloc's order (frame.c) differs from CPython's frameobject.c: code, function and f_locals first, then
 the fast locals top down, then f_back.
 (d) Not determined: an inlined callee whose frames a walker made real records, returning inside compiled code.
+
+### 2026-11-24 stage F: census, branches, build flags, LOAD_COMMON_CONSTANT
+
+Census on master 8ff4e137 (pyflakes JIT off, 160.2M bytecodes, 12.63G): CALL 16.18M x 251 (32.2%), LOAD_GLOBAL_MODULE
+21.36M x 61, LOAD_FAST 27.97M x 17, POP_JUMP_IF_FALSE 11.37M x 33, LOAD_GLOBAL_BUILTIN 4.81M x 72, LOAD_ATTR generic
+0.50M x 489, LOAD_CONST 8.11M x 25, RESUME 6.77M x 29, FOR_ITER 1.04M x 163, BINARY_OP 0.85M x 187, TO_BOOL 4.97M x 26,
+LOAD_COMMON_CONSTANT 0.09M x 1122, STORE_ATTR_FAST 0.37M x 260, MAKE_FUNCTION 0.18M x 501, COMPARE_OP 0.82M x 107,
+LOAD_ATTR_SLOT 1.02M x 83, DELETE_ATTR 0.21M x 492. Small handlers' counts carry perf skid: POP_JUMP_IF_FALSE is 22
+instructions in the disassembly with the JIT off (7 pop/compare/mode test, 3 the table-driven cache skip, 8-9
+dispatch).
+
+Branches (dropped): a constant cache skip in every cached handler and skipping the NOT_TAKEN after a fall-through
+(as CPython) each move gcc's allocation: the constant skip made oparg a stack slot stored at every dispatch
+(pyflakes JIT off +0.6-0.75%); the NOT_TAKEN skip alone measured -0.6% on pyflakes and -0.3% on `-c pass`. The
+test branch_not_taken_midloop.py was kept.
+
+Build flags: nothing defines NDEBUG for the runtime. The same tree with -DNDEBUG: fib/arith/attr -3.0/-3.3/-3.0%
+instructions per bytecode, JIT off pass/imports/pyflakes -2.2/-1.4/-0.6%, JIT on -2.4/-2.2/-1.2%, Richards
+-0.25%, DeltaBlue -1.1%. No assert with a side effect; no test relies on one firing; the header asserts that
+are the only guard (PyTuple/PyList_SET_ITEM, PyUnicode_READ/WRITE indexes, the _CAST type checks, argformat
+pointers) are CPython's release-build exposure. Undecided (owner).
+
+LOAD_COMMON_CONSTANT interned a name and looked it up in the builtins at every execution (about 1,100
+instructions), following a rebinding of builtins.all that CPython does not; the interpreter keeps the objects as
+the kernel booted them (test common_constants_rebound.py fails before). Numbers against master: fib 66.7 -> 67.9,
+arith 93.2 -> 94.6, attr 90.5 -> 91.8 per bytecode, none of which runs the opcode: the dispatch now keeps opcode
+in a stack slot. pyflakes JIT off +0.3-0.6%, JIT on flat. A variant with the boot lookup out of line flips the
+same way.
+
