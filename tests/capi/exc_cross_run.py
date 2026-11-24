@@ -102,4 +102,16 @@ try:
 except ValueError:
     pass
 print(x.occurred())
+# a C function's NULL without an exception: SystemError. Each site runs once:
+# CPython words it differently at a specialized site, and does not check a
+# result returned with an exception set there.
+try:
+    x.bad_null()
+except SystemError as e:
+    print('SystemError', e)
+try:
+    x.bad_null(1)
+except SystemError as e:
+    print('SystemError', e)
+print(x.occurred())
 x.raise_(ValueError, 'uncaught')

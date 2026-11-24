@@ -169,7 +169,16 @@ exc_pending_lookup(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef(v != NULL ? v : Py_None);
 }
 
+/* bad_null(): NULL without an exception, which the caller turns into
+   SystemError. */
+static PyObject *
+exc_bad_null(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+    return NULL;
+}
+
 static PyMethodDef methods[] = {
+    { "bad_null", (PyCFunction)(void (*)(void))exc_bad_null, METH_FASTCALL, NULL },
     { "call", (PyCFunction)(void (*)(void))exc_call, METH_FASTCALL, NULL },
     { "catch", (PyCFunction)(void (*)(void))exc_catch, METH_FASTCALL, NULL },
     { "roundtrip", exc_roundtrip, METH_O, NULL },
