@@ -16,7 +16,7 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp. Stages 0 and 1 done. Next: stage 2 (machine-word int results), started: PyLong_FromLongLong built in place, lu_small_int inline, compact fast paths for //, % and compares; test tests/kernel/int_word_edges.py.
+Branch luc-interp. Stages 0-2 done. Next: stage 3 (exact-arguments calls), started: CALL_PY_EXACT_ARGS/CALL_BOUND_METHOD_EXACT_ARGS in place in op_CALL (lu_frame_push_exact), PUSH_RETURNED tests the plain push first; test tests/kernel/call_exact_args.py.
 Measuring: instructions per bytecode with the JIT off from two sizes of each workload (fib 25/27, the arith loop 1M/2M,
 the attribute loop 750k/1.5M; 4.52M, 15M, 15M bytecodes apart, counted with CPython's opcode tracing); whole-run
 `perf stat -e instructions:u` with the JIT on for `-c pass`, `-c "import <STARTUP_IMPORTS>"`, pyflakes as the corpus runs it
@@ -78,3 +78,27 @@ operators have specialized forms (stage 4), whose specialization is then the rec
 | pyflakes | 16.24G | 16.19G |
 | Richards (harness 5x20) | 12.320G | 12.314G |
 | DeltaBlue (harness 5x2000) | 5.95G | 5.93G |
+
+### 2026-11-24 stage 2: machine-word ints
+
+PyLong_FromLongLong (every int result of the eval loop, the kernel's int primitives and compiled code's boxing)
+split the value into a scratch digit array and went through lu_long_from_digits (normalize, small-int check again,
+alloc, memcpy); it now fills the new int's digits in place. // and % of compact ints ran the general long_divmod and
+every int compare walked digit views: compact operands now take machine words with CPython's floor rules
+(fast_floor_div/fast_mod). lu_small_int was an out-of-line call per result; both_compact and compact were outlined
+too. New test tests/kernel/int_word_edges.py (values at 2^e+-1 for e up to 64, both signs, every operator,
+division by zero, bools, a compiled loop whose operands change size).
+
+| row | stage 1 | stage 2 |
+|---|---|---|
+| fib, instr/bc, JIT off | 100.1 | 97.4 |
+| arith loop | 112.4 | 97.4 |
+| attribute loop | 104.6 | 96.7 |
+| -c pass, JIT on | 170.13M | 170.00M |
+| stdlib imports | 1558.3M | 1557.8M |
+| pyflakes | 16.19G | 16.17G |
+| Richards | 12.314G | 12.314G |
+| DeltaBlue | 5.920G | 5.905G |
+
+What is left of int arithmetic is the opcode body: two out-of-line Py_DECREF calls per operator (gcc does not inline
+it into eval_frame), the bool and bitwise tests, the switch in lu_long_binary; stage 4's BINARY_OP_*_INT forms.
