@@ -234,3 +234,9 @@ known.*	runtime/jit/eval_prims.c	const table pairing those tables with their typ
 lu_jit_exc_prev	runtime/jit/eval_exc.c	the immortal marker a unit's handler holds for the exc_info it left alone, compared by address, never written
 lu_jit_unbound	runtime/jit/jit.c	the immortal marker compiled code carries beside a raw number while its local is unbound; never written after load
 os_sched_methods	runtime/prim/os.c	posix scheduler PyMethodDef table, never written; the API takes it non-const
+flags.*	runtime/jit/eval_prims.c	const table of kind names and type flags; relocated by ld.so, then read-only (RELRO)
+words.*	runtime/jit/eval_prims.c	const table of unboxed word primitives; relocated by ld.so, then read-only (RELRO)
+prims.*	runtime/jit/eval_prims.c	const table of word-operand primitives; relocated by ld.so, then read-only (RELRO)
+kinds.*	runtime/jit/x86_64/emit.c	const table of the release fast-path types; relocated by ld.so, then read-only (RELRO)
+known.*	runtime/jit/x86_64/emit.c	lazy CPUID answer for the JCC erratum; any thread may store it with a relaxed atomic, every store writes the same value
+switching	runtime/thread/task.c	process-wide lock of the serial-to-parallel switch, ordered before stop-the-world and fork; the forking thread holds it across fork and the child reinitializes it
