@@ -1,42 +1,55 @@
-# Instances released by compiled code while their class changes what a
-# release must do: a class gaining and losing __del__ mid-loop, its base
-# gaining one, __bases__ reassigned to a class with a finalizer, and a
-# subclass of a class that needs nothing. Every finalizer due must run
-# once, at the release, and every value the instances held must survive.
+# Instances released by compiled code (each escapes into a list slot and
+# is released when the slot is overwritten) while their class changes what
+# a release must do: a class gaining and losing __del__ mid-loop, a base
+# class gaining one (released as itself and through a subclass), a
+# __bases__ assignment refused or taking a base with a finalizer, and
+# subclasses. The instances hold counted values with finalizer probes:
+# one only every other instance holds (it dies with the instance; the
+# others hold the shared one there), one held two or three times by each
+# instance and once outside (it must survive), and the instance's own
+# class (the release's reference to the type comes on top). Every
+# finalizer due must run once, at the release, and none early.
 import sys
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
 log = []
+probes = []
+
+
+class Probe:
+    def __del__(self):
+        probes.append(1)
 
 
 def note(self):
-    log.append(self.i)
+    log.append(1)
 
 
-class P:
-    def __init__(self, i):
+def make(base=object, name='C'):
+    def __init__(self, i, shared):
         self.i = i
-        self.s = KEEP
-
-
-KEEP = 'kept'
+        self.own = Probe() if i % 2 else shared     # dies with the instance, or a third reference
+        self.a = shared                 # twice in each instance, once outside
+        self.b = shared
+        self.cls = type(self)           # the type twice: the attribute and the release's own
+    return type(name, (base,), {'__init__': __init__})
 
 
 def churn(cls, n):
-    keep = []
+    shared = Probe()
+    out = [None] * 7
+    before = len(probes)
     for i in range(n):
-        p = cls(i)
-        if i % 500 == 0:
-            keep.append(p.s)
-    return len(keep), all(s is KEEP for s in keep)
+        out[i % 7] = cls(i, shared)
+    out = None
+    died = len(probes) - before         # each odd instance's own probe, and not the shared one
+    shared = None
+    return died, len(probes) - before - died == 1
 
 
 def gain_lose(n):
     del log[:]
-    class C:
-        def __init__(self, i):
-            self.i = i
-            self.s = KEEP
+    C = make()
     a = churn(C, n)
     C.__del__ = note
     b = churn(C, n)
@@ -48,44 +61,43 @@ def gain_lose(n):
 
 def base_gains(n):
     del log[:]
-    class Base:
-        def __init__(self, i):
-            self.i = i
-            self.s = KEEP
-    class D(Base):
-        pass
+    Base = make(name='Base')
+    D = make(Base, 'D')
     a = churn(Base, n), churn(D, n)
     Base.__del__ = note
-    b = churn(D, n)
+    b = churn(Base, n), churn(D, n)
     return a, b, len(log)
 
 
-def bases_reassigned(n):
+def bases_assigned(n):
     del log[:]
-    class Plain:
-        pass
     class Fin:
         def __del__(self):
-            log.append(self.i)
-    class E(Plain):
-        def __init__(self, i):
-            self.i = i
-            self.s = KEEP
+            log.append(1)
+    E = make(name='E')
+    try:
+        E.__bases__ = (Fin,)
+        refused = False
+    except TypeError:
+        refused = True
     a = churn(E, n)
-    E.__bases__ = (Fin,)
-    b = churn(E, n)
-    return a, b, len(log)
+    Plain = make(name='Plain')
+    E2 = make(Plain, 'E2')
+    b = churn(E2, n)
+    E2.__bases__ = (Fin,)
+    c = churn(E2, n)
+    return refused, a, b, c, len(log)
 
 
 def subclass(n):
-    class F(P):
-        pass
-    class G(F):
-        pass
+    P = make(name='P')
+    F = make(P, 'F')
+    G = make(F, 'G')
     return churn(F, n), churn(G, n), churn(P, n)
 
 
 print('gain and lose', gain_lose(N))
 print('base gains', base_gains(N))
-print('bases reassigned', bases_reassigned(N))
+print('bases assigned', bases_assigned(N))
 print('subclass', subclass(N))
+print('probes', len(probes))

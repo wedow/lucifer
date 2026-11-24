@@ -790,11 +790,18 @@ PyType_GenericAlloc(PyTypeObject *tp, Py_ssize_t nitems)
     return op;
 }
 
+/* Serializes refreshes: each runs after its own slot write, so the last
+   to take the lock reads every write before it (slot writers hold no
+   lock of their own). */
+static PyMutex plain_lock;
+
 void
 lu_type_refresh_plain(PyTypeObject *tp)
 {
-    unsigned long need = Py_TPFLAGS_HEAPTYPE | Py_TPFLAGS_INLINE_VALUES | Py_TPFLAGS_MANAGED_DICT;
-    int plain = (tp->tp_flags & need) == need && tp->tp_dealloc == lu_subtype_dealloc && tp->tp_finalize == NULL
+    unsigned long need = Py_TPFLAGS_HEAPTYPE | Py_TPFLAGS_INLINE_VALUES | Py_TPFLAGS_MANAGED_DICT | Py_TPFLAGS_HAVE_GC;
+    PyMutex_Lock(&plain_lock);
+    unsigned long flags = __atomic_load_n(&tp->tp_flags, __ATOMIC_ACQUIRE);
+    int plain = (flags & need) == need && tp->tp_dealloc == lu_subtype_dealloc && tp->tp_finalize == NULL
         && tp->tp_del == NULL && tp->tp_base == &PyBaseObject_Type && Py_SIZE(tp) == 0;
     if (plain) {
         __atomic_fetch_or(&tp->tp_flags, LU_TPFLAGS_PLAIN_RELEASE, __ATOMIC_RELEASE);
@@ -802,6 +809,7 @@ lu_type_refresh_plain(PyTypeObject *tp)
     else {
         __atomic_fetch_and(&tp->tp_flags, ~LU_TPFLAGS_PLAIN_RELEASE, __ATOMIC_RELEASE);
     }
+    PyMutex_Unlock(&plain_lock);
 }
 
 void
@@ -2135,10 +2143,10 @@ prim_type_set_flag(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     }
     PyTypeObject *tp = (PyTypeObject *)args[0];
     if (args[2] == Py_True) {
-        tp->tp_flags |= (unsigned long)flag;
+        __atomic_fetch_or(&tp->tp_flags, (unsigned long)flag, __ATOMIC_RELEASE);
     }
     else {
-        tp->tp_flags &= ~(unsigned long)flag;
+        __atomic_fetch_and(&tp->tp_flags, ~(unsigned long)flag, __ATOMIC_RELEASE);  /* LU_TPFLAGS_PLAIN_RELEASE kept */
     }
     return Py_NewRef(Py_None);
 }
@@ -2274,6 +2282,7 @@ prim_type_set_bases(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     else {
         Py_INCREF(base);
         Py_SETREF(tp->tp_base, base);
+        lu_type_refresh_plain(tp);              /* the base it reads, before anything that can fail */
         for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); i++) {
             if (add_subclass((PyTypeObject *)PyTuple_GET_ITEM(bases, i), tp) < 0) {
                 return NULL;
@@ -2284,7 +2293,6 @@ prim_type_set_bases(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (!(tp->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
         _PyObject_XDecRefDelayed(old);          /* lock-free readers, as the MRO's */
     }
-    lu_type_refresh_plain(tp);                  /* the base it reads */
     return Py_NewRef(Py_None);
 }
 

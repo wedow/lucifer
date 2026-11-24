@@ -417,9 +417,10 @@ void lu_subtype_dealloc(PyObject *self);
 /* A Lucifer tp_flags bit, kept by lu_type_refresh_plain at every change of
    what it reads: lu_subtype_dealloc of an instance of the class does no
    more than release its inline values, its dict and its type and free its
-   block (no __del__, no __slots__, object its base, inline values and a
-   managed dict). Weak references are the object's own to tell (its shared
-   word). Compiled releases test it alone (emit.c release_instance). */
+   block (no __del__, no __slots__, object its base, inline values, a
+   managed dict, collected). Weak references are the object's own to tell
+   (its shared word). Compiled releases test it with the slots a writer
+   could change without a refresh (emit.c release_instance). */
 #define LU_TPFLAGS_PLAIN_RELEASE (1UL << 40)
 void lu_type_refresh_plain(PyTypeObject *tp);
 

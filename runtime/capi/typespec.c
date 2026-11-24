@@ -500,6 +500,7 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
         }
     }
     lu_type_modified(tp);
+    lu_type_refresh_plain(tp);  /* the spec's slots were written straight into the type */
     goto done;
 fail:
     Py_CLEAR(cls);

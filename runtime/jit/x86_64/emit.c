@@ -2477,10 +2477,14 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     int failed = new_label(a);
     int scan = new_label(a), scanned = new_label(a), drop = new_label(a), dropped = new_label(a);
     int untyped = new_label(a);
+    /* What C can write straight into a type behind the bit (a spec's
+       slots, a metaclass's code): the bit then never decides alone. */
     load(a, R11, RAX, offsetof(PyTypeObject, tp_dealloc));
     mov_ri(a, RCX, (int64_t)(intptr_t)lu_subtype_dealloc);
     alu_rr(a, ALU_CMP, R11, RCX);
-    jcc(a, CC_NE, fail);                        /* a metaclass's C may have set its own after the bit */
+    jcc(a, CC_NE, fail);
+    cmp_mi(a, 1, RAX, offsetof(PyTypeObject, tp_finalize), 0);
+    jcc(a, CC_NE, fail);                        /* lu_subtype_dealloc runs it (tp_del it does not) */
     cmp_mi(a, 1, r, LU_MANAGED_DICT_OFFSET, 0);
     jcc(a, CC_NE, fail);                        /* a dict, which inline values moved to make too */
     rex(a, 0, 0, 0, r);
