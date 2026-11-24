@@ -553,7 +553,7 @@ def check_ledger(args, lane):
     source = (ROOT / 'runtime' / 'jit' / 'jit.c').read_text()
     build_ins = int(re.search(r'^#define BUILD_INS (\d+)', source, re.M)[1])
     build_ins2 = int(re.search(r'^#define BUILD_INS2 (\d+)', source, re.M)[1])
-    first = later = paid = 0
+    first = later = paid = learned = 0
     bought = set()      # a purchase prints the same paid on every unit of its root it kills: count it once
     for line in p.stderr.splitlines():
         b = re.match(r'jit-ev \S+ build (\S+) \S+ ins (\d+) .*: (\S+)', line)
@@ -563,6 +563,7 @@ def check_ledger(args, lane):
                 first += int(b[2])
             elif not b[3].startswith('dep-'):
                 later += int(b[2])  # a dependency that changed (dep-keys, dep-value) rebuilds whatever was paid
+                learned += b[3].startswith('learned-')
         elif k:
             unit, root, own, given, cost, why = k.groups()
             own = int(own)  # the killed unit's build: names repeat across code objects (exec'd anew)
@@ -580,6 +581,8 @@ def check_ledger(args, lane):
         problems.append('no builds')
     elif first + later > bound:
         problems.append(f'{first + later} IR instructions built, more than {bound:.0f}')
+    if lane == 'learnprice' and learned == 0:
+        problems.append('no learned rebuild')  # the lane is about one: without it, it checks nothing
     print(f"{'FAIL' if problems else 'PASS'} {lane}" + (': ' + '; '.join(problems[:5]) if problems else
           f' ({first} first, {later} rebuilt, {paid} paid: at most {bound:.0f})'))
     return 1 if problems else 0
@@ -597,8 +600,11 @@ def check_entries(args):
     if (p.returncode, p.stdout) != run([args.oracle, str(program), str(n)], args.timeout)[:2]:
         problems.append('output differs')
     builds = re.findall(r'^jit-ev \S+ build entry@(\d+) ok ins (\d+) .* grown (\d+) ', p.stderr, re.M)
-    if not any(pc == '1' and int(grown) > 0 for pc, _, grown in builds):
+    grew = next((i for i, (pc, _, grown) in enumerate(builds) if pc == '1' and int(grown) > 0), None)
+    if grew is None:
         problems.append('the start never grew')
+    elif not any(pc != '1' for pc, _, _ in builds[grew + 1:]):
+        problems.append('no loop entry built after the start grew')
     problems += [f'entry@{pc} built grown {grown} ({ins} IR)' for pc, ins, grown in builds if pc != '1' and grown != '0']
     print(f"{'FAIL' if problems else 'PASS'} entrygrowth" + (': ' + '; '.join(problems[:5]) if problems else
           f' ({len(builds)} builds of entry)'))

@@ -676,8 +676,8 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned, struct l
     return 1;
 }
 
-static void kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc, double paid,
-                 double cost);
+static int kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc, double paid,
+                double cost);
 
 /* What a purchase that kills every live unit of root costs: the builds it
    causes, each at least the unit it replaces (enough), so never below any
@@ -725,8 +725,10 @@ prof_exit(struct lu_deopt *d)
     int now = 0;
     const char *what = "type";
     uint64_t cost = exit_cost(d);
-    double paid = (double)(p->fails += cost), price = kills_cost(jc);
-    if (quiet(d->unit, cost, (uint64_t)price) && paid >= price) {
+    /* Once its type and kind are both given up, the place has nothing left to learn: no price. */
+    int learns = (!p->poly && !p->dropped) || p->unshared != LU_PROF_KINDS;
+    double paid = (double)(p->fails += cost), price = learns ? kills_cost(jc) : 0;
+    if (quiet(d->unit, cost, (uint64_t)price) && learns && paid >= price) {
         if (!p->poly && !p->dropped) {
             p->dropped = now = 1;
         }
@@ -1295,12 +1297,12 @@ wait_at(struct lu_jit_code *jc, int pc)
    compile. A unit that served at least that wait's entries, leaving on
    fewer than half, decays the code's level first: the wait never exceeds
    what the last good unit served, and one that served past what its count
-   holds starts the code over. */
-static void
+   holds starts the code over. 1 for the one call that killed it. */
+static int
 kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc, double paid, double cost)
 {
     if (__atomic_exchange_n(&u->dead, 1, __ATOMIC_SEQ_CST)) {
-        return;
+        return 0;
     }
     if (_PyRuntime.jit.events) {
         char cause[512], ledger[64] = "";
@@ -1330,6 +1332,7 @@ kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *a
         __atomic_store_n(&jc->level, level, __ATOMIC_RELAXED);
     }
     wait_at(jc, u->entry_pc);
+    return 1;
 }
 
 /* A writer took back what the unit relies on (runtime/jit/deps.c), or a
@@ -1887,16 +1890,14 @@ unit_losses(struct lu_unit *u)
     }
     unsigned long upto = __atomic_load_n(&u->lost_entries, __ATOMIC_RELAXED);
     double lost = (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED);
-    double total = lost;
     double per = lost / (double)(upto != 0 ? upto : entries);
     for (int i = 0; i < u->nouts; i++) {
-        double out = CALL_COST * (double)out_calls(&u->outs[i]);
-        total += out;
-        per += out / (double)entries;
+        per += CALL_COST * (double)out_calls(&u->outs[i]) / (double)entries;
     }
-    /* A torn read of a callee's counters must not stand for good: a loss
-       per entry is at least 0 and at most all that was recorded. */
-    per = per < 0 ? 0 : per > total ? total : per;
+    /* out_calls is never below 0, so no negative value reaches the cast. A
+       torn read of a site while u's root re-arms it can still count up to
+       about 2-3 times its calls; when that is the first nonzero value made
+       once entries reach ENTRIES_SEEN, it stands in per_entry. */
     __atomic_store_n(&u->per_entry, (uint64_t)per, __ATOMIC_RELAXED);
     return per;
 }
@@ -1987,10 +1988,12 @@ hot_exit(struct lu_deopt *d)
         fprintf(stderr, "jit: %s@%d: %s at %s@%d, %d hot now\n", PyUnicode_AsUTF8(u->code->co_qualname),
                 u->entry_pc, why, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
     }
-    if (why[0] == 'g') {
-        __atomic_store_n(&jc->grown[u->entry_pc], jc->grown[u->entry_pc] + 1, __ATOMIC_RELAXED);
+    /* Only the exit that kills the unit grows its entry, and never past MAX_GROWN. */
+    uint8_t grown = __atomic_load_n(&jc->grown[u->entry_pc], __ATOMIC_RELAXED);
+    if (kill(jc, u, why, in->code, in->pc, why[0] == 'g' ? total : most, why[0] == 'g' ? grow : worth)
+        && why[0] == 'g' && grown < MAX_GROWN) {
+        __atomic_store_n(&jc->grown[u->entry_pc], grown + 1, __ATOMIC_RELAXED);
     }
-    kill(jc, u, why, in->code, in->pc, why[0] == 'g' ? total : most, why[0] == 'g' ? grow : worth);
     __atomic_store_n(&jc->wait[u->entry_pc], 0, __ATOMIC_RELAXED);    /* not for its faults: built again at once */
 }
 
@@ -2127,8 +2130,10 @@ lu_jit_note_exit(struct lu_deopt *d)
     uint64_t n = __atomic_add_fetch(&jc->fails[site_pc], exit_cost(d), __ATOMIC_RELAXED);
     PyCodeObject *code = lu_deopt_frame(d, 0)->code;
     struct lu_jit_code *root = state_for(code);
-    double price = kills_cost(root);
-    if (n >= price || (d->reason == EXIT_GUARD && marked_since(jc, site_pc, d))) {
+    /* A guard's site marked since its unit's build was bought (again, below): its kills carry no price. */
+    int marked = d->reason == EXIT_GUARD && marked_since(jc, site_pc, d);
+    double price = marked ? 0 : kills_cost(root);
+    if (marked || n >= price) {
         int again;
         if (caught >= 0) {
             /* A kernel handler keeps taking what a call raises: the unit is
