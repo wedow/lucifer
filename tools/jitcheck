@@ -117,6 +117,10 @@ require that a count of the tier's does not grow with the iterations:
          and tuple items nothing can free before their last use: no INCREF
          or DECREF per item (-X lucifer_jit_stats' incref, decref): only the
          inner loop's list iterator is released, once per outer turn.
+  holds  tests/kernel/jit_hold_counts.py 'named', whose hot loop hands C
+         one object three locals and a stack entry name: one count step
+         for the holds of the call (-X lucifer_jit_stats' hold), not one
+         per slot.
   entryfails tests/kernel/jit_borrow_entry_fails.py, whose loop is entered
          in compiled code while a local its list read writes holds a value
          no container holds: the entry's check fails as a guard does, and
@@ -347,6 +351,7 @@ GROWTH = {
               r'jit: executed:[^\n]* truth (\d+)', 0),
     'typed': ('jit_typed_items.py', r'jit: executed:.* helper (\d+)', 0),
     'borrowed': ('jit_borrowed_counts.py', r'jit: executed:.* incref (\d+) decref (\d+)', 1 / 2),
+    'holds': ('jit_hold_counts.py', r'jit: executed:.* hold (\d+)', 1, (), (['named'],)),
     'entryfails': ('jit_borrow_entry_fails.py', r'exits guard (\d+) stress \d+ poll (\d+)', 0),
     'strs': ('jit_str_chars.py', r'jit: executed:.* helper (\d+)', 0),
     'positional': ('jit_positional_args.py', r'(?s)jit: unit scan@\d+ entries [1-9]\d* .*?'

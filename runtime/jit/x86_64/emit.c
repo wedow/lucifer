@@ -1777,6 +1777,19 @@ unlocked_again(struct asm_ *a)
     }
 }
 
+/* One more of kind k in the unit's census, while it keeps one (-X
+   lucifer_jit_stats), with r as scratch. */
+static void
+counted(struct asm_ *a, int k, int r)
+{
+    if (a->unit->counts != NULL && k >= 0) {
+        mov_ri(a, r, (int64_t)(intptr_t)&a->unit->counts[k]);
+        rex(a, 1, 0, 0, r);
+        b1(a, 0xFF);
+        modrm_mem(a, 0, r, 0);                  /* inc qword [r] */
+    }
+}
+
 static void
 publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
 {
@@ -1802,6 +1815,7 @@ publish(struct asm_ *a, struct lu_ins *in, struct lu_deopt *d)
         for (int k = 0; k < a->nheld; k++) {
             to_gpr(a, R11, a->held[k].v);
             for (int i = 0; i < a->held[k].n; i++) {
+                counted(a, CNT_hold, RAX);
                 incref(a, R11);
             }
         }
@@ -5586,13 +5600,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
         int next = k + 1 < f->norder ? f->order[k + 1] : -1;
         int start = a->n;
         for (int i = 0; i < bl->nins; i++) {
-            int k = unit->counts != NULL ? lu_count_kind(I(a, bl->ins[i])) : -1;
-            if (k >= 0) {
-                mov_ri(a, R11, (int64_t)(intptr_t)&unit->counts[k]);
-                rex(a, 1, 0, 0, R11);
-                b1(a, 0xFF);
-                modrm_mem(a, 0, R11, 0);        /* inc qword [r11] */
-            }
+            counted(a, lu_count_kind(I(a, bl->ins[i])), R11);
             alloc_count_before(a, bl->ins[i]);
             if (_PyRuntime.jit.dump) {
                 fprintf(stderr, "  code +%d v%d\n", a->n, bl->ins[i]);    /* with the unit's address below: a profile by instruction */
