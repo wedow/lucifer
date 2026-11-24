@@ -2496,10 +2496,12 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     load(a, RCX, RCX, offsetof(struct lu_carrier, current));
     cmp_mi(a, 0, RCX, offsetof(struct lu_entry, gc_alloc_count), -LU_GC_ALLOC_FLUSH + 1);
     jcc(a, CC_LE, fail);                        /* the decrement would flush */
-    /* [rsp] R10, [rsp+8] the end of the inline values; 24 bytes keep the
-       stack aligned for a call (the stub's return address below). */
+    /* [rsp] R10, [rsp+8] the end of the inline values, [rsp+16] whether a
+       word holds a counted object; 24 bytes keep the stack aligned for a
+       call (the stub's return address below). */
     alu_ri(a, ALU_SUB, RSP, 24);
     store(a, RSP, 0, R10);
+    store32_mi(a, RSP, 16, 0);
     thread_id(a, R10);
     load(a, RCX, RAX, offsetof(PyHeapTypeObject, ht_cached_keys));
     load(a, RCX, RCX, LU_SHARED_NAMES_COUNT);  /* the names */
@@ -2537,9 +2539,13 @@ release_instance(struct asm_ *a, int r, int fail, int done)
     jcc(a, CC_BE, failed);
     cmp_rm(a, R10, RAX, offsetof(PyObject, ob_tid));
     jcc(a, CC_NE, failed);
+    store32_mi(a, RSP, 16, 1);                  /* one to drop */
     jmp(a, scan);
     bind(a, scanned);
-    /* It dies: the values' counts, then the type's, then the block. */
+    /* It dies: the values' counts (when any word holds a counted object),
+       then the type's, then the block. */
+    cmp_mi(a, 0, RSP, 16, 0);
+    jcc(a, CC_E, dropped);
     load(a, R11, r, offsetof(PyObject, ob_type));
     load(a, R11, R11, offsetof(PyTypeObject, tp_basicsize));
     alu_rr(a, ALU_ADD, R11, r);
