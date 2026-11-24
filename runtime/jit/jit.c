@@ -1802,9 +1802,10 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
     }
     int op = site[0].op.code;
     PyObject *prop = NULL;
-    if (pic->store && op == STORE_ATTR && tp->tp_setattro == PyObject_GenericSetAttr
-        && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
-        && lu_type_assign_version(tp)) {
+    uint32_t tag = pic->store && op == STORE_ATTR && lu_type_assign_version(tp)
+        ? __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) : 0;     /* before what it vouches for */
+    if (tag != 0 && tp->tp_setattro == PyObject_GenericSetAttr
+        && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
         /* A store through a property: its setter, under the class's version,
            where object's __setattr__ is the class's (as the specializer asks
            of its stores); a type as owner (a metaclass property) sets
@@ -1814,7 +1815,7 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
         if (fset != NULL && PyFunction_Check(fset)) {
             prop = d;
             op = LU_PIC_STORE_PROPERTY;
-            lu_cache_store32(site + 1 + LA_VERSION, __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE));
+            lu_cache_store32(site + 1 + LA_VERSION, tag);      /* a change since takes the tag back */
         }
     }
     if (op != LU_PIC_STORE_PROPERTY && op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES

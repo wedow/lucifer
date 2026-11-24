@@ -14,8 +14,6 @@
 import sys
 import warnings
 
-warnings.simplefilter('ignore', RuntimeWarning)       # the async setter's coroutine is never awaited
-
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
 calls = []
 
@@ -412,9 +410,11 @@ class AsyncSet:
 def odd_setters(n):
     o = GenSet()
     p = AsyncSet()
-    for i in range(n):
-        o.g = i
-        p.a = i
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)     # the async setter's coroutine is never awaited
+        for i in range(n):
+            o.g = i
+            p.a = i
     return hasattr(o, '_g'), hasattr(p, '_a')
 
 
