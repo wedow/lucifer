@@ -2260,6 +2260,8 @@ return_frame: {
     uint8_t ret = frame->ret;
     int from_builtin = (code->co_flags & LU_CO_KERNEL) != 0;
     if (frame->owner == LU_FRAME_GENERATOR) {
+        /* Leaves caller current: lu_gen_finish unlinks the frame, or compiled
+           code's return (OP_UNLINK) already did. */
         lu_gen_finish(ts, frame);
         if (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT) {
             Py_DECREF(retval);

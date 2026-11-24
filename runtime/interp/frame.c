@@ -173,7 +173,7 @@ lu_frame_release(struct lu_frame *f)
         f->locals = NULL;
         f->func = NULL;
     }
-    else {
+    else if (f->func != NULL) {
         lu_frame_release_refs(f);
     }
 }

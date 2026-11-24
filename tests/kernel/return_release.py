@@ -242,3 +242,21 @@ try:
 except RecursionError:
     pass
 print('depth again', depth[0])
+
+
+# The deepest frame's finalizer runs with the depth its frame gave back.
+class Quiet:
+    __del__ = lambda s: None
+
+
+def deepest(n):
+    q = Quiet()
+    return deepest(n + 1)
+
+
+sys.setrecursionlimit(100)
+try:
+    deepest(0)
+except RecursionError:
+    pass
+print('deepest finalizers', log)

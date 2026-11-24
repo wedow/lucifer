@@ -382,7 +382,8 @@ lu_frame_release_refs(struct lu_frame *f)
 }
 
 /* The frame's references, except its code, go to its frame object if
-   observers hold one (lu_frame_retire), else are released. */
+   observers hold one (lu_frame_retire), else are released; nothing for a
+   frame already released (a generator's frame cleared twice). */
 void lu_frame_release(struct lu_frame *f);
 
 /* Gives back the datastack space of a frame that began its chunk. */
@@ -393,13 +394,13 @@ void lu_frame_free_chunk(PyThreadState *ts);
 static inline Py_ALWAYS_INLINE void
 lu_frame_drop(PyThreadState *ts, struct lu_frame *f)
 {
+    lu_depth_leave(ts, f->code);        /* before the releases, as CPython: their finalizers get the depth back */
     if (f->frame_obj == NULL) {
         lu_frame_release_refs(f);
     }
     else {
         lu_frame_release(f);
     }
-    lu_depth_leave(ts, f->code);
     lu_decref((PyObject *)f->code);
     if ((PyObject **)f != &ts->datastack_chunk->data[0]) {
         ts->datastack_top = (PyObject **)f;
