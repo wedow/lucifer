@@ -499,6 +499,28 @@ lu_ir_dump(struct lu_func *f, FILE *out)
             if (in->flags & INS_UNLOCKED) {
                 fprintf(out, (in->flags & INS_RECHECK) ? " serial-recheck" : " serial");
             }
+            if (in->src != NULL) {
+                /* The bytecode it was built for, and what its constant operands are. */
+                fprintf(out, " {%s@%d op %d%s", PyUnicode_AsUTF8(in->src->co_qualname), in->src_pc,
+                        lu_base_opcode(in->src, in->src_pc), (in->src->co_flags & LU_CO_KERNEL) ? " kernel" : "");
+                for (int j = 0; in->op == OP_HELPER && j < in->nargs; j++) {
+                    struct lu_ins *k = &f->ins[in->args[j]];
+                    PyObject *o = k->op == OP_CONST ? (PyObject *)(intptr_t)k->imm : NULL;
+                    if (o != NULL && PyFunction_Check(o)) {
+                        fprintf(out, " fn=%s", PyUnicode_AsUTF8(((PyFunctionObject *)o)->func_qualname));
+                    }
+                    else if (o != NULL && PyType_Check(o)) {
+                        fprintf(out, " type=%s", ((PyTypeObject *)o)->tp_name);
+                    }
+                    else if (o != NULL && PyUnicode_Check(o) && PyUnicode_GET_LENGTH(o) < 40) {
+                        fprintf(out, " str=%s", PyUnicode_AsUTF8(o));
+                    }
+                    else if (o != NULL && o != Py_None) {
+                        fprintf(out, " const=%s", Py_TYPE(o)->tp_name);
+                    }
+                }
+                fprintf(out, "}");
+            }
             if (in->fs != NULL) {
                 dump_fs(f, in->fs, out);
             }
