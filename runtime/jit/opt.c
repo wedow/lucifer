@@ -477,6 +477,8 @@ struct borrow {
     char *bad;                  /* per root: counted after all */
     uint64_t *out;              /* per block: members live out */
     int entry;                  /* the entry block */
+    int *use_start, *use_bits;  /* per instruction, the members it names (collect_uses) */
+    int nuses, use_cap;
 };
 
 static int
@@ -493,23 +495,6 @@ static int
 is_tuple_item(const struct lu_ins *in)
 {
     return in->op == OP_LOAD && in->imm2 == LU_LOAD_TUPLE_ITEM;
-}
-
-/* The one INCREF of a tuple item's LOAD, or -1. */
-static lu_v
-item_incref(struct lu_func *f, lu_v v)
-{
-    lu_v found = -1;
-    for (int x = 0; x < f->nins; x++) {
-        struct lu_ins *in = &f->ins[x];
-        if (!(in->flags & INS_DEAD) && in->op == OP_INCREF && in->a == v) {
-            if (found >= 0) {
-                return -1;
-            }
-            found = x;
-        }
-    }
-    return found;
 }
 
 static int
@@ -543,30 +528,59 @@ goes(struct borrow *w, const struct lu_ins *in)
 }
 
 static void
-use_bit(struct lu_func *f, lu_v v, void *arg)
+collect_use(struct lu_func *f, lu_v v, void *arg)
 {
     struct borrow *w = arg;
-    if (live_member(w, v)) {
-        w->out[(size_t)f->nblocks * (size_t)w->words + (size_t)(w->bit[v] / 64)] |= 1ull << (w->bit[v] % 64);
+    (void)f;
+    if (v >= 0 && w->bit[v] >= 0) {
+        if (w->nuses == w->use_cap) {
+            w->use_cap = w->use_cap > 0 ? 2 * w->use_cap : 256;
+            w->use_bits = realloc(w->use_bits, sizeof(int) * (size_t)w->use_cap);
+        }
+        w->use_bits[w->nuses++] = w->bit[v];
     }
 }
 
-/* The members an instruction uses, into the scratch set after the blocks'. */
+/* The members each instruction names, its frame state's included, listed
+   once: the rounds ask for them again and again, and a state names every
+   value of every frame inlined there. */
+static void
+collect_uses(struct borrow *w)
+{
+    struct lu_func *f = w->f;
+    w->use_start = malloc(sizeof(int) * (size_t)(f->nins + 1));
+    for (int v = 0; v < f->nins; v++) {
+        struct lu_ins *in = &f->ins[v];
+        w->use_start[v] = w->nuses;
+        if ((in->flags & INS_DEAD) || in->op == OP_PHI) {
+            continue;
+        }
+        collect_use(f, in->a, w);
+        collect_use(f, in->b, w);
+        collect_use(f, in->c, w);
+        for (int i = 0; i < in->nargs; i++) {
+            collect_use(f, in->args[i], w);
+        }
+        if (in->fs != NULL) {
+            lu_fs_each(f, in->fs, collect_use, w);
+        }
+    }
+    w->use_start[f->nins] = w->nuses;
+}
+
+/* The live members instruction v uses, into the scratch set after the blocks'. */
 static uint64_t *
-uses_of(struct borrow *w, struct lu_ins *in)
+uses_of(struct borrow *w, lu_v v)
 {
     struct lu_func *f = w->f;
     uint64_t *u = w->out + (size_t)f->nblocks * (size_t)w->words;
     memset(u, 0, sizeof(uint64_t) * (size_t)w->words);
-    if (in->op != OP_PHI && !goes(w, in)) {
-        use_bit(f, in->a, w);
-        use_bit(f, in->b, w);
-        use_bit(f, in->c, w);
-        for (int i = 0; i < in->nargs; i++) {
-            use_bit(f, in->args[i], w);
-        }
-        if (in->fs != NULL) {
-            lu_fs_each(f, in->fs, use_bit, w);
+    if (f->ins[v].op != OP_PHI && !goes(w, &f->ins[v])) {
+        for (int k = w->use_start[v]; k < w->use_start[v + 1]; k++) {
+            int i = w->use_bits[k];
+            if (!w->bad[uf_root(w->uf, w->of_bit[i])]) {
+                u[i / 64] |= 1ull << (i % 64);
+            }
         }
     }
     return u;
@@ -678,7 +692,7 @@ borrow_round(struct borrow *w)
                 if (live_member(w, v)) {
                     live[w->bit[v] / 64] &= ~(1ull << (w->bit[v] % 64));
                 }
-                uint64_t *u = uses_of(w, in);
+                uint64_t *u = uses_of(w, v);
                 for (int j = 0; j < W; j++) {
                     live[j] |= u[j];
                 }
@@ -705,7 +719,7 @@ borrow_round(struct borrow *w)
             if (live_member(w, v)) {
                 live[w->bit[v] / 64] &= ~(1ull << (w->bit[v] % 64));
             }
-            uint64_t *u = uses_of(w, in);
+            uint64_t *u = uses_of(w, v);
             for (int j = 0; j < W; j++) {
                 across[j] = live[j] | u[j];
             }
@@ -874,17 +888,25 @@ borrow_items(struct lu_func *f)
     w.bit = malloc(sizeof(int) * (size_t)n);
     w.of_bit = malloc(sizeof(lu_v) * (size_t)n);
     w.bad = calloc((size_t)n, 1);
+    uint8_t *increfs = calloc((size_t)n, 1);    /* each value's INCREFs, counted up to 2 */
+    for (int x = 0; x < n; x++) {
+        struct lu_ins *in = &f->ins[x];
+        if (!(in->flags & INS_DEAD) && in->op == OP_INCREF && in->a >= 0 && increfs[in->a] < 2) {
+            increfs[in->a]++;
+        }
+    }
     int any = 0;
     for (int v = 0; v < n; v++) {
         w.uf[v] = v;
         w.bit[v] = -1;
         struct lu_ins *in = &f->ins[v];
         if (!(in->flags & INS_DEAD) && (in->flags & INS_OWNED) && in->rep == REP_OBJ
-            && (in->op == OP_LIST_ITEM || (is_tuple_item(in) && item_incref(f, v) >= 0))) {
+            && (in->op == OP_LIST_ITEM || (is_tuple_item(in) && increfs[v] == 1))) {
             w.kind[v] = READ;
             any = 1;
         }
     }
+    free(increfs);
     if (!any) {
         goto done;
     }
@@ -995,6 +1017,7 @@ borrow_items(struct lu_func *f)
     }
     w.words = (w.nbits + 63) / 64;
     w.out = calloc((size_t)(f->nblocks + 2) * (size_t)w.words, sizeof(uint64_t));
+    collect_uses(&w);
     for (int again = 1; again;) {
         again = unheld_entries(&w, can_enter);
         again |= borrow_round(&w);
@@ -1019,6 +1042,8 @@ done:
     free(w.of_bit);
     free(w.bad);
     free(w.out);
+    free(w.use_start);
+    free(w.use_bits);
 }
 
 /* An attribute read from an instance's inline values whose reference the
