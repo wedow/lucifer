@@ -1397,7 +1397,9 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     PyObject *callable, *kwnames, **args, **base, **to_free;
     Py_ssize_t total, npos;
     int free_self;              /* args[-1] may take a prepended self */
-    lu_codeunit *monitored = NULL;      /* the INSTRUMENTED_CALL making the call being made */
+    /* The INSTRUMENTED_CALL making the call being made. In memory: NULL at
+       every instruction boundary, a register would be zeroed at each dispatch. */
+    lu_codeunit *volatile monitored = NULL;
     /* The start of the instruction being executed and of the one before it,
        for the events that name a source (LINE, NOT_TAKEN, POP_ITER). */
     lu_codeunit *cur_instr, *prev_instr;
