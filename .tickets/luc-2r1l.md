@@ -16,8 +16,9 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp, rebased on master after stage 2. Stages 0-2 landed. Stage A (calls and returns, replacing the
-unlanded stage 3 commit) and its fix reviewed; stage B committed for review. Successor order, from the coordinator's brief:
+Branch luc-interp. Stages 0-2, A and B landed or landing; C1 (a C type's generic attribute slots run directly, the
+ast node classes' getattr/setattr no longer through call_special) committed for review; next C2 if the census still
+shows the forwarding above 2%, then D, E, F (coordinator's order). Earlier order and evidence:
 
 1. B done (count steps inline, locals through the frame, word-sized opcode/oparg). Dispatch is still 10 instructions
    against CPython's 8 (6 plus its instr_ptr store and next_instr step): opcode is live across calls in many handlers
@@ -266,3 +267,53 @@ What is left is above in State.
 Gate: 29 programs (calls, frames, closures, classes, dicts, ints, errors, generators, recursion, JIT calls,
 monitoring) in jit-off, plain, jit and jit-deopt, six thread programs in handoff, jitcheck: all pass.
 
+
+### 2026-11-24 stage C1: a C type's generic attribute slots run directly
+
+An ast node class (made by type() over ast.AST, whose dict holds C slot wrappers of PyObject_GenericGetAttr and
+PyObject_GenericSetAttr) got the slot thunks, so every attribute read of a node went interpreter -> getattr_hook ->
+call_special -> wrapper -> C -> the kernel's generic lookup, and every store from the node constructor the same way
+through setattr_hook. Now, as update_one_slot does, a class whose dunders are a base's C slot wrappers of that very
+slot gets the wrapped C function as its slot (no __getattr__ for tp_getattro; __setattr__ and __delattr__ wrapping one
+function for tp_setattro), so the interpreter's own generic paths and lu_setattr_native take node attributes; and the
+kernel hooks run a wrapper of the generic functions as generic access, as slot_tp_getattr_hook does (getattr,
+setattr, delattr, getattr with a default, hasattr). getattr_hook runs type's and module's own lookups without
+call_special too. pyflakes' output is unchanged (and CPython's).
+
+| row | stage B | C1 |
+|---|---|---|
+| fib / arith / attribute loop, instr/bc, JIT off | 75.1 / 96.4 / 93.5 | 75.1 / 96.4 / 93.5 |
+| -c pass, JIT off | 130.44M | 127.89M |
+| stdlib imports, JIT off | 1.285-1.300G | 1.281G |
+| pyflakes, JIT off | 26.66G | 14.76G |
+| -c pass, JIT on | 151.24M | 149.44M |
+| stdlib imports, JIT on | 1.432G | 1.430G |
+| pyflakes, JIT on | 15.22G | 10.90G |
+| Richards | 12.285G | 12.301G (+0.13%) |
+| DeltaBlue | 5.698G | 5.680-5.685G |
+
+Richards does not call getattr; its extra 16M instructions are in JIT code. A probe of getattr() on a class and a
+module, 1M iterations: JIT off 4241 -> 4183 instructions per iteration, JIT on 714 -> 733 (the kernel's getattr_hook,
+compiled, is two identity tests longer; with the generic test as a primitive call before them it was 871).
+Gate: ast_attr_hooks (new) and 13 attribute and ast programs in jit-off, plain, jit and jit-deopt;
+threads_ast_attr_hooks (new) and attr_class_assign_threads in handoff; jitcheck: all pass.
+
+### 2026-11-24 stage C1 review fixes
+
+- A subclass of a type with only the old tp_getattr/tp_setattr slots took their stand-ins (getattro_from_getattr,
+  setattro_from_setattr) as its specific slots and ran the base's old hooks (tests/capi/ready_run failed on the C1
+  build: OldAttrPy's store raised "cannot set other"); the stand-ins are never specific now.
+- generic_wrapper takes the type: a wrapper copied into a class that is not a subtype of its d_type is called and
+  raises its TypeError, as in CPython (before __getattr__ CPython's hook skips that check, and so does the kernel's).
+  type's and module's __getattribute__ copied into other classes no longer take getattr_hook's or lookup_attr's
+  direct lookups.
+- _type_set and __bases__ assignment take the tags back after rewriting the slots (the class's and its subclasses'),
+  so no tag assigned in between names the old slots.
+- New cases in ast_attr_hooks (sibling base supplying the hooks, __bases__ and a custom mro(), copied wrappers,
+  copied type/module __getattribute__) and threads_ast_attr_hooks (the base's hooks flipped by another thread under
+  a hot loop); ready_run: a class over a C type with its own getattro gaining and losing hooks mid-loop.
+- Gate: 21 kernel programs in jit-off, plain, jit, jit-deopt; 4 thread programs in handoff; jitcheck; all 16
+  check-capi-ext programs: pass. pyflakes after the fixes: JIT off 14.75-14.79G, JIT on 11.05-11.06G (C1 as first
+  committed: 14.76G, 10.89G).
+- Reviewer's note for stage F: default_getattribute and the STORE_ATTR specializer (runtime/interp/specialize.c)
+  still compare against object's lookup, so these classes get no specialised LOAD_ATTR / STORE_ATTR yet.
