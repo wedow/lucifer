@@ -225,6 +225,7 @@ struct lu_static_type_state {
     X(list_append)              /* list.append, dict.items: CALL answers them for builtin lists and dicts */ \
     X(dict_items)               /* */ \
     X(isinstance)               /* */ \
+    X(issubclass)               /* */ \
     X(dict_setitem)             /* PyDict_SetItem(dict, key, value): the dict's own, whatever the subclass overrides */ \
     X(dict_delitem)             /* PyDict_DelItem(dict, key) */ \
     X(dict_key_hash)            /* hash with dict-specific errors */ \

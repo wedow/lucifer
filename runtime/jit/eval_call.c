@@ -853,6 +853,193 @@ lower_int_mul(struct ctx *c, lu_v *args, int nops)
     return 1;
 }
 
+/* The classes a class test names: one class whose metaclass is exactly
+   type, or a flat tuple of them, a constant or one the unit made of
+   constants. */
+struct classes {
+    PyObject *one, *tuple;
+    struct lu_vobj *o;
+    int n;
+};
+
+static int
+named_classes(struct ctx *c, lu_v v, struct classes *cs)
+{
+    *cs = (struct classes){ 0 };
+    lu_v real = v;
+    PyObject *k = lu_ev_const(c, v);
+    if (k == NULL && LU_IS_VIRT(v)) {
+        cs->o = lu_ev_virt(c->g, &c->g->st, v, &real);
+    }
+    if (k != NULL && Py_IS_TYPE(k, &PyType_Type)) {
+        cs->one = k;
+        cs->n = 1;
+    }
+    else if (k != NULL && PyTuple_CheckExact(k)) {
+        cs->tuple = k;
+        cs->n = (int)PyTuple_GET_SIZE(k);
+    }
+    else if (cs->o != NULL && real == LU_NOV && cs->o->kind == VK_TUPLE) {
+        cs->n = cs->o->n;
+    }
+    else {
+        return 0;
+    }
+    for (int i = 0; i < cs->n; i++) {
+        PyObject *ci = cs->one != NULL ? cs->one : cs->tuple != NULL ? PyTuple_GET_ITEM(cs->tuple, i)
+            : lu_ev_const(c, cs->o->f[i]);
+        if (ci == NULL || !Py_IS_TYPE(ci, &PyType_Type)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static PyTypeObject *
+class_at(struct ctx *c, const struct classes *cs, int i)
+{
+    return (PyTypeObject *)(cs->one != NULL ? cs->one : cs->tuple != NULL ? PyTuple_GET_ITEM(cs->tuple, i)
+                            : lu_ev_const(c, cs->o->f[i]));
+}
+
+/* The tp_flags bit every subclass of the classes has, or 0 when one of
+   them has none. */
+static unsigned long
+subclass_flags(struct ctx *c, const struct classes *cs)
+{
+    static const struct { PyTypeObject *t; unsigned long flag; } flagged[] = {
+        { &PyLong_Type, Py_TPFLAGS_LONG_SUBCLASS }, { &PyUnicode_Type, Py_TPFLAGS_UNICODE_SUBCLASS },
+        { &PyBytes_Type, Py_TPFLAGS_BYTES_SUBCLASS }, { &PyTuple_Type, Py_TPFLAGS_TUPLE_SUBCLASS },
+        { &PyList_Type, Py_TPFLAGS_LIST_SUBCLASS }, { &PyDict_Type, Py_TPFLAGS_DICT_SUBCLASS },
+        { &PyType_Type, Py_TPFLAGS_TYPE_SUBCLASS },
+    };
+    unsigned long all = 0;
+    for (int i = 0; i < cs->n; i++) {
+        PyTypeObject *t = class_at(c, cs, i);
+        unsigned long flag = t == (PyTypeObject *)PyExc_BaseException ? Py_TPFLAGS_BASE_EXC_SUBCLASS : 0;
+        for (size_t j = 0; j < sizeof flagged / sizeof flagged[0]; j++) {
+            flag = t == flagged[j].t ? flagged[j].flag : flag;
+        }
+        if (flag == 0) {
+            return 0;
+        }
+        all |= flag;
+    }
+    return all;
+}
+
+/* Whether class t (an instance's for isinstance, the class itself for
+   issubclass) is a subclass of one of the classes, relied on as of t's
+   version: 1 or 0, or -1 when that cannot be told here. A negative
+   isinstance answer stands only where t keeps object's __class__ and
+   __getattribute__ (else obj.__class__ is asked). */
+static int
+known_subclass(struct ctx *c, PyTypeObject *t, const struct classes *cs, int instance)
+{
+    uint32_t version;
+    if (!lu_ev_class_as_of(c, t, &version)) {
+        return -1;
+    }
+    int sub = 0;
+    for (int i = 0; i < cs->n && !sub; i++) {
+        sub = PyType_IsSubtype(t, class_at(c, cs, i));
+    }
+    for (int i = 0; !sub && instance && i < 2; i++) {
+        PyObject *name = i == 0 ? LU_ID(__class__) : LU_ID(__getattribute__);
+        PyObject *own = _PyType_LookupRef(t, name), *base = _PyType_LookupRef(&PyBaseObject_Type, name);
+        int plain = own == base;
+        Py_XDECREF(own);
+        Py_XDECREF(base);
+        if (!plain) {
+            return -1;
+        }
+    }
+    return lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)t), version) ? sub : -1;
+}
+
+/* The bit that says whether r's class (Py_TYPE(r), or r itself) has one
+   of the flags. */
+static lu_v
+flags_test(struct ctx *c, lu_v r, int of_type, unsigned long flags)
+{
+    lu_v t = of_type ? lu_ev_emit(c, OP_LOAD, REP_OBJ, r, LU_NOV, LU_NOV, offsetof(PyObject, ob_type)) : r;
+    lu_v f = lu_ev_emit(c, OP_LOAD, REP_I64, t, LU_NOV, LU_NOV, offsetof(PyTypeObject, tp_flags));
+    lu_v has = lu_ev_emit(c, OP_AND_I, REP_I64, f, lu_ev_const_i(c, (int64_t)flags), LU_NOV, 0);
+    return lu_ev_emit(c, OP_CMP_I, REP_BIT, has, lu_ev_const_i(c, 0), LU_NOV, Py_NE);
+}
+
+/* The CALL goes two ways on bit: answered `answer` where it is 1, built
+   again as it is where it is 0, the class test left out. */
+static int
+class_test_split(struct ctx *c, lu_v bit, lu_v answer, int nops)
+{
+    struct gctx *g = c->g;
+    struct split s;
+    lu_ev_split(c, bit, &s);
+    call_result(c, nops, answer);
+    lu_ev_split_else(c, &s);
+    g->classtest = 1;
+    int r = lu_ev_instruction(c);
+    g->classtest = 0;
+    if (r < 0 || g->f->fail != NULL) {
+        return -1;
+    }
+    lu_ev_split_end(c, &s);
+    return 1;
+}
+
+/* isinstance(x, classes) or issubclass(x, classes) (`instance` says
+   which) against classes the code names (named_classes), without the
+   tuple or a call: a constant where x's class is known (as of its
+   version), or for each class the site learned it to be; else one test
+   of the subclass flags in tp_flags where every class has one. Anything
+   else (nested tuples, a non-class, a metaclass of its own, an
+   isinstance whose negative answer would ask obj.__class__) is the
+   kernel's function. 1 when built, 0 when not, -1 when the build failed. */
+static int
+class_test(struct ctx *c, int instance, lu_v *a, int nops)
+{
+    struct gctx *g = c->g;
+    struct classes cs;
+    if (g->classtest || a[0] == LU_NOV || !named_classes(c, a[1], &cs)) {
+        return 0;
+    }
+    PyObject *k = instance ? (PyObject *)lu_ev_type(c, a[0]) : lu_ev_const(c, a[0]);
+    if (k == NULL && !g->generic && !instance) {
+        lu_v cls = a[0];
+        k = lu_ev_learn_const(c, &cls, 0, LU_PROF_CLASS);
+    }
+    else if (k == NULL && !g->generic) {
+        k = (PyObject *)lu_ev_learn_type(c, a[0], 0);
+        if (k == NULL) {
+            int done = lu_ev_kernel_arms(c, a, 1);
+            if (done != 0) {
+                return done;
+            }
+        }
+    }
+    if (k != NULL) {
+        int sub = PyType_Check(k) ? known_subclass(c, (PyTypeObject *)k, &cs, instance) : -1;
+        if (sub < 0) {
+            return 0;
+        }
+        call_result(c, nops, lu_ev_konst(c, sub ? Py_True : Py_False));
+        return 1;
+    }
+    unsigned long flags = subclass_flags(c, &cs);
+    if (flags == 0 || LU_IS_VIRT(a[0]) || I(c, a[0])->rep != REP_OBJ) {
+        return 0;
+    }
+    lu_v x = lu_ev_val(c, a[0]);
+    if (instance) {
+        /* A negative answer asks obj.__class__ of a class not known. */
+        return class_test_split(c, flags_test(c, x, 1, flags), lu_ev_konst(c, Py_True), nops);
+    }
+    /* A class: its own flags tell, both ways. */
+    return class_test_split(c, flags_test(c, x, 1, Py_TPFLAGS_TYPE_SUBCLASS),
+                            lu_ev_bool(c, flags_test(c, x, 0, flags), 0), nops);
+}
+
 /* A call of `callable` (the self beside it, or LU_NOV) with n positional
    arguments in a[], then one value per name of kwnames (NULL: none). The
    instruction's `nops` operands are on the stack still and are popped
@@ -887,6 +1074,16 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
     if (n == 1 && nkw == 0 && self == LU_NOV && kc != NULL && PyFunction_Check(kc)
         && kc == lu_next_missing_of((PyObject *)&PyGen_Type)) {
         int done = lu_ev_gen_call(c, a[0], nops);
+        if (done != 0) {
+            return done < 0 ? -1 : 0;
+        }
+    }
+    PyObject *bound = NULL;
+    PyFunctionObject *fn = target_of(kc, &bound);
+    PyObject *const *kernel = PyInterpreterState_Get()->kernel;
+    if (fn != NULL && bound == NULL && self == LU_NOV && n == 2 && nkw == 0 && c->base == CALL && nops == n + 2
+        && ((PyObject *)fn == kernel[LU_K_isinstance] || (PyObject *)fn == kernel[LU_K_issubclass])) {
+        int done = class_test(c, (PyObject *)fn == kernel[LU_K_isinstance], a, nops);
         if (done != 0) {
             return done < 0 ? -1 : 0;
         }
@@ -975,8 +1172,6 @@ call_values(struct ctx *c, lu_v callable, lu_v self, lu_v *a, int n, PyObject *k
             return done < 0 ? -1 : 0;
         }
     }
-    PyObject *bound = NULL;
-    PyFunctionObject *fn = target_of(kc, &bound);
     if (fn == NULL && kc != NULL && PyType_Check(kc) && Py_IS_TYPE(kc, &PyType_Type) && self == LU_NOV) {
         /* A class called: type.__call__, the kernel's, with the class first. */
         PyObject *unused, *call = _PyType_Lookup(&PyType_Type, LU_ID(__call__));

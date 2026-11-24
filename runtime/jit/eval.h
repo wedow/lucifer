@@ -245,6 +245,7 @@ struct gctx {
     int maxdepth;               /* the deepest inlined frame */
     PyTypeObject *relied;       /* the class last made a dependency for what is known of an object's type */
     int generic;                /* the way of lu_ev_kernel_arms for types it has no way for is being built */
+    int classtest;              /* the way of a class test (eval_call.c) its folds do not answer is being built */
 };
 
 /* Per-code JIT state the evaluator consults (jit.c). */
