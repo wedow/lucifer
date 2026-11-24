@@ -16,9 +16,9 @@ With the JIT off the interpreter costs 105-114 machine instructions per bytecode
 
 ## State
 
-Branch luc-interp, on master 12e0fa43. Stages 0-2, A and B landed; C1 (a C type's generic attribute slots run
-directly) with its review fixes, and C2 (call_special without packing), committed for review; next D (LOAD_GLOBAL
-forms), E (dispatch), F (remaining forms by a fresh census) (coordinator's order). Earlier order and evidence:
+Branch luc-interp, on master 12e0fa43 (C1 landed as 642de4c7; rebase onto master once C2 lands). Stages 0-2, A, B,
+C1 landed; C2 landing; D (LOAD_GLOBAL forms) committed for review; next E (dispatch), F (remaining forms by the
+census after C2, below) (coordinator's order). Earlier order and evidence:
 
 1. B done (count steps inline, locals through the frame, word-sized opcode/oparg). Dispatch is still 10 instructions
    against CPython's 8 (6 plus its instr_ptr store and next_instr step): opcode is live across calls in many handlers
@@ -341,3 +341,68 @@ special_method_kinds.
 
 Gate: 14 programs (special methods, descriptors, wrappers, fast paths) in jit-off, plain, jit, jit-deopt; two thread
 programs in handoff; jitcheck: pass. Next: D (LOAD_GLOBAL_MODULE/BUILTIN, 25.4M executions in pyflakes after C1).
+
+### 2026-11-24 census after C2 (JIT off, counting build; instructions inclusive of C callees)
+
+| | bytecodes | kernel code | instructions | per bytecode |
+|---|---|---|---|---|
+| pyflakes | 160.2M | 82% | 14.10G | 88 |
+| stdlib imports | 12.0M | 90% | 1.21G | 101 |
+
+pyflakes (opcode: executions, kernel share, instructions each, share of the run); shared paths: return_frame 9.8%,
+call_tail 7.6%, not under the loop 2.0%, kernel_call 1.5%, push_callee 0.7%, INSTRUMENTED_RESUME 0.6%,
+call_stack_args 0.4%, call_done 0.3%.
+
+| opcode | executions | kernel | instr each | share |
+|---|---|---|---|---|
+| CALL (with its C callees) | 16.18M | 88% | 265 | 30.4% |
+| LOAD_GLOBAL_MODULE / _BUILTIN | 21.36M / 4.81M | 92% | 80 | 14.9% |
+| LOAD_FAST(_BORROW) | 27.97M | 84% | 22 | 4.3% |
+| POP_JUMP_IF_FALSE | 11.37M | 88% | 43 | 3.5% |
+| LOAD_ATTR (generic) | 0.50M | 2% | 490 | 1.7% |
+| LOAD_CONST | 8.11M | 80% | 28 | 1.6% |
+| RESUME | 6.77M | 83% | 30 | 1.4% |
+| BINARY_OP | 0.85M | 33% | 213 | 1.3% |
+| POP_JUMP_IF_TRUE | 3.47M | 87% | 48 | 1.2% |
+| FOR_ITER | 1.04M | 12% | 151 | 1.1% |
+| TO_BOOL | 4.97M | 71% | 32 | 1.1% |
+| STORE_FAST | 9.50M | 87% | 16 | 1.1% |
+| IS_OP | 9.31M | 99% | 15 | 1.0% |
+| POP_TOP | 2.94M | 60% | 42 | 0.9% |
+| LOAD_FAST_LOAD_FAST | 5.76M | 87% | 21 | 0.9% |
+| STORE_ATTR_FAST | 0.37M | 6% | 280 | 0.7% |
+| DELETE_ATTR | 0.21M | 0% | 493 | 0.7% |
+| NOP / NOT_TAKEN | 6.65M | 84% | 15 | 0.7% |
+
+The imports run has the same order (CALL 35.4%, LOAD_GLOBAL 11.2%, LOAD_FAST 3.5%, POP_JUMP_IF_FALSE 2.9%,
+COMPARE_OP 1.9%, BINARY_OP 1.9%, IMPORT_NAME 1.6%, RESUME 1.5%).
+
+### 2026-11-24 stage D: LOAD_GLOBAL's specialized forms
+
+The forms cost about 60 instructions with dispatch: one handler for both (opcode-dependent selects on the spilled
+opcode), the cache skip through the opcode table, str-keys and entry-range tests on both tables, and the site's
+sequence checked after the value was taken. Now each form checks the site's words first (lu_site_unchanged), so they
+are one specialization's, and a keys table that still has the cached version has the same keys at the same entries:
+the guard is the exact-dict test and the keys version (globals; globals then builtins), then the indexed load,
+CPython's _GUARD_GLOBALS_VERSION / _GUARD_BUILTINS_VERSION / _LOAD_GLOBAL_*. The try-incref and the keys-pointer
+recheck after it stay (a resize between the version check and the take). Cache layout unchanged (the JIT reads it).
+Loop of ten loads, each with its POP_TOP, JIT off: module global 91 -> 65 instructions, builtin 108 -> 85.
+Also carried: the dead JIT helper h_call_special removed and comments on call_special's old *args fixed (C2 review);
+special_method_kinds covers method descriptors, builtins, a raising __get__, bound methods, classmethod and partial
+__init__, __new__ returning another class's instance, a metaclass __call__ (dict.get called with no key words its
+arity error differently from CPython's clinic message, so the test calls it with its key only).
+
+| row | C2 | D |
+|---|---|---|
+| fib / arith / attribute loop, instr/bc, JIT off | 75.1 / 96.4 / 93.5 | 72.7 / 96.4 / 93.5 |
+| -c pass, JIT off | 122.85M | 119.25M |
+| stdlib imports, JIT off | 1.205G | 1.160G |
+| pyflakes, JIT off | 14.06G | 13.43G |
+| -c pass, JIT on | 147.36M | 144.07M |
+| stdlib imports, JIT on | 1.395-1.408G | 1.373G |
+| pyflakes, JIT on | 10.90-10.95G | 10.89G |
+| Richards | 12.271G | 12.266G |
+| DeltaBlue | 5.588-5.603G | 5.578-5.594G |
+
+Gate: global_guard_changes (new) and 12 global, builtin, shared-code and special-method programs in jit-off, plain,
+jit, jit-deopt; threads_global_guard_changes (new) and threads_global_churn in handoff; jitcheck: pass.
