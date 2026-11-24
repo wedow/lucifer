@@ -257,10 +257,14 @@ void lu_jit_note_resume(void);
    immortal or deferred, forgotten by lu_specialize_forget before a
    collection frees them. */
 #define LU_PIC_WAYS 4
+/* A pic entry's op for a store through an exact property whose setter is a
+   Python function (descr the property): the interpreter has no such
+   specialization, so the cache makes it itself (jit.c lu_jit_pic_note). */
+#define LU_PIC_STORE_PROPERTY 0x1000
 struct lu_pic_entry {
     uint32_t version;
     uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _WITH_HINT, _SLOT, _METHOD_*, _NONDESCRIPTOR_* or _PROPERTY;
-                                   STORE_ATTR_INSTANCE_VALUE, _WITH_HINT or _SLOT */
+                                   STORE_ATTR_INSTANCE_VALUE, _WITH_HINT, _SLOT or LU_PIC_STORE_PROPERTY */
     uint16_t index;
     PyObject *descr;
 };

@@ -1299,6 +1299,12 @@ lu_static_or_class_get(PyObject *descr, PyObject *cls)
 }
 
 PyObject *
+lu_property_fset(PyObject *prop)
+{
+    return __atomic_load_n((PyObject **)((char *)prop + lu_field_offset(&PyProperty_Type, 1)), __ATOMIC_ACQUIRE);
+}
+
+PyObject *
 lu_property_fget(PyObject *prop)
 {
     if (Py_IS_TYPE(prop, &PyGetSetDescr_Type)) {

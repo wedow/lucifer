@@ -781,7 +781,10 @@ lu_ev_returned(struct ctx *c, lu_v v)
         PyTypeObject *t = lu_ev_type(c, v);
         c->missing |= !LU_IS_VIRT(v) && lu_ev_const(c, v) == NULL && (t == NULL || t == Py_TYPE(LU_MISSING));
     }
-    if (c->ret != LU_RETURN_INIT && c->ret != LU_RETURN_DISCARD) {
+    if (c->ret == LU_RETURN_DISCARD) {
+        lu_ev_drop(p, v);       /* the instruction takes no result (a setter's) */
+    }
+    else if (c->ret != LU_RETURN_INIT) {
         lu_ev_push(p, v);
     }
     lu_ev_settle(p, p->next);
@@ -1241,6 +1244,16 @@ int
 lu_ev_call_function(struct ctx *c, PyObject *fn, lu_v *args, int n, int nops)
 {
     return call_values(c, lu_ev_konst(c, fn), LU_NOV, args, n, NULL, nops, 0);
+}
+
+int
+lu_ev_call_discard(struct ctx *c, PyObject *fn, lu_v *args, int n, int nops)
+{
+    if (!PyFunction_Check(fn)) {
+        return 0;
+    }
+    int done = inline_call(c, (PyFunctionObject *)fn, LU_NOV, -1, args, n, NULL, nops, NULL, LU_RETURN_DISCARD);
+    return done < 0 ? -1 : done != 0;
 }
 
 int

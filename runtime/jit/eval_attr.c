@@ -711,6 +711,24 @@ store_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *desc
         lu_v args[3] = { owner, lu_ev_const_i(c, index), v };
         lu_ev_helper(c, H_slot_store, 3, args, 0);
     }
+    else if (op == LU_PIC_STORE_PROPERTY) {
+        /* The setter, a function, called with the owner and the value: read
+           from the property each time (its __init__ or setter() may change
+           it), so guarded. The only way the site has: in line, the guard
+           leaving for any other class; one of several: out of line. */
+        PyObject *fset = lu_property_fset(descr);
+        lu_ev_guard_version(c, owner, version);
+        lu_v g = lu_ev_guard(c, OP_GUARD_IS, lu_ev_konst(c, descr), (int64_t)(intptr_t)fset);
+        I(c, g)->imm2 = GI_FIELD | (int64_t)lu_field_offset(&PyProperty_Type, 1);
+        lu_v args[2] = { owner, v };
+        int done = pic == NULL ? lu_ev_call_discard(c, fset, args, 2, 2) : 0;
+        if (done != 0) {
+            return done < 0 ? -1 : 0;
+        }
+        lu_v hargs[4] = { lu_ev_konst(c, fset), LU_NOV, owner, v };
+        lu_ev_push(c, lu_ev_helper(c, H_call, 4, hargs, 0));
+        lu_ev_pop(c);           /* the setter's result */
+    }
     else {
         lu_v args[4] = { owner, lu_ev_konst(c, name), v, lu_ev_const_i(c, (int64_t)(intptr_t)pic) };
         lu_ev_helper(c, H_store_attr, 4, args, 2);
@@ -734,6 +752,11 @@ lu_ev_store_attr(struct ctx *c)
     int op = LU_IS_VIRT(owner) ? STORE_ATTR : cached_site(c, STORE_ATTR, &version, &index, &unused);
     struct lu_pic *pic = op == STORE_ATTR && owner >= 0
         ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
-    return pic != NULL ? attr_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0, store_as, STORE_ATTR)
+    int n = pic != NULL ? __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE) : 0;
+    if (n == 1 && pic->e[0].op == LU_PIC_STORE_PROPERTY && !nospec(c, c->pc)) {
+        /* A property's setter, the one way the site has met: in line. */
+        return store_as(c, LU_PIC_STORE_PROPERTY, pic->e[0].version, 0, pic->e[0].descr, NULL);
+    }
+    return pic != NULL ? attr_ways(c, pic, n, 0, store_as, STORE_ATTR)
                        : store_as(c, op, version, index, NULL, NULL);
 }

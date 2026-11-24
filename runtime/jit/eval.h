@@ -482,6 +482,11 @@ int lu_ev_call_ex(struct ctx *c);
 /* Function fn called with the n values args, in place of the top `nops`
    stack entries, as a CALL makes it: in line where it can be. */
 int lu_ev_call_function(struct ctx *c, PyObject *fn, lu_v *args, int n, int nops);
+/* Function fn called with the n values args in place of the top `nops`
+   stack entries, in line, its result dropped (an instruction that pushes
+   none, as a store through a setter): 1 when done, 0 when it cannot be
+   inlined (nothing changed), -1 when the build failed. */
+int lu_ev_call_discard(struct ctx *c, PyObject *fn, lu_v *args, int n, int nops);
 /* The instruction as the interpreter leaves it to the kernel: kernel[kid]
    of the n args, in line, its result in place of the top `nops` stack
    entries. Only where every operand's type is known or learned: the

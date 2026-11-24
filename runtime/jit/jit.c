@@ -1801,14 +1801,25 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name)
         lu_specialize_load_attr(owner, site, name);
     }
     int op = site[0].op.code;
-    if (op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
+    PyObject *prop = NULL;
+    if (pic->store && op == STORE_ATTR && lu_type_assign_version(tp)) {
+        /* A store through a property: its setter, under the class's version. */
+        PyObject *d = _PyType_Lookup(tp, name);
+        PyObject *fset = d != NULL && Py_IS_TYPE(d, &PyProperty_Type) ? lu_property_fset(d) : NULL;
+        if (fset != NULL && PyFunction_Check(fset)) {
+            prop = d;
+            op = LU_PIC_STORE_PROPERTY;
+            lu_cache_store32(site + 1 + LA_VERSION, __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE));
+        }
+    }
+    if (op != LU_PIC_STORE_PROPERTY && op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
         && op != LOAD_ATTR_NONDESCRIPTOR_NO_DICT && op != LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
         && op != LOAD_ATTR_WITH_HINT && op != LOAD_ATTR_SLOT && op != LOAD_ATTR_PROPERTY
         && op != STORE_ATTR_INSTANCE_VALUE && op != STORE_ATTR_WITH_HINT && op != STORE_ATTR_SLOT) {
         return;
     }
     struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op, lu_cache_load(site + 1 + LA_INDEX),
-                              pic->store ? NULL : lu_cache_load_ptr(site + 1 + LA_DESCR) };
+                              prop != NULL ? prop : pic->store ? NULL : lu_cache_load_ptr(site + 1 + LA_DESCR) };
     int added = 0;
     PyMutex_Lock(&_PyRuntime.pic_lock);
     n = pic->n;

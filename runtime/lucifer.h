@@ -1738,6 +1738,8 @@ PyObject *lu_bind_method(PyObject *descr, PyObject *obj);
 /* A property's getter, or a kernel getset's (borrowed, read once; NULL or None
    for none, and NULL for another getset). */
 PyObject *lu_property_fget(PyObject *prop);
+/* An exact property's setter (borrowed), or NULL. */
+PyObject *lu_property_fset(PyObject *prop);
 /* Where a classmethod's and a staticmethod's callable is (compiled code reads it). */
 extern const Py_ssize_t lu_classmethod_callable_offset;
 /* The Python or kernel function a class's __new__ entry runs, called with the class first: 1 with *func, else 0. */
