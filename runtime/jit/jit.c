@@ -137,7 +137,7 @@ struct lu_prof {
     int n;                      /* how many: release-stored after the type */
     uint8_t value_kind;         /* lu_prof_value_kind, or zero for types of operands */
     uint8_t poly;               /* it had more than those: nothing to rely on */
-    uint8_t dropped;            /* not relied on: a guard on its one type failed as a site's does (fails_enough) */
+    uint8_t dropped;            /* not relied on: a guard on its one type failed as a site's does (kills_cost) */
     uint64_t fails;             /* what that guard's exits lost (exit_cost) */
     unsigned long at;           /* its root's learned count when it last learned: a unit built before then is
                                    stale here */
@@ -679,12 +679,17 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned, struct l
 static void kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *at, int pc, double paid,
                  double cost);
 
-/* Whether exits of a guard in a unit of root's that lost `lost` have cost
-   what building it again without the guard will. */
-static int
-fails_enough(uint64_t lost, struct lu_jit_code *root)
+/* What a purchase that kills every live unit of root costs: the builds it
+   causes, each at least the unit it replaces (enough), so never below any
+   one of them. With none live it shapes root's next build, about its last. */
+static double
+kills_cost(struct lu_jit_code *root)
 {
-    return lost >= build_cost(__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED));
+    double sum = 0;
+    for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
+        sum += __atomic_load_n(&u->dead, __ATOMIC_RELAXED) ? 0 : (double)u->enough;
+    }
+    return sum > 0 ? sum : build_cost(__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED));
 }
 
 /* d's unit is built again, at once, with what its root jc learned since. */
@@ -720,8 +725,8 @@ prof_exit(struct lu_deopt *d)
     int now = 0;
     const char *what = "type";
     uint64_t cost = exit_cost(d);
-    double paid = (double)(p->fails += cost);
-    if (quiet(d->unit, cost, build_cost(__atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED))) && fails_enough(p->fails, jc)) {
+    double paid = (double)(p->fails += cost), price = kills_cost(jc);
+    if (quiet(d->unit, cost, (uint64_t)price) && paid >= price) {
         if (!p->poly && !p->dropped) {
             p->dropped = now = 1;
         }
@@ -739,8 +744,7 @@ prof_exit(struct lu_deopt *d)
     }
     const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
     for (struct lu_unit *u = now ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
-        kill(jc, u, what[0] == 't' ? "learned-type-fails" : "learned-kind-fails", in->code, in->pc, paid,
-             build_cost(__atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED)));
+        kill(jc, u, what[0] == 't' ? "learned-type-fails" : "learned-kind-fails", in->code, in->pc, paid, price);
     }
 }
 
@@ -1304,8 +1308,8 @@ kill(struct lu_jit_code *jc, struct lu_unit *u, const char *why, PyCodeObject *a
         if (cost > 0) {
             snprintf(ledger, sizeof ledger, " paid %.0f cost %.0f", paid, cost);
         }
-        event("kill %s@%d entries %lu leaves %lu level %d%s: %s", qualname(u->code), u->entry_pc, u->entries,
-              u->leaves, jc->level, ledger, cause);
+        event("kill %s@%d entries %lu leaves %lu level %d ins %d%s: %s", qualname(u->code), u->entry_pc, u->entries,
+              u->leaves, jc->level, u->nins, ledger, cause);
         free(jc->cause);
         jc->cause = strdup(cause);
     }
@@ -1942,8 +1946,7 @@ hot_exit(struct lu_deopt *d)
     unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
     unsigned long loop = turns ? entries / 2 : LOOP_CALLS * entries;
     struct lu_jit_code *jc = state_of(u->code);
-    int built = __atomic_load_n(&jc->built_ins, __ATOMIC_RELAXED);
-    double worth = build_cost(built);
+    double worth = (double)u->enough, grow = build_cost(2 * u->nins);     /* the builds they cause: u's */
     PyMutex_Lock(&jc->prof_lock);
     double most = 0, total = 0, *cost = malloc(sizeof(double) * (size_t)u->nouts);
     for (int i = 0; i < u->nouts; i++) {
@@ -1965,7 +1968,7 @@ hot_exit(struct lu_deopt *d)
         }
     }
     const char *why = jc->nhot > was ? "hot-site"
-        : u->refused && jc->grown[u->entry_pc] < MAX_GROWN && total >= build_cost(2 * built) ? "grown" : NULL;
+        : u->refused && jc->grown[u->entry_pc] < MAX_GROWN && total >= grow ? "grown" : NULL;
     free(cost);
     for (int i = 0; why == NULL && i < u->nouts; i++) {
         struct lu_out *o = &u->outs[i];
@@ -1987,7 +1990,7 @@ hot_exit(struct lu_deopt *d)
     if (why[0] == 'g') {
         __atomic_store_n(&jc->grown[u->entry_pc], jc->grown[u->entry_pc] + 1, __ATOMIC_RELAXED);
     }
-    kill(jc, u, why, in->code, in->pc, why[0] == 'g' ? total : most, why[0] == 'g' ? build_cost(2 * built) : worth);
+    kill(jc, u, why, in->code, in->pc, why[0] == 'g' ? total : most, why[0] == 'g' ? grow : worth);
     __atomic_store_n(&jc->wait[u->entry_pc], 0, __ATOMIC_RELAXED);    /* not for its faults: built again at once */
 }
 
@@ -2124,7 +2127,8 @@ lu_jit_note_exit(struct lu_deopt *d)
     uint64_t n = __atomic_add_fetch(&jc->fails[site_pc], exit_cost(d), __ATOMIC_RELAXED);
     PyCodeObject *code = lu_deopt_frame(d, 0)->code;
     struct lu_jit_code *root = state_for(code);
-    if (fails_enough(n, root) || (d->reason == EXIT_GUARD && marked_since(jc, site_pc, d))) {
+    double price = kills_cost(root);
+    if (n >= price || (d->reason == EXIT_GUARD && marked_since(jc, site_pc, d))) {
         int again;
         if (caught >= 0) {
             /* A kernel handler keeps taking what a call raises: the unit is
@@ -2175,8 +2179,7 @@ lu_jit_note_exit(struct lu_deopt *d)
         const char *why = whys[again != 0][caught >= 0 ? 0 : out ? 1 : d->reason != EXIT_GUARD ? 2 : d->borrow ? 3 : 4];
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             /* An old unit's death buys nothing: the mark was bought. */
-            kill(root, u, why, site, site_pc, again ? 0 : (double)n,
-                 again ? 0 : build_cost(__atomic_load_n(&root->built_ins, __ATOMIC_RELAXED)));
+            kill(root, u, why, site, site_pc, again ? 0 : (double)n, again ? 0 : price);
         }
     }
 }
