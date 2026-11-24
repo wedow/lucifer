@@ -2067,10 +2067,11 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
     PyObject *fn = Py_IS_TYPE(callable, &PyMethod_Type) && self == NULL ? ((PyMethodObject *)callable)->im_func
         : callable;
     PyFunctionObject *f = (PyFunctionObject *)fn;
-    /* What only a collection frees can be named; any other function by
-       what every function of its code shares; a builtin method bound to
-       its self by its kernel function; any other callable not. */
-    int named = _Py_IsImmortal(fn) || lu_has_deferred_refcount(fn);
+    /* What only a collection frees can be named, except a builtin function,
+       which the compiler never speculates on (speculate_callee); any other
+       function by what every function of its code shares; a builtin method
+       bound to its self by its kernel function; any other callable not. */
+    int named = !PyCFunction_Check(fn) && (_Py_IsImmortal(fn) || lu_has_deferred_refcount(fn));
     PyObject *bself = NULL;
     PyObject *kfn = !named && self == NULL && PyCFunction_Check(fn) ? lu_kernel_function_of(fn, &bself) : NULL;
     int cmeth = kfn != NULL && bself != NULL && !PyModule_Check(bself) && PyFunction_Check(kfn)
