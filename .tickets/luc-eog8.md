@@ -1,6 +1,6 @@
 ---
 id: luc-eog8
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-11-22T22:46:34Z
