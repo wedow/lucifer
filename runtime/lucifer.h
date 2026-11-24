@@ -1214,6 +1214,13 @@ extern LU_EXPORT union lu_runtime {
     unsigned char oracle_size[LU_RUNTIME_SIZE];
 } _PyRuntime;
 
+/* The cached int for value, -LU_NSMALLNEGINTS <= value < LU_NSMALLPOSINTS. */
+static inline PyObject *
+lu_small_int(int value)
+{
+    return (PyObject *)&_PyRuntime.singletons.small_ints[LU_NSMALLNEGINTS + value];
+}
+
 /* Serial: no task but the first has been made, so one task alone runs
    Python, and object locks are left out (compiled stores, runtime/jit/facts.c;
    critical sections, runtime/thread/critical_section.c). Making the second
@@ -1454,7 +1461,6 @@ void lu_module_init(void);
 void lu_exc_init(void);
 void lu_gen_init(void);
 void lu_frame_init(void);
-PyObject *lu_small_int(int value);
 PyLongObject *lu_long_alloc(Py_ssize_t ndigits);
 PyObject *lu_long_from_digits(int negative, Py_ssize_t ndigits, const digit *digits);
 PyObject *lu_long_from_bytes(const unsigned char *s, Py_ssize_t n, int little, int is_signed);

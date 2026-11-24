@@ -118,12 +118,7 @@ lu_long_alloc(Py_ssize_t ndigits)
     return v;
 }
 
-PyObject *
-lu_small_int(int value)
-{
-    return (PyObject *)&_PyRuntime.singletons.small_ints[LU_NSMALLNEGINTS + value];
-}
-
+/* Built in place: a value of up to three digits needs no scratch array. */
 PyObject *
 PyLong_FromLongLong(long long value)
 {
@@ -132,12 +127,16 @@ PyLong_FromLongLong(long long value)
     }
     unsigned long long abs = value < 0 ? 0ULL - (unsigned long long)value
                                        : (unsigned long long)value;
-    digit digits[3];
-    Py_ssize_t n = 0;
-    for (; abs != 0; abs >>= PyLong_SHIFT) {
-        digits[n++] = (digit)(abs & PyLong_MASK);
+    Py_ssize_t n = abs >> PyLong_SHIFT == 0 ? 1 : abs >> (2 * PyLong_SHIFT) == 0 ? 2 : 3;
+    PyLongObject *v = lu_long_alloc(n);
+    if (v == NULL) {
+        return NULL;
     }
-    return lu_long_from_digits(value < 0, n, digits);
+    for (Py_ssize_t i = 0; i < n; i++, abs >>= PyLong_SHIFT) {
+        v->long_value.ob_digit[i] = (digit)(abs & PyLong_MASK);
+    }
+    set_tag(v, value < 0 ? -1 : 1, n);
+    return (PyObject *)v;
 }
 
 PyObject *

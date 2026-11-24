@@ -467,13 +467,13 @@ long_neg_of(big a, int neg)
     return finish(neg, z, a.n);
 }
 
-static int
+static inline int
 both_compact(PyObject *a, PyObject *b)
 {
     return _PyLong_IsCompact((PyLongObject *)a) && _PyLong_IsCompact((PyLongObject *)b);
 }
 
-static stwodigits
+static inline stwodigits
 compact(PyObject *a)
 {
     return _PyLong_CompactValue((PyLongObject *)a);
@@ -637,6 +637,10 @@ long_abs(PyObject *a)
 int
 lu_long_compare(PyObject *a, PyObject *b)
 {
+    if (both_compact(a, b)) {
+        stwodigits d = compact(a) - compact(b);
+        return (d > 0) - (d < 0);
+    }
     big x = view(a), y = view(b);
     if (x.neg != y.neg) {
         return x.neg ? -1 : 1;
