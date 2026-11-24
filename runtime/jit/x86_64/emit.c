@@ -2934,6 +2934,22 @@ alloc_count_before(struct asm_ *a, lu_v v)
    and floats are none of the collector's: nothing counts them. Anything
    else is C's, which keeps the registers: a wider int, a page with no
    block at hand, or a hook that sees allocations or births. */
+/* The cached int whose value is in r, into RCX (RAX clobbered), or to
+   `other` for a value the cache does not hold. */
+static void
+small_int_box(struct asm_ *a, int r, int other)
+{
+    lea(a, RCX, r, LU_NSMALLNEGINTS);
+    alu_ri(a, ALU_CMP, RCX, LU_NSMALLNEGINTS + LU_NSMALLPOSINTS);
+    jcc(a, CC_AE, other);                       /* unsigned: below the cache too */
+    rex(a, 1, RCX, 0, RCX);
+    b1(a, 0x69);
+    modrm_rr(a, RCX, RCX);
+    b4(a, (int32_t)sizeof(PyLongObject));      /* imul rcx, rcx, size */
+    mov_ri(a, RAX, (int64_t)(intptr_t)&_PyRuntime.singletons.small_ints[0]);
+    alu_rr(a, ALU_ADD, RCX, RAX);
+}
+
 static void
 emit_box(struct asm_ *a, struct lu_ins *in)
 {
@@ -2943,15 +2959,7 @@ emit_box(struct asm_ *a, struct lu_ins *in)
     if (is_int) {
         int fresh = new_label(a);
         r = gpr_of(a, in->a, RDX);
-        lea(a, RCX, r, LU_NSMALLNEGINTS);
-        alu_ri(a, ALU_CMP, RCX, LU_NSMALLNEGINTS + LU_NSMALLPOSINTS);
-        jcc(a, CC_AE, fresh);                   /* unsigned: below the cache too */
-        rex(a, 1, RCX, 0, RCX);
-        b1(a, 0x69);
-        modrm_rr(a, RCX, RCX);
-        b4(a, (int32_t)sizeof(PyLongObject));  /* imul rcx, rcx, size */
-        mov_ri(a, RAX, (int64_t)(intptr_t)&_PyRuntime.singletons.small_ints[0]);
-        alu_rr(a, ALU_ADD, RCX, RAX);
+        small_int_box(a, r, fresh);
         jmp(a, done);
         bind(a, fresh);
         alloc_count(a, in);
@@ -3405,7 +3413,7 @@ raw_into(struct asm_ *a, struct lu_ins *in, lu_v v, int r, int is_int)
 
    Under a name whose first number is the load's (lucifer.h), the word
    decides, whatever the name holds now: the marker, or an exact float
-   (an exact int of one digit), has its value in the raw word; nothing
+   (an exact int of up to two digits), has its value in the raw word; nothing
    leaves (absent); any other object leaves, at a guard whose failures
    the site counts; a wider int is read from the object as below. The
    object's type and tag are read without a reference: an object freed
@@ -3443,8 +3451,8 @@ inline_load_raw(struct asm_ *a, struct lu_ins *in, lu_v v)
         cmp_rm(a, RCX, RAX, offsetof(PyObject, ob_type));
         jcc(a, CC_NE, fail);                    /* another kind */
         if (is_int) {
-            cmp_mi(a, 1, RAX, offsetof(PyLongObject, long_value.lv_tag), 2 << _PyLong_NON_SIZE_BITS);
-            jcc(a, CC_AE, wide);
+            cmp_mi(a, 1, RAX, offsetof(PyLongObject, long_value.lv_tag), 3 << _PyLong_NON_SIZE_BITS);
+            jcc(a, CC_AE, wide);                /* two digits fit int64, so their raw word was written too */
         }
         bind(a, take);
         raw_into(a, in, v, r, is_int);
@@ -4773,8 +4781,17 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         }
         cold_begin(a);
         bind(a, unboxed);
-        /* An unboxed value: its box, made once in C and kept by the owner;
-           making it may wait for the owner's lock. */
+        /* An unboxed value: a cached int is its own box (attrs.c stores one
+           as the marker); any other's box is made once in C and kept by the
+           owner, and making it may wait for the owner's lock. */
+        int made = new_label(a);
+        alu_ri(a, ALU_CMP, RAX, (int32_t)(intptr_t)LU_UNBOXED_INT);
+        jcc(a, CC_NE, made);
+        load(a, RAX, r, (int32_t)in->imm + 8);
+        small_int_box(a, RAX, made);
+        mov_rr(a, RAX, RCX);
+        jmp(a, done);
+        bind(a, made);
         parked_begin(a, in);
         if (r != RDI) {
             mov_rr(a, RDI, r);

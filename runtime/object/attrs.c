@@ -392,6 +392,12 @@ try_word_ref(PyObject **word, PyObject **seen)
 {
     PyObject *w = __atomic_load_n(word, __ATOMIC_ACQUIRE);
     *seen = w;
+    if (w == LU_UNBOXED_INT) {
+        /* A cached int is its own box, immortal: no lock, nothing installed.
+           The raw word is the marker's or a later int store's. */
+        int64_t n = (int64_t)__atomic_load_n(lu_inline_raw(word), __ATOMIC_ACQUIRE);
+        return n >= -LU_NSMALLNEGINTS && n < LU_NSMALLPOSINTS ? lu_small_int((int)n) : NULL;
+    }
     return w != NULL && !lu_unboxed(w) && lu_try_incref_compare(word, w) ? w : NULL;
 }
 
@@ -673,6 +679,10 @@ take_kind(PyTypeObject *tp, Py_ssize_t i, PyObject **v, uint64_t bits, uint64_t 
     int k = value_kind(*v, raw);
     int first = lu_field_first(join_kind(shared_names(tp), i, k));
     if (k == first) {
+        if (k == LU_FIELD_INT && *v != LU_UNBOXED_INT && (int64_t)*raw >= -LU_NSMALLNEGINTS
+            && (int64_t)*raw < LU_NSMALLPOSINTS && *v == lu_small_int((int)(int64_t)*raw)) {
+            *v = LU_UNBOXED_INT;        /* a cached int: every box made again from the raw word is this one */
+        }
         return first != LU_FIELD_OBJECT;
     }
     if (lu_unboxed(*v)) {
@@ -854,11 +864,11 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
         if (i < 0 && v != NULL) {
             i = add_name(tp, name);
         }
-        PyObject *old = NULL, *box = NULL;
+        PyObject *old = NULL, *box = NULL, *word = v;     /* v stays the value: the dict's way below takes it */
         int done = 0, err = 0, with_raw = 0;
         uint64_t raw = 0;
         if (v != NULL && i >= 0) {
-            with_raw = take_kind(tp, i, &v, 0, &raw, &box);     /* an object: no box */
+            with_raw = take_kind(tp, i, &word, 0, &raw, &box);  /* an object: no box, maybe a cached int's marker */
         }
         Py_BEGIN_CRITICAL_SECTION(obj);
         if (v == NULL && lu_inline_live(obj)) {
@@ -872,7 +882,7 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
                 old = NULL;
             }
         }
-        else if (v != NULL && i >= 0 && store_locked(obj, i, v, raw, with_raw, &old)) {
+        else if (v != NULL && i >= 0 && store_locked(obj, i, word, raw, with_raw, &old)) {
             done = 1;
         }
         else if (lu_inline_live(obj)) {
