@@ -452,6 +452,54 @@ for cls in (SlotsPlain, SlotsNode):
     print('slots after', cls.__name__, hot(slot_get, obj), hot(store_slot, obj))
 
 
+# 13. __setattr__ and __delattr__ overridden one at a time: each runs for its
+#     own operation only, on a __slots__ member and a dict attribute;
+#     defined with the class and assigned later.
+calls = []
+
+
+def note_delattr(self, name):
+    calls.append(('del', name))
+
+
+def note_setattr(self, name, value):
+    calls.append(('set', name))
+
+
+def delete_slot(o):
+    o.s = 1
+    del o.s
+    return hasattr(o, 's')
+
+
+class DelOnly:
+    __slots__ = ('s', '__dict__')
+    __delattr__ = note_delattr
+
+
+class SetOnly:
+    __slots__ = ('s', '__dict__')
+    __setattr__ = note_setattr
+
+
+class Later:
+    __slots__ = ('s', '__dict__')
+
+
+for cls in (DelOnly, SetOnly, Later):
+    calls.clear()
+    print('one hook', cls.__name__, hot(delete_slot, cls()), hot(delete_c, cls()), len(calls), sorted(set(calls)))
+Later.__delattr__ = note_delattr
+calls.clear()
+print('one hook later del', hot(delete_slot, Later()), hot(delete_c, Later()), len(calls), sorted(set(calls)))
+del Later.__delattr__
+Later.__setattr__ = note_setattr
+calls.clear()
+print('one hook later set', hot(delete_slot, Later()), hot(delete_c, Later()), len(calls), sorted(set(calls)))
+del Later.__setattr__
+print('one hook after', hot(delete_slot, Later()), hot(delete_c, Later()))
+
+
 # 8. A class's metaclass changed under a hot class-attribute load.
 class MetaA(type):
     pass
@@ -495,9 +543,6 @@ print('super bypasses', hot(Child.ask, Child()), hot(lambda o: o.who(), Child())
 
 
 # 14. A descriptor with __set__ and no __delete__, and the reverse.
-calls = []
-
-
 class SetOnlyDescr:
     def __get__(self, obj, owner=None):
         return 'got'
