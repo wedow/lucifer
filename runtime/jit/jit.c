@@ -146,7 +146,7 @@ enroll(struct lu_jit_code *jc)
     if (jc->pprev == NULL) {
         jc->next = states.head;
         if (states.head != NULL) {
-            states.head->pprev = &jc->next;
+            __atomic_store_n(&states.head->pprev, &jc->next, __ATOMIC_RELEASE);
         }
         states.head = jc;
         __atomic_store_n(&jc->pprev, &states.head, __ATOMIC_RELEASE);
@@ -687,7 +687,7 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned, struct l
     }
     if (!known && p->n < LU_OPCLASS_WAYS
         && (!kind || (kind == LU_PROF_CLASS ? PyType_Check(o) : _Py_IsImmortal(o)))) {
-        if (!p->held && lu_is_gc(t) && !_Py_IsImmortal(t) && !(t->ob_gc_bits & LU_GC_FROZEN)) {
+        if (!p->held && lu_is_gc(t) && !_Py_IsImmortal(t)) {
             struct lu_prof **held = realloc(jc->held, sizeof(*held) * (size_t)(jc->nheld + 1));
             if (held != NULL) {
                 held[jc->nheld++] = p;
@@ -936,7 +936,7 @@ static struct {
 
 /* A reference a collection took from a profile or a callee table, with the
    world stopped: released once it runs again (lu_jit_reclaim_free). */
-static void
+static int
 forgot_add(PyObject *o)
 {
     pthread_mutex_lock(&dying.lock);
@@ -945,13 +945,14 @@ forgot_add(PyObject *o)
         PyObject **v = realloc(dying.forgot, sizeof(PyObject *) * (size_t)cap);
         if (v == NULL) {
             pthread_mutex_unlock(&dying.lock);
-            return;             /* out of memory: the reference stays, o lives on */
+            return 0;           /* out of memory: the holder keeps its reference */
         }
         dying.forgot = v;
         dying.capforgot = cap;
     }
     dying.forgot[dying.nforgot++] = o;
     pthread_mutex_unlock(&dying.lock);
+    return 1;
 }
 
 /* A collection left the site's table k entries. */
@@ -1093,10 +1094,11 @@ hold(PyInterpreterState *interp, int on)
     }
 }
 
-/* What a collection does to the code's units and profiles (jit.h): with
-   keeping, those that cannot let go keep what they hold; then the others
-   let go of the garbage. Keeping first, so that nothing another keeps
-   alive kills a unit. */
+/* What a collection does to the code's units, profiles and callee tables
+   (jit.h): with keeping, those that cannot let go keep what they hold;
+   then the others let go of the garbage. The keeping pass runs over every
+   code first, so that no unit dies for an object another one then keeps
+   alive. What cannot be let go for want of memory is kept the same way. */
 static void
 weaken(struct lu_jit_code *jc, int keeping, int (*unreachable)(PyObject *), void (*keep)(PyObject *))
 {
@@ -1105,14 +1107,9 @@ weaken(struct lu_jit_code *jc, int keeping, int (*unreachable)(PyObject *), void
         struct lu_prof *p = jc->held[j];
         int k = 0;
         for (int i = 0; i < p->n; i++) {
-            if (keeping || !unreachable(p->met[i])) {
-                if (keeping) {
-                    keep(p->met[i]);
-                }
+            if (keeping || !unreachable(p->met[i]) || !forgot_add(p->met[i])) {
+                keep(p->met[i]);
                 p->met[k++] = p->met[i];
-            }
-            else {
-                forgot_add(p->met[i]);
             }
         }
         __atomic_store_n(&p->n, k, __ATOMIC_RELEASE);
@@ -1122,10 +1119,11 @@ weaken(struct lu_jit_code *jc, int keeping, int (*unreachable)(PyObject *), void
         struct lu_callees *t = jc->callees[pc];
         int k = 0;
         for (int i = 0; t != NULL && i < t->n; i++) {
-            if ((t->e[i].kind & LU_CALLEE_CODE) && unreachable(t->e[i].globals)) {
-                forgot_add(t->e[i].globals);
-            }
-            else {
+            PyObject *g = t->e[i].kind & LU_CALLEE_CODE ? t->e[i].globals : NULL;
+            if (g == NULL || !unreachable(g) || !forgot_add(g)) {
+                if (g != NULL) {
+                    keep(g);
+                }
                 t->e[k++] = t->e[i];
             }
         }
@@ -1432,7 +1430,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     u->nconsts = f.nconsts;
     for (int i = 0; i < u->nconsts; i++) {
         PyObject *o = u->consts[i];
-        if (o != NULL && lu_is_gc(o) && !_Py_IsImmortal(o) && !(o->ob_gc_bits & LU_GC_FROZEN)) {
+        if (o != NULL && lu_is_gc(o) && !_Py_IsImmortal(o)) {
             u->consts[i] = u->consts[u->ngc];
             u->consts[u->ngc++] = o;
         }
@@ -2690,7 +2688,7 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
                 t->e[k++] = t->e[i];
             }
             else if (t->e[i].kind & LU_CALLEE_CODE) {
-                forgot_add(t->e[i].globals);
+                forgot_add(t->e[i].globals);     /* its code is dead: out of memory, the globals leak */
             }
         }
         if (t != NULL && k < t->n) {
@@ -2771,7 +2769,7 @@ lu_jit_code_free(PyCodeObject *code)
     if (jc->pprev != NULL) {
         *jc->pprev = jc->next;
         if (jc->next != NULL) {
-            jc->next->pprev = jc->pprev;
+            __atomic_store_n(&jc->next->pprev, jc->pprev, __ATOMIC_RELEASE);
         }
     }
     pthread_mutex_unlock(&states.lock);

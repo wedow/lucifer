@@ -96,6 +96,9 @@ lu_ev_guard_type(struct ctx *c, lu_v r, PyTypeObject *t)
         return;
     }
     lu_v v = lu_ev_val(c, r);
+    if (!_Py_IsImmortal((PyObject *)t)) {
+        lu_ev_konst(c, (PyObject *)t);  /* the guard names it: the unit lives no longer than it */
+    }
     lu_ev_guard(c, OP_GUARD_TYPE, v, (int64_t)(intptr_t)t);
     lu_ev_set_type(c, v, t);
 }

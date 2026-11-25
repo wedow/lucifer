@@ -193,8 +193,7 @@ struct lu_unit {
     int32_t *owned;
     PyObject **consts;
     int nconsts;
-    int ngc;                    /* the first ngc are mortal GC objects not frozen (the image's are), all the
-                                   collector reads (jit.c weaken) */
+    int ngc;                    /* the first ngc are mortal GC objects, all the collector reads (jit.c weaken) */
     PyObject **mine;            /* of those, the ones the build made (ssa.h lu_ir_mine) */
     int nmine;
     long *stress_counter;       /* -X lucifer_stress=deopt:N: guards fail when it reaches 0 */
