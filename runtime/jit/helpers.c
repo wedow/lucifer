@@ -897,14 +897,6 @@ h_str_char(int64_t c)
     return PyUnicode_FromKindAndData(PyUnicode_4BYTE_KIND, &u, 1);
 }
 
-/* The kernel's seqiter_next: MISSING at the end. */
-static PyObject *
-h_seqiter_step(PyObject *it)
-{
-    PyObject *v = lu_seqiter_next(it);
-    return v != NULL ? v : Py_NewRef(LU_MISSING);
-}
-
 /* iter(range(start, stop, step)) for C longs, as range_iter computes the
    length; NULL when the values do not fit (the interpreter makes it). */
 static PyObject *
@@ -1583,27 +1575,6 @@ h_binary_slice(PyObject *container, PyObject *start, PyObject *stop, int64_t gen
     return r;
 }
 
-/* BINARY_SLICE by machine-int bounds (luc-14n0): mode bit 0 or 1, the
-   start or the stop is None; bit 2, a container the native slice does not
-   take slices as h_binary_slice slices it, its bounds boxed. */
-static PyObject *
-h_binary_slice_raw(PyObject *container, int64_t start, int64_t stop, int64_t mode)
-{
-    PyObject *r = lu_slice_native_raw(container, start, stop, (int)(mode & 3));
-    if (r != NULL || PyErr_Occurred()) {
-        return r;
-    }
-    if (!(mode & 4)) {
-        return LU_JIT_DECLINED;
-    }
-    PyObject *so = mode & 1 ? Py_NewRef(Py_None) : PyLong_FromLongLong(start);
-    PyObject *eo = mode & 2 ? Py_NewRef(Py_None) : PyLong_FromLongLong(stop);
-    r = so != NULL && eo != NULL ? h_binary_slice(container, so, eo, 1) : NULL;
-    Py_XDECREF(so);
-    Py_XDECREF(eo);
-    return r;
-}
-
 /* STORE_SLICE: container[start:stop] = v. */
 static int
 h_store_slice(PyObject *v, PyObject *container, PyObject *start, PyObject *stop)
@@ -1759,11 +1730,6 @@ h_unpack(PyObject *seq, int64_t n)
 const struct lu_helper lu_helpers[H_COUNT] = {
     [H_box_int] = { (void *)lu_jit_box_int, "box_int", REP_OBJ, 0, 1 },
     [H_box_float] = { (void *)lu_jit_box_float, "box_float", REP_OBJ, 0, 1 },
-    [H_decref] = { (void *)lu_jit_decref, "decref", REP_NONE, 0, 1 },
-    [H_truth] = { (void *)lu_jit_truth, "truth", REP_BIT, FX_RAISE | FX_PY, 1 },
-    [H_list_item] = { (void *)lu_jit_list_item, "list_item", REP_OBJ, FX_SEEN, 2 },
-    [H_list_store] = { (void *)lu_jit_list_store, "list_store", REP_BIT, FX_SEEN, 3 },
-    [H_attr_load] = { (void *)lu_jit_attr_load, "attr_load", REP_OBJ, 0, 4 },
     [H_attr_store] = { (void *)h_attr_store, "attr_store", REP_BIT, FX_SEEN, 4 },
     [H_slot_store] = { (void *)h_slot_store, "slot_store", REP_NONE, FX_SEEN, 3 },
     [H_dict_lacks] = { (void *)h_dict_lacks, "dict_lacks", REP_BIT, 0, 2 },
@@ -1803,10 +1769,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, FX_RAISE | FX_PY, 1 },
     [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, FX_SEEN, 1 },
-    [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, FX_SEEN, 1 },
-    [H_field_get] = { (void *)lu_field_get, "field_get", REP_OBJ, FX_SEEN, 2 },
     [H_str_char] = { (void *)h_str_char, "str_char", REP_OBJ, FX_RAISE, 1 },
-    [H_field_set] = { (void *)lu_field_set, "field_set", REP_NONE, FX_SEEN, 3 },
     [H_range_iter] = { (void *)h_range_iter, "range_iter", REP_OBJ, 0, 3 },
     [H_listiter_new] = { (void *)h_seqiter_new, "listiter_new", REP_OBJ, 0, 2 },
     [H_tupleiter_new] = { (void *)h_seqiter_new, "tupleiter_new", REP_OBJ, 0, 2 },
@@ -1834,17 +1797,14 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_build_map] = { (void *)h_build_map, "build_map", REP_OBJ, FX_RAISE | FX_PY, 0 },
     [H_set_add] = { (void *)h_set_add, "set_add", REP_BIT, FX_RAISE | FX_PY, 2 },
     [H_list_to_tuple] = { (void *)h_list_to_tuple, "list_to_tuple", REP_OBJ, FX_RAISE | FX_SEEN | FX_DECLINES, 2 },
-    [H_unpack_exact] = { (void *)h_unpack_exact, "unpack_exact", REP_OBJ, FX_RAISE | FX_SEEN | FX_DECLINES, 2 },
     [H_send] = { (void *)h_send, "send", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 2 },
     [H_gen_done] = { (void *)h_gen_done, "gen_done", REP_BIT, 0, 1 },
     [H_get_awaitable] = { (void *)h_get_awaitable, "get_awaitable", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_get_yield_from_iter] = { (void *)h_get_yield_from_iter, "get_yield_from_iter", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_get_aiter] = { (void *)h_get_aiter, "get_aiter", REP_OBJ, FX_RAISE | FX_PY, 1 },
     [H_get_anext] = { (void *)h_get_anext, "get_anext", REP_OBJ, FX_RAISE | FX_PY, 1 },
-    [H_async_gen_wrap] = { (void *)lu_async_gen_wrap, "async_gen_wrap", REP_OBJ, FX_RAISE, 1 },
     [H_get_iter_seq] = { (void *)lu_get_iter_exact, "get_iter_seq", REP_OBJ, FX_RAISE, 1 },
     [H_binary_slice] = { (void *)h_binary_slice, "binary_slice", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 4 },
-    [H_binary_slice_raw] = { (void *)h_binary_slice_raw, "binary_slice_raw", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 4 },
     [H_store_slice] = { (void *)h_store_slice, "store_slice", REP_BIT, FX_RAISE | FX_PY, 4 },
     [H_call_kw] = { (void *)h_call_kw, "call_kw", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
     [H_call_bound] = { (void *)h_call_bound, "call_bound", REP_OBJ, FX_RAISE | FX_PY | FX_DECLINES, 0 },
@@ -1858,7 +1818,6 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_exc_match] = { (void *)h_exc_match, "exc_match", REP_OBJ, FX_RAISE, 2 },
     [H_raise] = { (void *)h_raise, "raise", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_seq_concat] = { (void *)lu_seq_concat, "seq_concat", REP_OBJ, FX_RAISE, 2 },
-    [H_float_pow] = { (void *)lu_float_pow, "float_pow", REP_OBJ, FX_RAISE, 2 },
     [H_bind_method] = { (void *)lu_bind_method, "bind_method", REP_OBJ, FX_RAISE, 2 },
     [H_bytes_concat] = { (void *)lu_bytes_concat, "bytes_concat", REP_OBJ, FX_RAISE, 2 },
     [H_reraise] = { (void *)h_reraise, "reraise", REP_OBJ, FX_RAISE, 1 },

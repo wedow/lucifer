@@ -368,11 +368,6 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
 #define LU_HELPERS(X) \
     X(box_int) \
     X(box_float) \
-    X(decref) \
-    X(truth) \
-    X(list_item) \
-    X(list_store) \
-    X(attr_load) \
     X(attr_store) \
     X(slot_store) \
     X(dict_lacks) X(profile) X(pic_same) X(fields_new) X(exc_new) X(exc_push) X(exc_fetch) X(exc_here) X(exc_left) X(exc_pop) X(gen_new) X(gen_give) X(gen_over) \
@@ -410,10 +405,7 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(get_iter) \
     X(for_iter) \
     X(seqiter_next) \
-    X(seqiter_step) \
-    X(field_get) \
     X(str_char) \
-    X(field_set) \
     X(range_iter) \
     X(listiter_new) \
     X(tupleiter_new) \
@@ -431,8 +423,6 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(build_map) \
     X(set_add) \
     X(list_to_tuple) \
-    X(unpack_exact) \
-    X(async_gen_wrap) \
     X(send) \
     X(gen_done) \
     X(get_awaitable) \
@@ -441,7 +431,6 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(get_anext) \
     X(get_iter_seq) \
     X(binary_slice) \
-    X(binary_slice_raw) \
     X(store_slice) \
     X(call_kw) \
     X(call_bound) \
@@ -456,7 +445,6 @@ int lu_jit_deopt(PyThreadState *ts, struct lu_frame *frame, struct lu_deopt *d,
     X(raise) \
     X(bytes_concat) \
     X(bind_method) \
-    X(float_pow) \
     X(seq_concat) \
     X(reraise) \
     X(load_special) \

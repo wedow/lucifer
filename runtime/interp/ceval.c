@@ -488,22 +488,12 @@ slice_take(PyObject *container, Py_ssize_t length, Py_ssize_t start, Py_ssize_t 
 /* A bytearray's slice, its bounds taken and its bytes copied under its lock;
    NULL without an error when the kernel must slice. */
 static PyObject *
-bytearray_slice(PyObject *ba, PyObject *start_o, PyObject *stop_o, PyObject *step_o, int raw, int64_t rstart,
-                int64_t rstop, int none)
+bytearray_slice(PyObject *ba, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
 {
     PyObject *r = NULL;
     Py_BEGIN_CRITICAL_SECTION(ba);
     Py_ssize_t length = PyByteArray_GET_SIZE(ba), start, step = 1, count;
-    int ok = 1;
-    if (raw) {
-        start = none & 1 ? 0 : slice_clamp(rstart, length, 0);
-        Py_ssize_t to = none & 2 ? length : slice_clamp(rstop, length, 0);
-        count = start < to ? to - start : 0;
-    }
-    else {
-        ok = slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count);
-    }
-    if (ok) {
+    if (slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count)) {
         r = bytes_take(PyByteArray_AS_STRING(ba), start, step, count, 1);
     }
     Py_END_CRITICAL_SECTION();
@@ -517,7 +507,7 @@ PyObject *
 lu_slice_native(PyObject *container, PyObject *start_o, PyObject *stop_o, PyObject *step_o)
 {
     if (PyByteArray_CheckExact(container)) {
-        return bytearray_slice(container, start_o, stop_o, step_o, 0, 0, 0, 0);
+        return bytearray_slice(container, start_o, stop_o, step_o);
     }
     Py_ssize_t length = native_length(container), start, step, count;
     if (length < 0 || !slice_unpack(start_o, stop_o, step_o, length, &start, &step, &count)
@@ -653,21 +643,6 @@ lu_setitem_slice_native(PyObject *container, PyObject *sub, PyObject *v)
     PySliceObject *s = (PySliceObject *)sub;
     return Py_IS_TYPE(sub, &PySlice_Type) && s->step == Py_None ? lu_store_slice_native(container, s->start, s->stop, v)
         : 1;
-}
-
-PyObject *
-lu_slice_native_raw(PyObject *container, int64_t start, int64_t stop, int none)
-{
-    if (PyByteArray_CheckExact(container)) {
-        return bytearray_slice(container, NULL, NULL, NULL, 1, start, stop, none);
-    }
-    Py_ssize_t length = native_length(container);
-    if (length < 0) {
-        return NULL;
-    }
-    Py_ssize_t from = none & 1 ? 0 : slice_clamp(start, length, 0);
-    Py_ssize_t to = none & 2 ? length : slice_clamp(stop, length, 0);
-    return slice_take(container, length, from, 1, from < to ? to - from : 0);
 }
 
 PyObject *

@@ -1869,9 +1869,6 @@ PyObject *lu_binary_foreign(PyObject *a, PyObject *b, int op);
    the kernel's load_special binds it: a new reference, or NULL (no error)
    for the kernel to look it up. */
 PyObject *lu_special_function(PyObject *owner, int which);
-/* float.__pow__ of a float and a float or int (either side), without a
-   modulus: the result, or NULL with the error (runs no Python). */
-PyObject *lu_float_pow(PyObject *a, PyObject *b);
 /* a + b for two exact lists or two exact tuples. */
 PyObject *lu_seq_concat(PyObject *a, PyObject *b);
 /* sub in s for two strs (no Python, no error). */
@@ -1880,10 +1877,6 @@ int lu_str_contains(PyObject *s, PyObject *sub);
 PyObject *lu_bytes_concat(PyObject *a, PyObject *b);
 /* Whether lu_binary_foreign takes the operator for operands of these types. */
 int lu_binary_is_foreign(PyTypeObject *ta, PyTypeObject *tb, int op);
-/* container[start:stop] for an exact list, tuple, str or bytes by machine-int
-   bounds, either None as `none` says (bit 0 the start, bit 1 the stop): a new
-   reference, or NULL without an error for another type. */
-PyObject *lu_slice_native_raw(PyObject *container, int64_t start, int64_t stop, int none);
 int lu_compare_native(PyObject *a, PyObject *b, int oparg);
 PyObject *lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ssize_t npos);
 /* PyObject_IsTrue: 1, 0 or -1 with an error set. */
