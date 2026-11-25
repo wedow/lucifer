@@ -193,6 +193,8 @@ struct lu_unit {
     int32_t *owned;
     PyObject **consts;
     int nconsts;
+    PyObject **mine;            /* of those, the ones the build made (ssa.h lu_ir_mine) */
+    int nmine;
     long *stress_counter;       /* -X lucifer_stress=deopt:N: guards fail when it reaches 0 */
     unsigned long entries;      /* up to a bound (jit.c) */
     unsigned long entered;      /* every entry, under -X lucifer_jit_stats */

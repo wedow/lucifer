@@ -394,6 +394,13 @@ lu_ir_const(struct lu_func *f, int block, PyObject *o)
 }
 
 void
+lu_ir_mine(struct lu_func *f, PyObject *o)
+{
+    f->mine = grow(f->mine, &f->capmine, f->nmine + 1, sizeof(PyObject *));
+    f->mine[f->nmine++] = Py_NewRef(o);
+}
+
+void
 lu_ir_free(struct lu_func *f)
 {
     for (int i = 0; i < f->nblocks; i++) {
@@ -414,6 +421,10 @@ lu_ir_free(struct lu_func *f)
         Py_XDECREF(f->consts[i]);
     }
     free(f->consts);
+    for (int i = 0; i < f->nmine; i++) {
+        Py_DECREF(f->mine[i]);
+    }
+    free(f->mine);
     for (int i = 0; i < f->nchunks; i++) {
         free(f->chunks[i]);
     }

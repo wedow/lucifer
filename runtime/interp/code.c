@@ -83,6 +83,7 @@ code_dealloc(PyObject *op)
     if (lu_resurrect_end(op) != 0) {
         return;
     }
+    lu_jit_code_free(co);       /* first: a collection walks its units until then */
     Py_XDECREF(co->co_consts);
     Py_XDECREF(co->co_names);
     Py_XDECREF(co->co_exceptiontable);
@@ -103,7 +104,6 @@ code_dealloc(PyObject *op)
         PyMem_Free(extra);
     }
     lu_monitoring_free(co);
-    lu_jit_code_free(co);
     lu_object_free(op);
 }
 

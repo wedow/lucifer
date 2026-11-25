@@ -92,6 +92,7 @@ function_of_code(struct ctx *c, lu_v callable, PyObject *code, PyObject *globals
         lu_ev_konst(c, same[i]);
     }
     lu_ev_konst(c, one);
+    lu_ir_mine(c->g->f, one);
     Py_DECREF(one);             /* the unit holds its constants */
     return one;
 }

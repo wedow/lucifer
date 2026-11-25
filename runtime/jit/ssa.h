@@ -385,6 +385,8 @@ struct lu_func {
     int stress;                 /* deopt:N is on: guards count */
     PyObject **consts;          /* strong references the unit keeps */
     int nconsts, capconsts;
+    PyObject **mine;            /* of those, the objects the build made itself (lu_ir_mine) */
+    int nmine, capmine;
     char *arena;                /* chunks for states and argument arrays */
     size_t arena_used, arena_cap;
     char **chunks;
@@ -434,6 +436,10 @@ int lu_ir_block(struct lu_func *f);
 lu_v lu_ir_emit(struct lu_func *f, int block, int op, int rep, lu_v a, lu_v b, lu_v c, int64_t imm);
 void lu_ir_edge(struct lu_func *f, int from, int to);
 lu_v lu_ir_const(struct lu_func *f, int block, PyObject *o);
+/* o, a constant of f, is the build's own: no other path reaches it, so the
+   collector holds the unit's other constants alone against what it frees
+   (runtime/jit/jit.c weaken). */
+void lu_ir_mine(struct lu_func *f, PyObject *o);
 void lu_ir_free(struct lu_func *f);
 /* The unit relies on dep between polls (runtime/jit/deps.c). */
 void lu_ir_dep(struct lu_func *f, struct lu_fdep *dep);
