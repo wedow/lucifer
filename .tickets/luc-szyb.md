@@ -799,7 +799,61 @@ Rows that gain: tomli_loads all values -9.6% (compile 2,748 -> 1,809M; best of t
 
 Reading: the site grain recovers the rows R6 named (tomli, genshi, richards, regex windows), and the losses are not a doubling's breadth (R8's abandon condition is not met). They are purchases that pay their own build but not the rebuilds the larger unit then incurs, on cold cli code and on deepcopy's short window. Check 6 (D) was not run: the bar is not met.
 
+## Stage 1q: quiet rule and riding (2026-11-25, not landable)
+
+On the coordinator's ruling, a separate change on stage 1 (lanes 2fa93b9b, change 468a61cc):
+- A `sites` purchase obeys the quiet rule unchanged: each look adds what the out-of-line calls paid since the last look to `quiet(u, paid, price)`; a purchase is made only when its value covers the whole build and the unit is quiet. While not quiet the sites are armed for the larger of the price's and the quiet's shortfall.
+- When a unit dies for a learned rebuild (learned-since-build, learned-type/kind-fails) or a mark, the sites whose value covers their marginal price at that build go into the entry's bought set and in line in that rebuild (`buy ... riding` events), at no rebuild of their own.
+- The look's valuation is shared by both paths (`look_at`, `look_buy`).
+
+Lanes: siteshared (tests/kernel/jit_site_shared.py: a hot out-of-line call while a place of the unit learns four classes in turn) FAIL on stage 1 (one rebuild for sites alone, after the learned rebuild) -> PASS on 1q (the call rides the first learned rebuild). sitepath was rewritten: on 1q the hot path's own unit buys leaf (riding) and the start then buys that callee with it, so the lane now checks every build that takes bought sites in (adds less than their own units plus half of leaf's), and that leaf goes in line on the hot path; base FAIL, stage 1 PASS (1,468 for 1,264; 348 for 514), 1q PASS (1,816 for 1,611). All other site and ledger lanes hold on 1q (sitefinal 109,952 -> 170,752; siteshape 97,488 -> 113,486; megaiter 132,103 -> 132,807).
+
+Gate (1q): focused kernel programs 76/76 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; tools/jitcheck 0 failing (toolsoff included, see below); tools/jitcost PASS.
+
+toolsoff: an environment artefact, not a red on master. The first gate ran before the stdlib extensions were built in this tree (only bin/lucifer and the library); cProfile needs the `_lsprof` extension, which plain `make` builds (STDLIB_EXTS). With it built, toolsoff passes on both arms.
+
+Table, three arms, same method (instructions on core leases, pinned, two runs per arm alternated, min). The master and stage 1 runs are those of the stage 1 table; stage 1q's two runs were taken after them in the same way. Cli rows: G; compile ms; builds; IR built.
+
+| row | figure | master M (compile) | stage 1 M (compile) | stage 1q M (compile) | 1 vs master | 1q vs master |
+|---|---|---|---|---|---|---|
+| django_template | all values, -n 3 | 4,693.4 (667.2) | 4,622.2 (572.6) | 4,604.4 (557.4) | -1.5% | -1.9% |
+| django_template | best value, -n 20 | 853.6 (0.0) | 853.6 (0.0) | 853.2 (0.0) | +0.0% | -0.0% |
+| django_template | best of three, -n 3 (reported) | 932.4 (25.4) | 917.4 (11.6) | 917.2 (12.0) | -1.6% | -1.6% |
+| genshi | all values, -n 3 | 8,996.0 (1,088.2) | 8,859.8 (1,247.6) | 8,723.4 (1,285.6) | -1.5% | -3.0% |
+| genshi | best value, -n 20 | 1,862.4 (2.0) | 1,623.4 (0.0) | 1,622.2 (0.0) | -12.8% | -12.9% |
+| genshi | best of three, -n 3 (reported) | 1,876.6 (7.0) | 1,821.2 (79.2) | 1,840.6 (99.6) | -3.0% | -1.9% |
+| richards | all values, -n 3 | 1,445.0 (283.6) | 1,445.0 (292.6) | 1,426.4 (293.2) | +0.0% | -1.3% |
+| richards | best value, -n 20 | 240.0 (0.0) | 240.0 (0.0) | 240.0 (0.0) | +0.0% | +0.0% |
+| richards | best of three, -n 3 (reported) | 245.8 (0.0) | 240.0 (0.0) | 240.2 (0.0) | -2.4% | -2.3% |
+| tomli_loads | all values, -n 3 | 103,990.4 (2,748.0) | 93,998.4 (1,809.0) | 94,505.4 (2,493.0) | -9.6% | -9.1% |
+| tomli_loads | best value, -n 20 | 22,512.1 (0.0) | 22,501.1 (0.0) | 22,506.1 (0.0) | -0.0% | -0.0% |
+| tomli_loads | best of three, -n 3 (reported) | 25,034.1 (0.0) | 22,748.1 (55.0) | 22,646.1 (3.0) | -9.1% | -9.5% |
+| deepcopy | all values, -n 3 | 5,470.8 (549.0) | 5,573.4 (705.6) | 5,377.2 (692.0) | +1.9% | -1.7% |
+| deepcopy | best value, -n 20 | 947.4 (0.0) | 927.0 (0.0) | 923.2 (0.0) | -2.2% | -2.6% |
+| deepcopy | best of three, -n 3 (reported) | 1,131.0 (37.8) | 1,151.8 (70.6) | 1,048.4 (17.6) | +1.8% | -7.3% |
+| regex_v8 | all values, -n 3 | 8,099.0 (2,364.0) | 7,840.0 (2,115.0) | 8,304.0 (2,527.0) | -3.2% | +2.5% |
+| regex_v8 | best value, -n 20 | 842.0 (20.0) | 833.0 (19.0) | 828.0 (19.0) | -1.1% | -1.7% |
+| regex_v8 | best of three, -n 3 (reported) | 1,132.0 (215.0) | 1,089.0 (165.0) | 1,113.0 (179.0) | -3.8% | -1.7% |
+| regex_v8 calls 64-128 | total / compile / run G | 54.27 / 4.06 / 50.22 | 51.49 / 1.15 / 50.34 | 51.37 / 0.86 / 50.50 | -5.1% total, -71.6% compile, +0.3% run | -5.4% total, -78.7% compile, +0.6% run |
+| regex_v8 calls 128-256 | total / compile / run G | 104.56 / 5.83 / 98.72 | 100.18 / 0.73 / 99.45 | 101.08 / 1.56 / 99.52 | -4.2% total, -87.6% compile, +0.7% run | -3.3% total, -73.2% compile, +0.8% run |
+| pyflakes whole | G; compile ms; builds; IR | 8.070; 329 ms; 459 builds; 175,619 IR | 8.436; 396 ms; 463 builds; 195,228 IR | 8.638; 406 ms; 459 builds; 200,185 IR | +4.5% | +7.0% |
+| black whole | G; compile ms; builds; IR | 12.797; 586 ms; 874 builds; 264,079 IR | 12.797; 588 ms; 874 builds; 264,081 IR | 12.775; 575 ms; 880 builds; 262,740 IR | +0.0% | -0.2% |
+| pygments whole | G; compile ms; builds; IR | 13.881; 435 ms; 507 builds; 161,453 IR | 13.496; 504 ms; 505 builds; 163,320 IR | 13.774; 492 ms; 516 builds; 169,493 IR | -2.8% | -0.8% |
+| cli compile ms (sum) | ms | 1350 | 1488 | 1473 | +10.2% | +9.1% |
+| awfy-Richards per iteration | M | 129.42 | 129.42 | 129.42 | -0.0% | -0.0% |
+| awfy-DeltaBlue per iteration | M | 5.33 | 5.33 | 5.33 | +0.0% | +0.0% |
+| awfy-CD per iteration | M | 249.87 | 248.68 | 246.76 | -0.5% | -1.2% |
+
+Misses on 1q (bar: no row worse than 1% on either figure, cli compile ms not above master):
+- **pyflakes whole +7.0%** (stage 1 +4.5%). Builds 459 (master 459), so the double build is gone, but IR built is 200.2k against 175.6k. Event log: 2 purchases (80.0M) and 3 rides; the largest ride is Checker.NAME taking Checker.handleNodeLoad (1,722 IR) after 2,113 calls, admitted at the marginal price because out_cost includes handleNodeLoad's own unit losses per entry. The extra IR comes from riding, which admits at the marginal price, below the whole-build test a purchase must pass, and from each later rebuild of the larger units.
+- **regex_v8 all values at -n 3 +2.5%** (stage 1 -3.2%). No purchase; 12 sites ride learned rebuilds (617 IR, e.g. Pattern.search takes _new_match, 274 IR, at 4,853 calls); compile in the window 2,527M against 2,364M (stage 1 2,115M); builds 611 against 607, IR 194.0k against 187.7k. Best value at -n 20 is -1.7%.
+- **cli compile ms +9.1%** (1,473 against 1,350; stage 1 1,488): pyflakes 406 (+77), pygments 492 (+57), black 575 (-11).
+- Fixed by 1q: deepcopy all values -1.7% (stage 1 +1.9%).
+
+Reading: the quiet rule removes the extra rebuilds (pyflakes builds at master's count), but the cli and regex losses are IR taken in, not rebuilds: compile per build grows with the units the purchases and rides enlarge, and riding at the marginal price takes sites a lone purchase would not have paid for.
+
 ## State (2026-11-25)
 
-- Revision 1 is current. Falsifier (check 4 offline): done, no contradiction. Stage 1: built and gated on luc-site1 (lanes d6dca23c, change 9afb781e), tabled alone against master: misses deepcopy all values +1.9%, pyflakes whole +4.5%, cli compile ms +10.2%; not landable as is. Check 6 not run; stage 2 not built.
-- Open question for the coordinator: price a purchase with the rebuilds its larger unit will incur (the cli and deepcopy misses), or accept those losses against the tomli, genshi and regex gains.
+- Revision 1 is current. Falsifier (check 4 offline): done, no contradiction.
+- Stage 1 (lanes d6dca23c, change 9afb781e) and stage 1q (lanes 2fa93b9b, change 468a61cc) built and gated on luc-site1, tabled alone against master (three-arm table above). Neither meets the landing bar: stage 1 misses deepcopy all values +1.9%, pyflakes +4.5%, cli compile ms +10.2%; stage 1q misses pyflakes +7.0%, regex_v8 all values +2.5%, cli compile ms +9.1%. Gains on both: tomli all values -9%, genshi best value at -n 20 -12.8%, regex windows' compile -73% to -88%.
+- Check 6 not run; stage 2 not built. The gains-against-losses decision goes to the owner with both tables.
