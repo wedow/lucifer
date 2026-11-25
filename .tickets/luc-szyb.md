@@ -348,3 +348,136 @@ Reading:
 - **luc-iama's first mechanism is confirmed directly.** In key_value_rule's last build 9,500 of the 15,424 in-line IR sits at sites with no call in the last value (check 1). Spending the same allowance by density takes all eleven cut sites back in line. That recovers 27% of tomli's gap to ad1eb461, not all of it: the rest is per-pass cost of the in-line code itself (c684ad72's attribute path, luc-1kz0), which no selection removes.
 - The remaining django gap (81%) is pre's growth, which this arm does not touch (check 5: unpaid by -n 3). Genshi's remaining 59% is its steady-state units.
 - **Abandon conditions.** Stage 3's fallback ("spend the fixed allowance in density order") is shown to work as a mechanism: it gains on every row but pyflakes, with counts that the run-time key can only approximate. It is not yet a landable rule, because its counts here are an oracle and in-line sites have no counter today. Nothing here falsifies stage 1. On tomli, selection accounts for about a quarter of the cliff's cost. The rest is not the budget's size either: it is per-pass cost of the in-line code.
+
+### Check 1: site table (2026-11-25)
+
+Count-mode runs of the wip binary (`LUCIFER_SITES=2`, check 3): -w 1 -n 3 at the reference loops, regex_v8 at -l 1. Calls per value are the last value's window, all units of the root, counters at in-line and out-of-line sites. The cli programs are one window, the whole run. Each table describes the root's last build in that run.
+
+How to read the columns:
+- IR in context: IR made while the callee's frame was built, nested frames included; the callee's own part in brackets.
+- Callee own unit: the IR of the callee's own last build, - when it has none.
+- Signature, per argument: c constant, t type known, v virtual, u unknown.
+- Caveats on the counts. The in-line counters are guards with frame states, so they can shift a build slightly. A site's name is today's site key (code and pc, and the frame that called it), so copies of one call under one parent share a count.
+
+Units:
+
+| unit | builds | predicted compile M (n(6500+5n), all builds) | last IR | sites in / out for budget / out other | in-line IR at sites with no call in the window | out-of-line calls a value |
+|---|---|---|---|---|---|---|
+| tomli key_value_rule@3 | 8 | 1,919 | 15,733 (budget 16,000) | 667 / 18 / 1 | 9,500 of 15,424 (62%) | 2,358,914 |
+| django VariableNode.render | 4 | 110 | 2,878 (2,000) | 94 / 4 / 0 | 2,363 of 2,854 (83%) | 61,434 |
+| django render_value_in_context | 2 | 38 | 1,711 (1,000) | 51 / 2 / 0 | 1,480 of 1,663 (89%) | 0 |
+| django Node.render_annotated | 6 | 72 | 57 | 0 / 0 / 0 (nospec at @3) | - | 0 |
+| django getattr (kernel) | 3 | 34 | 880 | 23 / 0 / 0 | 713 of 829 (86%) | 0 |
+| richards DeviceTask.fn | 6 | 30 | 527 | 6 / 0 / 0 | 30 of 451 | 0 |
+| richards HandlerTask.fn | 2 | 27 | 1,124 | 13 / 1 / 0 | 0 of 968 | 16,974 |
+| richards IdleTask.fn | 2 | 13 | 161 | 4 / 0 / 0 | 0 of 72 | 0 |
+| richards WorkTask.fn (@1; @106) | 3; 3 | 25; 12 | 633; 516 | 8 / 0 / 0; 4 / 0 / 0 | 30 of 495; 427 of 427 | 0 |
+| genshi XMLSerializer.__call__@97 | 1 | 24 | 1,621 | 46 / 16 / 0 | 263 of 636 | 28,002 |
+| genshi XMLSerializer.__call__@116 | 4 | 442 | 6,848 | 124 / 79 / 0 | 2,527 of 4,183 (60%) | 4,384 |
+| regex_v8 block0@12 | 2 | 98 | 2,997 | 33 / 85 / 0 | 1,491 of 1,959 (76%) | 14,155 |
+| regex_v8 Pattern.sub | 3 | 120 | 3,547 (2,000) | 40 / 28 / 0 | 1,635 of 3,525 (46%) | 29,831 |
+
+Sites with at least 1,000 calls a value at root level or out for budget, for the units that have any (richards: every root-level site of the four task functions is in line, at 4.6k-18.6k calls a value; the one site out is HandlerTask's nested `Task.addPacket@82 -> Packet.append_to`, 17.0k calls, own unit 39 IR):
+
+| unit | site | decision | callee | sig | IR in context (own) | callee own unit | calls/value |
+|---|---|---|---|---|---|---|---|
+| key_value_rule@3 | @10 | in | parse_key_value_pair | ttu | 15,424 (46) | 950 | 316,419 |
+| | @59 | out | len | u | - | 278 | 316,413 |
+| | @63 | out | type.__call__ | ccu | - | 155 | 316,412 |
+| | @67, @74 | out | get_iter | t | - | 129 | 316,411 |
+| | @68 | out | key_value_rule.<locals>.<genexpr> | u | - | 54 | 316,410 |
+| | @224 | out | Flags.is_ | utc | - | 146 | 316,408 |
+| | @273 | out | NestedDict.get_or_create_nest | ut | - | 153 | 316,407 |
+| | @370 | out | Flags.set | utc | - | 331 | 4,489 |
+| | parse_value@319, @376 (depth 2) | out | Pattern.match | ctv | - | 1,723 | 27,912 |
+| | parse_value@400, @410 (depth 2) | out | Match.end; match_to_number | t; tu | - | 64; 472 | 27,910 |
+| VariableNode.render | @24 | in | FilterExpression.resolve | uu | 2,854 (177) | - | 15,363 |
+| | @35 | out | render_value_in_context | uu | - | 1,711 | 15,354 |
+| | FilterExpression.resolve@166, @206, @258 (depth 1) | out | getattr | ucc | - | 880 | 15,360 each |
+| render_value_in_context | @18; @40 | in | template_localtime; localize | t | 18; 16 | 944; - | 20,000 |
+| | @111 | in | conditional_escape | t | 1,629 (22) | 1,032 | 20,000 |
+| getattr | @7; @39 | in | _attribute_name; lookup_attr | t; ut | 8; 141 (6) | 16; 482 | 40,000 |
+| XMLSerializer.__call__@97 | @104 | out | _get | uv | - | 137 | 11,996 |
+| | NamespaceFlattener.__call__@209 (depth 1) | out | _get | uv | - | 137 | 12,002 |
+| block0@12 | @38 | in | Pattern.search | uc | 1,959 (32) | 2,008 | 6,510 |
+| | Pattern.search@48 (depth 1) | out | _new_match | uvu | - | 271 | 6,510 |
+| | @58 | out | next_item | t | - | 144 | 1,845 |
+| Pattern.sub | @14; @19 | in | _ssize; _subx | t; utttc | 75 (26); 3,450 (263) | 119; 1,852 | 6,288 |
+| | _subx@262..@489 (depth 1, 7 sites) | out | _getslice, _append, str.join | v.. | - | 18-31 | 2,101-6,285 |
+
+The 20 units with most predicted compile in the cli programs (one window: the whole run):
+
+| program | unit | predicted compile M | last IR | in / out budget / out other | in-line IR at sites never called | out-of-line calls |
+|---|---|---|---|---|---|---|
+| pyflakes | Checker.NAME:1855@1 | 295 | 2,254 | 56 / 18 / 2 | 809 of 2,144 | 2,538 |
+| pyflakes | Checker.handleChildren:1212@1 | 149 | 3,973 | 131 / 6 / 7 | 2,337 of 3,908 | 212,101 |
+| pyflakes | Checker.handleNodeLoad:1041@48 | 97 | 1,558 | 29 / 15 / 0 | 661 of 829 | 5,602 |
+| pyflakes | Checker.addBinding:966@1 | 96 | 1,615 | 23 / 26 / 0 | 921 of 1,050 | 2,121 |
+| pyflakes | Checker.addBinding:966@23 | 94 | 1,599 | 26 / 24 / 0 | 995 of 1,064 | 1,894 |
+| pyflakes | Checker.handleNodeLoad:1041@1 | 81 | 1,503 | 41 / 16 / 0 | 523 of 781 | 6,919 |
+| pyflakes | Checker.handleNode:1244@1 | 70 | 447 | 7 / 0 / 1 | 0 of 284 | 0 |
+| pyflakes | Checker.getCommonAncestor:915@1 | 70 | 768 | 24 / 3 / 0 | 68 of 519 | 341 |
+| pyflakes | Checker.__init__:742@192 | 68 | 1,070 | 37 / 7 / 0 | 569 of 962 | 4,484 |
+| pyflakes | _is_typing_helper:620@3 | 47 | 1,199 | 33 / 6 / 0 | 768 of 1,020 | 27,339 |
+| pyflakes | Checker.LAMBDA.<locals>.runFunction:1969@2 | 40 | 2,252 | 53 / 8 / 1 | 1,529 of 2,185 | 382 |
+| pyflakes | Checker.ARGUMENTS:1978@1 | 40 | 2,239 | 55 / 7 / 0 | 1,564 of 2,221 | 9,452 |
+| pyflakes | Checker._run_deferred:786@25 | 36 | 2,112 | 48 / 9 / 1 | 1,335 of 2,028 | 10,502 |
+| pyflakes | Checker.IF:1805@1 | 35 | 2,091 | 50 / 9 / 0 | 1,536 of 2,050 | 15,001 |
+| pyflakes | Checker.getParent:908@1 | 31 | 194 | 10 / 0 / 0 | 0 of 121 | 0 |
+| pyflakes | Checker.differentForks:955@1 | 30 | 1,167 | 26 / 8 / 0 | 266 of 1,059 | 70 |
+| pyflakes | Checker.futuresAllowed:800@1 | 29 | 1,829 | 42 / 0 / 0 | 1,539 of 1,751 | 0 |
+| pyflakes | Checker.ARG:1981@1 | 28 | 1,244 | 37 / 11 / 0 | 861 of 1,217 | 0 |
+| pyflakes | compile:3567@280 | 23 | 1,606 | 26 / 18 / 0 | 1,236 of 1,412 | 0 |
+| pyflakes | Checker.CLASSDEF:1984@276 | 23 | 1,595 | 35 / 8 / 1 | 1,482 of 1,482 | 6 |
+| black | Parser._addtoken:278@1 | 147 | 1,127 | 36 / 5 / 0 | 0 of 813 | 11,801 |
+| black | _match:536@157 | 125 | 1,793 | 17 / 10 / 0 | 119 of 637 | 34,301 |
+| black | _t223:2647@17 | 124 | 1,735 | 5 / 5 / 0 | 0 of 392 | 2,376 |
+| black | Parser._addtoken:278@38 | 114 | 1,189 | 38 / 5 / 0 | 320 of 918 | 1,892 |
+| black | Pattern.match:3077@1 | 84 | 3,119 | 56 / 17 / 0 | 357 of 3,055 | 6,652 |
+| black | _match_entry:2785@1 | 68 | 2,115 | 15 / 17 / 0 | 361 of 2,057 | 15 |
+| black | LineGenerator.visit_default:134@4 | 67 | 2,474 | 52 / 28 / 4 | 459 of 1,903 | 6,074 |
+| black | Parser.addtoken:230@1 | 65 | 1,058 | 32 / 2 / 0 | 168 of 1,005 | 4,890 |
+| black | BracketTracker.mark:70@1 | 63 | 1,074 | 20 / 3 / 0 | 95 of 757 | 1,032 |
+| black | Driver.parse_tokens:114@81 | 61 | 1,166 | 47 / 8 / 1 | 0 of 727 | 8,142 |
+| black | Line.__str__:479@92 | 56 | 635 | 41 / 0 / 0 | 17 of 546 | 0 |
+| black | Line.append:52@1 | 55 | 1,088 | 38 / 8 / 0 | 417 of 855 | 11,220 |
+| black | Parser.pop:386@1 | 47 | 633 | 30 / 0 / 0 | 75 of 547 | 0 |
+| black | Visitor.visit:152@3 | 44 | 410 | 15 / 0 / 1 | 0 of 230 | 0 |
+| black | _entry:2906@327 | 36 | 1,545 | 8 / 0 / 0 | 660 of 1,405 | 0 |
+| black | _entry:2906@211 | 34 | 1,300 | 7 / 4 / 0 | 889 of 889 | 2,087 |
+| black | _entry:2906@1 | 28 | 888 | 3 / 0 / 0 | 690 of 690 | 0 |
+| black | normalize_trailing_prefix:127@1 | 28 | 538 | 20 / 0 / 1 | 27 of 495 | 0 |
+| black | convert:475@1 | 26 | 695 | 22 / 0 / 0 | 181 of 593 | 0 |
+| black | _entry:2906@290 | 26 | 1,230 | 6 / 0 / 0 | 0 of 1,070 | 0 |
+| pygments | HtmlFormatter._format_lines:829@45 | 298 | 4,502 | 46 / 53 / 0 | 859 of 2,754 | 1,017,511 |
+| pygments | _match_entry:2785@1 | 127 | 1,835 | 21 / 7 / 0 | 26 of 1,764 | 5,341 |
+| pygments | Lexer.get_tokens.<locals>.streamer:269@31 | 118 | 3,385 | 53 / 41 / 0 | 1,646 of 2,043 | 303,696 |
+| pygments | Pattern.match:3077@1 | 96 | 2,250 | 28 / 14 / 0 | 154 of 2,209 | 249,261 |
+| pygments | RegexLexer.get_tokens_unprocessed:700@46 | 94 | 1,543 | 25 / 7 / 0 | 34 of 1,343 | 57,846 |
+| pygments | _entry:139@143 | 66 | 1,324 | 20 / 3 / 0 | 17 of 149 | 13,820 |
+| pygments | _entry:1@1 | 61 | 259 | 0 / 0 / 0 | 0 of 0 | 0 |
+| pygments | RegexLexer.get_tokens_unprocessed:700@43 | 50 | 2,585 | 25 / 24 / 0 | 1,992 of 2,386 | 376 |
+| pygments | _entry:270@182 | 30 | 1,899 | 16 / 6 / 0 | 126 of 126 | 0 |
+| pygments | str.__mod__:478@1 | 23 | 680 | 48 / 0 / 0 | 0 of 664 | 0 |
+| pygments | HtmlFormatter._translate_parts:824@1 | 23 | 953 | 24 / 0 / 0 | 513 of 934 | 0 |
+| pygments | compile:3567@280 | 22 | 1,540 | 25 / 16 / 0 | 1,169 of 1,345 | 0 |
+| pygments | binary_op:94@1 | 21 | 747 | 9 / 0 / 0 | 74 of 467 | 0 |
+| pygments | _lru_cache_wrapper.<locals>.wrapper:641@2 | 21 | 927 | 21 / 0 / 1 | 362 of 560 | 0 |
+| pygments | regex_opt_inner:26@408 | 20 | 1,443 | 19 / 16 / 0 | 918 of 1,206 | 720 |
+| pygments | str.translate:697@103 | 18 | 428 | 9 / 0 / 0 | 203 of 263 | 0 |
+| pygments | list.extend:254@1 | 18 | 574 | 26 / 0 / 0 | 29 of 526 | 0 |
+| pygments | _entry:1@143 | 17 | 207 | 0 / 0 / 0 | 0 of 0 | 0 |
+| pygments | _Gen.excludes:1847@31 | 17 | 1,296 | 25 / 5 / 0 | 678 of 1,161 | 0 |
+| pygments | _Gen.exclusive:2033@35 | 16 | 1,264 | 24 / 5 / 0 | 676 of 1,225 | 263 |
+
+Totals over each program's 20: in-line IR at sites never called is pyflakes 18,999 of 28,087 (68%), black 4,835 of 19,584 (25%), pygments 9,476 of 21,125 (45%).
+
+All logged sites per program (every build):
+- Signatures. At least one constant argument: 42-57%. At least one virtual (with no constant): 6-18%. At least one type (none of those): 9-17%. All unknown: 11-39%. Most constants are kernel dispatch (call_special with its name).
+- Shared keys. 4% (richards) to 43% (tomli) of sites share their key with another site of the same build: one call inlined at several places under the same parent frame, mostly the kernel's call_special, getitem, compare and contains. A per-site counter keyed as today cannot tell those copies apart, so their calls merge. The design's risk 13 treats only hash collisions; this merging is far larger.
+
+Reading:
+- In-line IR mostly goes to code that never runs. In the named units 46-89% of in-line IR sits at sites with no call in the steady value (tomli 62%, django's three units 83-89%, regex 46-76%, genshi @116 60%). Over the cli programs' 20 largest units the share is 25-68%. The design's premise, that today's first builds take IR on no evidence, holds.
+- The hot sites out of line are small callees. Most own units are 54-480 IR (tomli's seven at 316k calls a value, genshi's `_get` 137, regex's `_new_match` 271). Under the design's price they are bought at first build, where today the budget is gone by bytecode order. The large exceptions are callees whose own units are big kernel regex paths (Pattern.match 1,723) and django's render_value_in_context (1,711). There, in-context IR is the open question that check 2 and stage 2's records must answer.
+- Calls per site at nested depth are not identifiable under today's key wherever kernel helpers are inlined repeatedly. The design's calls `N_i` for nested sites (stage 2's weights, stage 3's admission) must either key by the full inline path or accept merged counts.
+- Abandon conditions: none. Check 1 is input to checks 2 and 4 and has no condition of its own. The shared-key finding is a design gap to fix in stage 1 (the key gains the callee) and stage 2 (records per path).
