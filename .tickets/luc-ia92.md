@@ -252,3 +252,29 @@ The complexity sits in three places, none of which is duplicated JIT machinery o
 - **The architectural pattern:** each operation exists as canonical kernel Python, then a C `*_native` shortcut, then interpreter specialized forms, then a JIT fold, all agreeing by hand. Today's attribute and isinstance bugs and the ~20 copies of the protocol predicate come from this. The single highest-evidence consolidation is one per-type attribute-protocol word.
 
 A 20% delete-and-get-faster pass is not supported by the evidence. The speed lies in replacing the call and entry protocol and in the policy and feedback keying. Deleting what is dead is a cheap, safe first step, but it buys little speed by itself.
+## 2026-11-25: dead leftovers deleted (items 1a-1d)
+
+Four commits, one per group, each building on its own:
+- 1a: the operator class tables (`struct lu_opclasses`, want/note/vote, forget and free code) and every interpreter hook that fed them: CALL of a builtin or kernel function from warm code, generic FOR_ITER, COMPARE_OP and BINARY_OP with an other-kind operand, non-int UNARY_NEGATIVE/INVERT. h_for_iter loses its table argument; `lu_jit_observe` returns nothing; the jit.h comment on CALL's argument kinds is corrected. LU_OPCLASS_WAYS stays: profiles use it.
+- 1b: the helper ids no pass emits. Rows only for decref, truth, list_item, list_store, attr_load (called by address from emit.c), field_get, field_set, unpack_exact, async_gen_wrap (called directly); rows and bodies for seqiter_step, binary_slice_raw (with lu_slice_native_raw and bytearray_slice's machine-int mode, which only it reached) and the lu_float_pow wrapper. Kept, ids, rows and bodies, for the work restoring yield from / await / async: h_send, h_gen_done, h_get_awaitable, h_get_yield_from_iter, h_get_aiter, h_get_anext, h_push_exc_info, h_pop_except, h_reraise.
+- 1c: IR kinds ENTRY_PC, POW_F (with lu_jit_float_pow and LU_JIT_POW_FAILED), ATTR_STORE, GLOBAL_LOAD (and the global_load census count only it fed).
+- 1d: lu_inline_install, lu_frame_reserve, lu_function_template (make_function loses its notify flag), FX_ALLOC. Kept: lu_specialize_class_value/class_method/instance_method.
+
+Gate: 33 kernel programs for the areas touched in jit-off, plain, jit, jit-deopt; 7 thread programs in handoff; the full jitcheck, 0 failing.
+
+What the dead hooks cost, instructions:u, pinned, one core lease per run, two runs per arm (mean), master cb59992d against the four commits:
+
+| workload | JIT | master | deleted | change |
+|---|---|---|---|---|
+| -c pass | off | 115.27M | 113.86M | -1.2% |
+| -c pass | on | 139.52M | 130.67M | -6.3% |
+| stdlib imports | off | 1148.3M | 1141.4M | -0.6% |
+| stdlib imports | on | 1388.8M | 1334.1M | -3.9% |
+| pyflakes | off | 12.83G | 12.60G | -1.8% |
+| pyflakes | on | 10.06G | 9.93G | -1.2% |
+| AWFY Richards 5x100 | off | 411.36G | 405.39G | -1.5% |
+| AWFY Richards 5x100 | on | 60.36G | 60.35G | -0.0% |
+| AWFY DeltaBlue 5x12000 | off | 74.94G | 73.73G | -1.6% |
+| AWFY DeltaBlue 5x12000 | on | 25.55G | 25.47G | -0.3% |
+
+Left: items 2-10 of the survey.
