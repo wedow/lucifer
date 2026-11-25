@@ -255,7 +255,6 @@ swap_streams(struct asm_ *a)
 }
 
 static void jmp(struct asm_ *a, int label);
-static void broken_if(struct asm_ *a, int cc, const char *what);
 static int new_label(struct asm_ *a);
 static void bind(struct asm_ *a, int label);
 
@@ -4387,18 +4386,6 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         jcc(a, CC_L, fail);
         return 0;
     }
-    case OP_GUARD_ENTRY: {
-        /* find and the direct entry compared them (stage 1 of one entry protocol). */
-        load(a, RCX, R15, offsetof(struct lu_frame, globals));
-        mov_ri(a, RAX, in->imm);
-        alu_rr(a, ALU_CMP, RCX, RAX);
-        broken_if(a, CC_NE, "jit: a unit entered with another function's globals");
-        load(a, RCX, R15, offsetof(struct lu_frame, builtins));
-        mov_ri(a, RAX, in->imm2);
-        alu_rr(a, ALU_CMP, RCX, RAX);
-        broken_if(a, CC_NE, "jit: a unit entered with another function's builtins");
-        return 0;
-    }
     case OP_GUARD_FRAMES: {
         /* Not a speculation: the root is still compiled code's unless a
            walker made the frames real (runtime/jit/exit.c). */
@@ -5354,18 +5341,6 @@ gate(struct asm_ *a, int base, int32_t off)
     cold_end(a);
 }
 
-/* Stage 1 of one entry protocol: a test the gate made redundant that
-   still fails is a broken claim. */
-static void
-broken_if(struct asm_ *a, int cc, const char *what)
-{
-    int fine = new_label(a);
-    jcc(a, cc ^ 1, fine);
-    mov_ri(a, RDI, (int64_t)(intptr_t)what);
-    call_abs(a, (void *)lu_jit_entry_broken);
-    bind(a, fine);
-}
-
 static void
 prologue(struct asm_ *a)
 {
@@ -5421,11 +5396,10 @@ direct_entry(struct asm_ *a)
 {
     struct lu_func *f = a->f;
     PyCodeObject *code = f->code;
-    int at = a->n, decline = new_label(a), hooked = new_label(a), counted = new_label(a), unwatched = new_label(a);
+    int at = a->n, decline = new_label(a), counted = new_label(a);
     saves(a);
     mov_rr(a, R14, RDI);
     gate(a, R9, offsetof(struct lu_jit_call, act.unlocked_jit));      /* back at the activation's end */
-    jump_if_dead(a, decline);                   /* a caller may have read the entry before it died */
     /* A function of the same code with other globals or builtins has units of its own. */
     load(a, R11, RSI, offsetof(PyFunctionObject, func_globals));
     mov_ri(a, RAX, (int64_t)(intptr_t)a->unit->globals);
@@ -5435,24 +5409,6 @@ direct_entry(struct asm_ *a)
     mov_ri(a, RAX, (int64_t)(intptr_t)a->unit->builtins);
     alu_rr(a, ALU_CMP, R11, RAX);
     jcc(a, CC_NE, decline);
-    /* What the gate's version stands for (stage 1 of one entry protocol). */
-    mov_ri(a, R11, (int64_t)(intptr_t)&code->_co_monitoring);
-    load(a, R11, R11, 0);
-    test_rr(a, R11, R11);
-    jcc(a, CC_E, unwatched);
-    cmp8_mi(a, R11, offsetof(lu_monitoring, watched), 0);
-    broken_if(a, CC_NE, "jit: a direct entry into a unit whose code a tool watches");
-    bind(a, unwatched);
-    cmp_mi(a, 0, R14, offsetof(PyThreadState, tracing), 0);
-    broken_if(a, CC_NE, "jit: a direct entry while the thread is tracing");
-    load(a, R11, R14, offsetof(PyThreadState, interp));
-    load(a, R11, R11, offsetof(struct _is, eval_frame));
-    test_rr(a, R11, R11);
-    jcc(a, CC_E, hooked);
-    mov_ri(a, RAX, (int64_t)(intptr_t)lu_perf_eval);
-    alu_rr(a, ALU_CMP, R11, RAX);
-    broken_if(a, CC_NE, "jit: a direct entry under a frame evaluation hook");
-    bind(a, hooked);
     int words = code->co_framesize, kernel = lu_frame_is_kernel(code);
     if (kernel) {
         cmp_mi(a, 1, R14, offsetof(struct lu_task, kernel_room), words);

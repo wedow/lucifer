@@ -356,8 +356,7 @@ int lu_jit_prologue(struct lu_frame *frame);
    direct call, whose caller's frame is under it). The call's value, or
    NULL with an exception (a generator's step that ended: LU_MISSING). */
 PyObject *lu_jit_finish(PyThreadState *ts, struct lu_frame *frame, int r, PyObject *value, struct lu_frame *entry);
-/* Stage 1 of one entry protocol: an emitted check found a claim broken. */
-void lu_jit_entry_broken(const char *what);
+
 
 /* -X lucifer_jit_stats' count of direct entries, or NULL when the counts are off. */
 unsigned long *lu_jit_direct_count(void);

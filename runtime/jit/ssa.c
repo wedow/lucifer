@@ -35,7 +35,7 @@ lu_count_kind(const struct lu_ins *in)
         return GI_MODE(in->imm2) == 0 ? CNT_guard_is : GI_MODE(in->imm2) == 1 ? CNT_guard_cell : CNT_guard_global;
     case OP_GUARD_BIT: return CNT_guard_bit;
     case OP_GUARD_NOT_NULL: return CNT_guard_not_null;
-    case OP_GUARD_DEPTH: case OP_GUARD_ENTRY: case OP_GUARD_FRAMES: return CNT_guard_other;
+    case OP_GUARD_DEPTH: case OP_GUARD_FRAMES: return CNT_guard_other;
     case OP_UNBOX_INT: case OP_UNBOX_FLOAT: return CNT_unbox;
     case OP_POLL: return CNT_poll;
     case OP_CHECK_LIVE: return CNT_live;

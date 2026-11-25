@@ -96,7 +96,6 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(GUARD_BIT, REP_NONE, IF_GUARD)    /* a == imm */ \
     X(GUARD_NOT_NULL, REP_NONE, IF_GUARD)       /* a != NULL */ \
     X(GUARD_DEPTH, REP_NONE, IF_GUARD | IF_EFFECT)  /* the task's py_recursion_remaining >= imm (at entry) */ \
-    X(GUARD_ENTRY, REP_NONE, IF_GUARD | IF_EFFECT)  /* the root frame's globals is imm and its builtins imm2 (at entry) */ \
     X(GUARD_FRAMES, REP_NONE, IF_GUARD | IF_EFFECT) /* no walker made the frames real during the instruction's   \
                                                        calls (runtime/jit/exit.c); imm 1: nor holds the root's  \
                                                        frame object, which would take its locals at a return */ \

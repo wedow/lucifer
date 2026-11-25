@@ -2201,12 +2201,10 @@ build_root(struct gctx *g)
     lu_v room = lu_ev_guard(c, OP_GUARD_DEPTH, LU_NOV, 0);
     /* Functions of one code may have other globals and builtins than the
        frame the unit is built from, whose names it folds: only frames of
-       these enter it (jit.c finds units by them; the entry checks them
-       too), and it holds them, so that their identities stay theirs. */
+       these enter it (jit.c's find and the direct entry compare them), and
+       it holds them, so that their identities stay theirs. */
     lu_ev_konst(c, c->globals);
     lu_ev_konst(c, c->builtins);
-    lu_v own = lu_ev_guard(c, OP_GUARD_ENTRY, LU_NOV, (int64_t)(intptr_t)c->globals);
-    f->ins[own].imm2 = (int64_t)(intptr_t)c->builtins;
     for (int i = 0; co->co_localspluskinds != NULL && i < c->nlocals; i++) {
         /* A cell or free variable's slot holds its cell from the prologue
            on, and every entry is after it. */

@@ -452,7 +452,7 @@ static int
 borrow_safe(const struct lu_ins *in)
 {
     switch (in->op) {
-    case OP_GUARD_FRAMES: case OP_GUARD_DEPTH: case OP_GUARD_ENTRY:
+    case OP_GUARD_FRAMES: case OP_GUARD_DEPTH:
     case OP_INLINE_LOAD: case OP_INLINE_LOAD_I: case OP_INLINE_LOAD_F: case OP_INLINE_ORIGIN:
     case OP_RITER_NEXT: case OP_JUMP: case OP_BRANCH: case OP_PHI: case OP_ENTRY_LOCAL: case OP_ENTRY_STACK:
         return 1;
@@ -969,7 +969,7 @@ borrow_items(struct lu_func *f)
         }
         pure &= in->op == OP_ENTRY_LOCAL || in->op == OP_ENTRY_STACK || in->op == OP_CONST
                 || in->op == OP_CONST_I || in->op == OP_CONST_F || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT
-                || in->op == OP_GUARD_TYPE || in->op == OP_GUARD_DEPTH || in->op == OP_GUARD_ENTRY || in->op == OP_JUMP;
+                || in->op == OP_GUARD_TYPE || in->op == OP_GUARD_DEPTH || in->op == OP_JUMP;
     }
     int can_enter = pure && entry_fs != NULL && entry_fs->caller == NULL
                     && !lu_jit_noborrow(entry_fs->code, entry_fs->pc);
