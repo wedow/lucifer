@@ -609,6 +609,9 @@ _PyInterpreterState_SetEvalFrameFunc(PyInterpreterState *interp, _PyFrameEvalFun
     }
     lu_stw_stop(interp);
     interp->eval_frame = eval_frame;
-    lu_monitoring_hook_changed(interp);
+    int err = lu_monitoring_hook_changed(interp);
     lu_stw_start(interp);
+    if (err < 0) {
+        PyErr_WriteUnraisable(NULL);        /* the setter reports nothing */
+    }
 }

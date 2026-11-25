@@ -1644,7 +1644,7 @@ compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
 {
     PyCodeObject *code = frame->code;
     _PyFrameEvalFunction hook = ts->interp->eval_frame;
-    if (lu_code_watched(code) || (hook != NULL && hook != lu_perf_eval) || lu_jit_stack_low()) {
+    if ((hook != NULL && hook != lu_perf_eval) || lu_jit_stack_low()) {
         return NULL;
     }
     if (!ts->interp->kernel_booted || !(code->co_flags & CO_OPTIMIZED)) {
@@ -1742,7 +1742,7 @@ poll_word(PyThreadState *ts)
 static struct lu_unit *
 unit_for(PyThreadState *ts, struct lu_frame *frame, struct lu_jit_code *jc, int pc, int compile)
 {
-    if (frame->locals != NULL || ts->tracing) {
+    if (frame->locals != NULL || ts->tracing || lu_code_watched(frame->code)) {
         return NULL;
     }
     if (compile && jc != NULL) {
@@ -1772,9 +1772,11 @@ enter(PyThreadState *ts, struct lu_unit *u, struct lu_frame *frame, PyObject **r
     struct lu_task *task = (struct lu_task *)ts;
     struct lu_jit_act act = { u, task->jit_act, task->unlocked_jit };
     task->jit_act = &act;
-    bump_entries(u);
     int r = u->fn(ts, frame, result);
-    if (r == LU_JIT_NONE) {
+    if (r != LU_JIT_NONE) {
+        bump_entries(u);            /* entries the gate passed, as the direct entry counts them */
+    }
+    else {
         /* Before left, which may free a stale unit. */
         tools_moved(state_of(frame->code), u, poll_word(ts) & ~LU_POLL_EVENTS_MASK);
     }
@@ -1903,12 +1905,12 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     entry.previous = (struct lu_frame *)ts->current_frame;
     frame->previous = &entry;
     ts->current_frame = (struct _PyInterpreterFrame *)frame;
-    if (!gen && at > 1) {
-        if (prologue(frame) < 0) {
-            *result = lu_eval_continue(ts, 1);
-            return 1;
-        }
-        u = find(jc, at, frame);        /* a collection in the prologue may have taken it */
+    if (!gen && at > 1 && prologue(frame) < 0) {
+        *result = lu_eval_continue(ts, 1);
+        return 1;
+    }
+    if (fresh || (!gen && at > 1)) {
+        u = find(jc, at, frame);        /* a finalizer or a collection since may have taken it */
     }
     frame->instr = lu_code_start(code) + at;
     frame->last = frame->instr - 1 - lu_opcode_caches[RESUME];

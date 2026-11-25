@@ -606,3 +606,11 @@ Stage 1 cost about +1 (not the predicted +5: the fatal branches are not taken). 
 Wait-order commit gate: the gate's kernel programs in plain, jit and jit-deopt; full jitcheck, 0 failing (sharedcode, compiled, ccalls, toolsoff and entryfails PASS).
 
 State: stages 1 and 2 committed, plus the wait-order commit, on branch luc-entry1, not pushed; waiting for the adversarial reviews. Open: B7 (not reproduced; the find-first order costs `-c pass` +0.5%); B3 has no test (no hook can delegate); pyflakes with the JIT always on reads +0.27%, under the 0.3% bar, cause not looked for. Stages 3-5 not started.
+
+## Review fixes (2026-11-25)
+
+- M1: `lu_monitoring_hook_changed` also runs `instrument_all_executing_code_objects`, as every other tools path does; a failure there is reported as unraisable, since the setter returns nothing. New tests/capi `hook_toggle` and `hook_toggle_run` set and clear a hook inside one call from a hot loop and require the loop's unit polls to grow with the iterations. The test passes without the fix too, so it does not show the defect. The likely reason (not verified) is that the interpreter's back-edge poll brings the code up to the version. It stays as a guard on the hook path.
+- L1: `lu_jit_run` finds the unit again after anything that may run a finalizer or collect: the fresh generator's dropped value as well as the cells prologue. A decline after the drop resumes at RESUME 0.
+- L2: `enter()` counts an entry only when the gate passed, as the direct entry does.
+- L3: `unit_for` refuses a watched code before the find, as `lu_jit_enter` did; `compile_at` no longer tests it. The predicate is still one function and one test site.
+- Not tested (reviewer's list): a gate decline after the marker on a fresh generator; kernel gates with visible events pending; `lu_jit_direct` refusing while tracing. Also recorded: `lu_jit_finish` ends a generator that raises with `lu_gen_finish`, where the old `lu_jit_run` tail called `lu_frame_pop` on the generator's frame. That was probably an old bug, unreachable while `leaves_root` refuses generator roots. No test was added for it.
