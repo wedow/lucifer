@@ -102,6 +102,18 @@ lu_gen_suspend(PyThreadState *ts, struct lu_frame *f, int oparg)
 }
 void lu_gen_finish(PyThreadState *ts, struct lu_frame *f);
 
+/* A finished generator's value as its frame's `ret` takes it: a loop's
+   step (FOR_ITER, next) ends with no value. */
+static inline PyObject *
+lu_gen_returned(uint8_t ret, PyObject *v)
+{
+    if (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT) {
+        Py_DECREF(v);
+        return LU_MISSING;
+    }
+    return v;
+}
+
 /* frame.clear() on a generator's frame: refused while it runs or is suspended;
    a generator not yet started is closed. */
 int lu_gen_frame_clear(struct lu_frame *f);

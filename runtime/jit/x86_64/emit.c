@@ -29,6 +29,8 @@ enum { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, 
 static const int8_t gprs[] = { RBX, R12, R13, RSI, RDI, R8, R9, R10 };
 static const int8_t saved_gprs[] = { RBX, R12, R13 };
 static int clobbers_saved(const struct lu_ins *in);
+struct asm_;
+static void frame_end(struct asm_ *a, int r);
 static int result_over_a(const struct lu_ins *in);
 static const int8_t fprs[] = { XMM(2), XMM(3), XMM(4), XMM(5), XMM(6), XMM(7), XMM(8), XMM(9),
                                XMM(10), XMM(11), XMM(12), XMM(13), XMM(14) };
@@ -54,8 +56,7 @@ const struct lu_target lu_target = {
 #define ACT_BYTES 24                    /* sizeof (struct lu_jit_act) */
 #define ACT_SLOT (RESULT_SLOT - ACT_BYTES)      /* the unit's activation (target.h struct lu_jit_act) */
 #define ACT_AT(field) (ACT_SLOT + (int32_t)offsetof(struct lu_jit_act, field))
-#define FRAME_SLOT (ACT_SLOT - 8)       /* the frame the direct call in hand pushed (target.h struct lu_jit_direct) */
-#define SPILL_BASE (FRAME_SLOT - 8)
+#define SPILL_BASE (ACT_SLOT - 8)
 static_assert(sizeof(struct lu_jit_act) == ACT_BYTES, "the activation outgrew its slot");
 
 struct patch {
@@ -141,6 +142,7 @@ struct asm_ {
     int epilogue;               /* the activation's end, then the return */
     int restore;                /* the return alone */
     int decline;                /* an entry's decline, before its link */
+    int end;                    /* a return whose frame C ends (lu_jit_left) */
     int entered;                /* past the activation's link, where the direct entry joins the prologue */
     struct lu_func *f;
     struct lu_unit *unit;
@@ -1898,56 +1900,27 @@ takes_back(struct asm_ *a, uint64_t takes)
     }
 }
 
-/* After a direct entry ran its unit, which ended its activation (EAX
-   the enum lu_jit_result, the frame at FRAME_SLOT): the frame is popped
-   as lu_frame_pop pops it (its slots hold nothing: compiled code owned
-   them), the value in [rsp]; or the interpreter runs it. Then `done`
-   with the value or NULL in RAX. */
+/* After a direct entry ran its unit (EAX the enum lu_jit_result, the
+   result word at [rsp]): a return ended the frame and left the value
+   there; anything else names the frame there and goes to lu_jit_finish.
+   Then `done` with the value or NULL in RAX. */
 static void
 direct_done(struct asm_ *a, uint64_t takes, int done)
 {
-    int alone = new_label(a), exited = new_label(a);
+    int exited = new_label(a);
     b1(a, 0x83);
     b1(a, 0xF8);
     b1(a, LU_JIT_RETURN);                       /* cmp eax, LU_JIT_RETURN */
     jcc(a, CC_NE, exited);
-    load(a, RDI, RBP, FRAME_SLOT);
-    cmp_mi(a, 1, RDI, offsetof(struct lu_frame, frame_obj), 0);
-    jcc(a, CC_E, alone);
-    call_abs(a, (void *)lu_frame_retire);      /* a frame object only the record holds goes with it */
-    bind(a, alone);
-    /* lu_depth_leave, for the callee's code. */
-    int user = new_label(a), left = new_label(a);
-    load(a, RDX, RBP, FRAME_SLOT);
-    load(a, RDX, RDX, offsetof(struct lu_frame, code));
-    load32(a, R11, RDX, offsetof(PyCodeObject, co_flags));
-    alu_ri(a, ALU_AND, R11, LU_CO_KERNEL | LU_CO_HIDDEN);
-    jcc(a, CC_E, user);
-    load32(a, R11, RDX, offsetof(PyCodeObject, co_framesize));
-    op_rm(a, 1, 0x01, R11, R14, offsetof(struct lu_task, kernel_room));     /* add [r14+kernel_room], r11 */
-    jmp(a, left);
-    bind(a, user);
-    incdec32(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
-    bind(a, left);
-    /* The function and the code: the caller holds the function, and the
-       code is released here, outside the callee's unit, which its last
-       reference frees. */
-    static const int32_t refs[] = { offsetof(struct lu_frame, func), offsetof(struct lu_frame, code) };
-    for (int i = 0; i < 2; i++) {
-        load(a, RDX, RBP, FRAME_SLOT);
-        load(a, RDX, RDX, refs[i]);
-        decref(a, RDX, NULL, NULL, -1);
-    }
-    load(a, RDX, RBP, FRAME_SLOT);
-    store(a, R14, offsetof(PyThreadState, datastack_top), RDX);
     takes_back(a, takes);
     load(a, RAX, RSP, 0);
     jmp(a, done);
+    cold_begin(a);
     bind(a, exited);
     mov_rr(a, RDI, R14);
-    load(a, RSI, RBP, FRAME_SLOT);
+    load(a, RSI, RSP, 0);                       /* the frame, for DEOPT and ERROR */
     op_rr(a, 0, 0x89, RAX, RDX);                /* mov edx, eax */
-    mov_ri(a, RCX, 0);                          /* no value: not a return */
+    mov_rr(a, RCX, RSI);
     mov_ri(a, R8, 0);                           /* no marker: the caller's frame is under it */
     call_abs(a, (void *)lu_jit_finish);
     if (takes != 0) {
@@ -1956,6 +1929,7 @@ direct_done(struct asm_ *a, uint64_t takes, int done)
         load(a, RAX, RSP, 0);
     }
     jmp(a, done);
+    cold_end(a);
 }
 
 /* The direct call of the function in RAX with `nargs` positional
@@ -1985,7 +1959,6 @@ direct_call(struct asm_ *a, int nargs, int off, uint64_t takes, int slow, int do
     lea(a, RDX, RSP, off);
     mov_rr(a, RCX, RSP);                        /* the value goes over the callable's word */
     mov_ri(a, R8, (int64_t)(takes >> (off / 8)));
-    lea(a, R9, RBP, FRAME_SLOT);
     rex(a, 0, 0, 0, R11);
     b1(a, 0xFF);
     modrm_rr(a, 2, R11);                        /* call r11 */
@@ -2497,16 +2470,6 @@ free_in_line(struct asm_ *a, int other, int done)
     b1(a, 0xFF);
     modrm_mem(a, 1, R11, offsetof(mi_page_t, used));   /* dec word [r11+used] */
     jmp(a, done);
-}
-
-/* test r64, imm32 */
-static void
-test_ri(struct asm_ *a, int r, int32_t imm)
-{
-    rex(a, 1, 0, 0, r);
-    b1(a, 0xF7);
-    modrm_rr(a, 0, r);
-    b4(a, imm);
 }
 
 /* To `label` when the type in RAX has LU_TPFLAGS_PLAIN_RELEASE. */
@@ -5193,12 +5156,13 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
             load(a, R11, R15, prev);
             store(a, R14, offsetof(PyThreadState, exc_info), R11);
             store_mi(a, R15, prev, 0);
-            if (lu_frame_is_kernel(f->code)) {         /* lu_depth_leave */
-                alu_mi(a, 1, ALU_ADD, R14, offsetof(struct lu_task, kernel_room), f->code->co_framesize);
-            }
-            else {
-                incdec32(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
-            }
+        }
+        /* lu_depth_leave, before the releases, as lu_frame_drop: their finalizers get the depth back. */
+        if (lu_frame_is_kernel(f->code)) {
+            alu_mi(a, 1, ALU_ADD, R14, offsetof(struct lu_task, kernel_room), f->code->co_framesize);
+        }
+        else {
+            incdec32(a, 0, R14, offsetof(PyThreadState, py_recursion_remaining));
         }
         return 0;
     case OP_FRAME_STORE:
@@ -5230,8 +5194,14 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         store(a, RAX, 0, RCX);
         op_rm(a, 0, 0x0FB6, RAX, R15, offsetof(struct lu_frame, home));
         op_rm(a, 0, 0x88, RAX, R15, offsetof(struct lu_frame, owner));      /* its owner's again: lu_gen_finish's, a generator's */
-        mov_ri(a, RAX, in->imm ? LU_JIT_RAISED : LU_JIT_RETURN);           /* imm: the exception set, no value */
-        jmp(a, a->epilogue);
+        if (!(f->code->co_flags & LU_CO_GENERATORS)) {
+            frame_end(a, in->imm ? LU_JIT_RAISED : LU_JIT_RETURN);           /* imm: the exception set, no value */
+            jmp(a, a->epilogue);
+        }
+        else {
+            mov_ri(a, RAX, in->imm ? LU_JIT_RAISED : LU_JIT_RETURN);
+            jmp(a, a->end);
+        }
         return 0;
     case OP_JUMP: case OP_BRANCH:
         return 0;               /* the block's end does it */
@@ -5267,6 +5237,66 @@ edge_moves(struct asm_ *a, int b, int succ)
     }
     parallel_moves(a, moves, nm);
     free(moves);
+}
+
+/* Whether the object in r may lose a reference here without being freed
+   (immortal, or this thread's with a local count above one, the count
+   left in `count`): else `end`. Clobbers the flags. */
+static void
+spare_ref(struct asm_ *a, int r, int count, int end)
+{
+    int ok = new_label(a);
+    load32(a, count, r, offsetof(PyObject, ob_ref_local));
+    cmp32_ri8(a, count, -1);
+    jcc(a, CC_E, ok);                           /* immortal */
+    cmp32_ri8(a, count, 1);
+    jcc(a, CC_BE, end);
+    cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, end);
+    bind(a, ok);
+}
+
+/* The reference spare_ref found, given back. */
+static void
+drop_spare(struct asm_ *a, int r, int count)
+{
+    int immortal = new_label(a);
+    cmp32_ri8(a, count, -1);
+    jcc(a, CC_E, immortal);
+    incdec32(a, 1, r, offsetof(PyObject, ob_ref_local));
+    bind(a, immortal);
+}
+
+/* A root's return ends its frame (lu_frame_end) when nothing it gives
+   back can be freed: no frame object, the frame not its datastack
+   chunk's first, the function's and code's references spare. Everything
+   is tested before anything moves; else `end`, where C ends the frame
+   once the unit has left (epilogue). RAX is the result r after.
+   Clobbers RCX, RDX, R8, R11 and the flags. */
+static void
+frame_end(struct asm_ *a, int r)
+{
+    int slow = new_label(a);
+    cmp_mi(a, 1, R15, offsetof(struct lu_frame, frame_obj), 0);
+    jcc(a, CC_NE, slow);
+    load(a, R11, R14, offsetof(PyThreadState, datastack_chunk));
+    lea(a, R11, R11, offsetof(_PyStackChunk, data));
+    alu_rr(a, ALU_CMP, R11, R15);
+    jcc(a, CC_E, slow);
+    thread_id(a, RAX);
+    load(a, RDX, R15, offsetof(struct lu_frame, func));
+    spare_ref(a, RDX, RCX, slow);
+    load(a, R11, R15, offsetof(struct lu_frame, code));
+    spare_ref(a, R11, R8, slow);
+    drop_spare(a, RDX, RCX);
+    drop_spare(a, R11, R8);
+    store(a, R14, offsetof(PyThreadState, datastack_top), R15);
+    mov_ri(a, RAX, r);
+    cold_begin(a);
+    bind(a, slow);
+    mov_ri(a, RAX, r);
+    jmp(a, a->end);
+    cold_end(a);
 }
 
 static void
@@ -5418,10 +5448,23 @@ epilogue(struct asm_ *a)
     pops(a);
     b1(a, 0xC3);
     cold_begin(a);
+    int tail = new_label(a);
     bind(a, stale);
-    pops(a);
+    mov_ri(a, RCX, 0);                          /* its frame ended */
+    jmp(a, tail);
+    bind(a, a->end);
+    load(a, R11, RBP, ACT_AT(outer));
+    store(a, R14, offsetof(struct lu_task, jit_act), R11);
+    if (a->serial) {
+        load(a, R11, RBP, ACT_AT(unlocked_jit));
+        store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);
+    }
+    mov_rr(a, RCX, R15);                        /* the frame C ends */
+    bind(a, tail);
     mov_ri(a, RDI, (int64_t)(intptr_t)a->unit);
     op_rr(a, 0, 0x89, RAX, RSI);                /* mov esi, eax */
+    mov_rr(a, RDX, R14);
+    pops(a);
     mov_ri(a, R11, (int64_t)(intptr_t)lu_jit_left);
     rex(a, 0, 0, 0, R11);
     b1(a, 0xFF);
@@ -5436,10 +5479,18 @@ epilogue(struct asm_ *a)
     cold_end(a);
 }
 
+/* DEOPT and ERROR name the unit's frame in the result word (jit.h enum
+   lu_jit_result). Clobbers RCX. */
+static void
+name_frame(struct asm_ *a)
+{
+    load(a, RCX, RBP, RESULT_SLOT);
+    store(a, RCX, 0, R15);
+}
+
 /* The direct entry (target.h struct lu_jit_direct): RDI the task, RSI
    the function, RDX its arguments, RCX the result's word, R8 the
-   arguments that give their references, R9 the caller's word for the
-   frame. The gate, then what making the frame needs (a live unit for the
+   arguments that give their references. The gate, then what making the frame needs (a live unit for the
    function's globals and builtins, recursion and datastack room, as
    lu_frame_push), decline with 0 and nothing done. Then the activation is
    linked, the frame pushed and bound as lu_frame_push makes it, the
@@ -5492,7 +5543,6 @@ direct_entry(struct asm_ *a)
     }
     mov_rr(a, R15, R10);
     store(a, RBP, RESULT_SLOT, RCX);
-    store(a, R9, 0, R15);
     mov_ri(a, R11, (int64_t)(intptr_t)code);
     store(a, R15, offsetof(struct lu_frame, code), R11);
     incref(a, R11);                             /* clobbers RAX and RCX only */
@@ -5550,6 +5600,7 @@ direct_entry(struct asm_ *a)
         call_abs(a, (void *)lu_jit_prologue);
         op_rr(a, 0, 0x85, RAX, RAX);            /* test eax, eax */
         jcc(a, CC_E, made);
+        name_frame(a);
         mov_ri(a, RAX, LU_JIT_ERROR);
         jmp(a, a->epilogue);
         bind(a, made);
@@ -5628,6 +5679,7 @@ exits(struct asm_ *a)
     b1(a, 0x8D);
     modrm_mem(a, R9, RBP, SPILL_BASE);          /* lea r9, [rbp+SPILL_BASE] */
     call_abs(a, (void *)lu_jit_deopt);
+    name_frame(a);
     jmp(a, a->epilogue);
 }
 
@@ -5644,6 +5696,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     a->epilogue = new_label(a);
     a->restore = new_label(a);
     a->decline = new_label(a);
+    a->end = new_label(a);
     a->entered = new_label(a);
     a->save_all = new_label(a);
     a->restore_all = new_label(a);
@@ -5657,7 +5710,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     }
     /* After push rbp the stack is 16-aligned and the five saves leave it
        8 off, so the frame is 8 more than a multiple of 16. */
-    int bytes = 8 + ACT_BYTES + 8 + 8 * f->nspill + 8 * maxargs;  /* RESULT_SLOT, ACT_SLOT, FRAME_SLOT, spills, arguments */
+    int bytes = 8 + ACT_BYTES + 8 * f->nspill + 8 * maxargs;      /* RESULT_SLOT, ACT_SLOT, spills, arguments */
     a->frame_bytes = ((bytes + 15) & ~15) + 8;
     for (int v = 0; v < f->nins; v++) {
         int32_t loc = f->ins[v].loc;

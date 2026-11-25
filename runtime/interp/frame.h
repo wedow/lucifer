@@ -394,12 +394,11 @@ void lu_frame_release(struct lu_frame *f);
 /* Gives back the datastack space of a frame that began its chunk. */
 void lu_frame_free_chunk(PyThreadState *ts);
 
-/* Releases an unlinked frame's references and its datastack space. The
-   frame must be the task's topmost. */
+/* lu_frame_drop's second half: what an unlinked frame whose depth was
+   given back still holds, and its datastack space. */
 static inline Py_ALWAYS_INLINE void
-lu_frame_drop(PyThreadState *ts, struct lu_frame *f)
+lu_frame_end(PyThreadState *ts, struct lu_frame *f)
 {
-    lu_depth_leave(ts, f->code);        /* before the releases, as CPython: their finalizers get the depth back */
     if (f->frame_obj == NULL) {
         lu_frame_release_refs(f);
     }
@@ -413,6 +412,15 @@ lu_frame_drop(PyThreadState *ts, struct lu_frame *f)
     else {
         lu_frame_free_chunk(ts);
     }
+}
+
+/* Releases an unlinked frame's references and its datastack space. The
+   frame must be the task's topmost. */
+static inline Py_ALWAYS_INLINE void
+lu_frame_drop(PyThreadState *ts, struct lu_frame *f)
+{
+    lu_depth_leave(ts, f->code);        /* before the releases, as CPython: their finalizers get the depth back */
+    lu_frame_end(ts, f);
 }
 
 /* Unlinks the frame, then releases its references and its datastack space.

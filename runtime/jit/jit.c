@@ -180,6 +180,7 @@ static struct {
     unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired,
         generic;
     unsigned long resumes, resumes_compiled, raised;
+    unsigned long left_stale, ended_in_c;   /* lu_jit_left: a stale unit's activations, frames C ended */
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
     unsigned long bailouts[256];        /* side exits planted, per base opcode */
@@ -1751,13 +1752,49 @@ unit_for(PyThreadState *ts, struct lu_frame *frame, struct lu_jit_code *jc, int 
    (LU_JIT_NONE) for an event pending, a low C stack, death, or tools other
    than those it was built under: then it dies, still in that window, as
    it linked nothing. */
+/* The task as a frame's push left it, for checking a unit's frame end:
+   current frame, depth and datastack top. */
+struct as_before {
+    struct _PyInterpreterFrame *current;
+    int remaining, kernel_room;
+    PyObject **top;
+};
+
+static struct as_before
+as_before(PyThreadState *ts, struct _PyInterpreterFrame *current, PyCodeObject *code, PyObject **top)
+{
+    struct as_before b = { current, ts->py_recursion_remaining, ((struct lu_task *)ts)->kernel_room, top };
+    if (code != NULL) {
+        b.remaining += !lu_frame_is_kernel(code);
+        b.kernel_room += lu_frame_is_kernel(code) ? code->co_framesize : 0;
+    }
+    return b;
+}
+
+/* A unit returned or raised: its frame ended as the protocol says. */
+static void
+check_ended(PyThreadState *ts, int r, struct as_before b)
+{
+    if (r != LU_JIT_RETURN && r != LU_JIT_RAISED) {
+        return;
+    }
+    if (ts->current_frame != b.current || ts->py_recursion_remaining != b.remaining
+        || ((struct lu_task *)ts)->kernel_room != b.kernel_room || (b.top != NULL && ts->datastack_top != b.top)) {
+        Py_FatalError("jit: a unit's frame did not end as before its push");
+    }
+}
+
 static int
 enter(PyThreadState *ts, struct lu_unit *u, struct lu_frame *frame, PyObject **result)
 {
+    int first = (PyObject **)frame == &ts->datastack_chunk->data[0] || frame->owner == LU_FRAME_GENERATOR;
+    struct as_before b = as_before(ts, (struct _PyInterpreterFrame *)frame->previous, frame->code,
+                                   first ? NULL : (PyObject **)frame);
     int r = u->fn(ts, frame, result);
     if (r == LU_JIT_NONE) {
         tools_moved(state_of(frame->code), u, poll_word(ts) & ~LU_POLL_EVENTS_MASK);
     }
+    check_ended(ts, r, b);
     return r;
 }
 
@@ -1854,6 +1891,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
        the value sent, before RESUME 0: it goes on in its call's unit, the
        value dropped here. */
     int gen = frame->owner == LU_FRAME_GENERATOR;
+    uint8_t ret = frame->ret;           /* read before the unit ends the frame */
     lu_codeunit *resume = frame->instr;
     int fresh = gen && resume->op.code == POP_TOP && resume[1].op.code == RESUME && resume[1].op.arg == 0;
     resume += fresh;
@@ -1894,6 +1932,9 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     else {
         count(gen ? &stats.resumes_compiled : &stats.direct, 1);
     }
+    if (r == LU_JIT_RETURN && gen) {
+        *result = lu_gen_returned(ret, *result);
+    }
     *result = lu_jit_finish(ts, frame, r, *result, &entry);
     return 1;
 }
@@ -1904,7 +1945,7 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
 {
     PyCodeObject *code = (PyCodeObject *)func->func_code;
     struct lu_jit_code *jc = state_of(code);
-    int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, uint64_t, struct lu_frame **) =
+    int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, uint64_t) =
         jc != NULL && jc->direct.nargs == nargs ? __atomic_load_n(&jc->direct.entry, __ATOMIC_ACQUIRE) : NULL;
     /* An exception pending, which lu_eval would set aside, or a tool's
        callback running: the interpreter's call. */
@@ -1912,13 +1953,17 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
         return 0;
     }
     takes &= nargs < 64 ? ((uint64_t)1 << nargs) - 1 : ~(uint64_t)0;
-    struct lu_frame *frame;
+    PyObject **top = ts->datastack_top;
+    struct as_before b = as_before(ts, ts->current_frame, NULL,
+                                   top != NULL && top != &ts->datastack_chunk->data[0] ? top : NULL);
     PyObject *result;
-    int r = entry(ts, func, args, &result, takes, &frame);
+    int r = entry(ts, func, args, &result, takes);
     if (r == 0) {
         return 0;
     }
-    result = lu_jit_finish(ts, frame, r, result, NULL);
+    check_ended(ts, r, b);
+    /* DEOPT and ERROR name the unit's frame in the result word. */
+    result = lu_jit_finish(ts, (struct lu_frame *)result, r, result, NULL);
     /* The parameters released what the arguments gave them: they have it again. */
     for (; takes != 0; takes &= takes - 1) {
         Py_INCREF(args[__builtin_ctzll(takes)]);
@@ -1928,9 +1973,17 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
 }
 
 int
-lu_jit_left(struct lu_unit *u, int r)
+lu_jit_left(struct lu_unit *u, int r, PyThreadState *ts, struct lu_frame *f)
 {
-    left(u);
+    count(&stats.left_stale, __atomic_load_n(&u->stale, __ATOMIC_RELAXED) != 0);
+    left(u);                    /* first: ending the frame may free the unit with its code */
+    count(&stats.ended_in_c, f != NULL);
+    if (f != NULL && f->owner == LU_FRAME_GENERATOR) {
+        lu_gen_finish(ts, f);
+    }
+    else if (f != NULL) {
+        lu_frame_end(ts, f);
+    }
     return r;
 }
 
@@ -2780,7 +2833,8 @@ lu_jit_report(void)
     fprintf(stderr, ", raised %lu\n", stats.raised);
     fprintf(stderr, "jit: entries waited %lu, units retired %lu, generic passes %lu\n", stats.waited, stats.retired,
             stats.generic);
-    fprintf(stderr, "jit: units freed %lu, dead held %lu\n", dying.freed, dying.n);
+    fprintf(stderr, "jit: units freed %lu, dead held %lu, stale leaves %lu, frames ended in C %lu\n", dying.freed,
+            dying.n, stats.left_stale, stats.ended_in_c);
     fprintf(stderr, "jit: side exits compiled (bailouts) by opcode:");
     for (int i = 0; i < 256; i++) {
         if (stats.bailouts[i]) {

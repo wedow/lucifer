@@ -991,18 +991,6 @@ lu_jit_finish(PyThreadState *ts, struct lu_frame *frame, int r, PyObject *value,
         /* As the interpreter's YIELD_VALUE, back to a C caller. */
         lu_gen_suspend(ts, frame, frame->instr[-1].op.arg);
     }
-    else if (frame->owner == LU_FRAME_GENERATOR) {
-        /* As its return_frame: a loop's step ends with no value. */
-        uint8_t ret = frame->ret;
-        lu_gen_finish(ts, frame);
-        if (r == LU_JIT_RETURN && (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT)) {
-            Py_DECREF(value);
-            value = LU_MISSING;
-        }
-    }
-    else {
-        lu_frame_pop(ts, frame);
-    }
     if (entry != NULL) {
         ts->current_frame = (struct _PyInterpreterFrame *)entry->previous;
     }

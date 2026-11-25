@@ -326,33 +326,34 @@ struct lu_jit_act {
 
    The entry is a C function:
        int entry(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args,
-                 PyObject **result, uint64_t takes, struct lu_frame **frame)
+                 PyObject **result, uint64_t takes)
    It makes the checks the interpreter makes at a call and at RESUME, and
    returns 0 with nothing done when one fails. Else it pushes the frame,
-   names it in *frame, binds the nargs arguments (those in `takes`, bits
-   by index, give their references to the parameters; the others are
-   counted), runs the prologue (lu_jit_prologue where it makes cells:
-   LU_JIT_ERROR when that raises) and runs the unit: an enum
-   lu_jit_result. The caller then either pops the frame (LU_JIT_RETURN,
-   the value in *result) as lu_frame_pop pops it, or has the interpreter
-   run it (lu_jit_finish). */
+   binds the nargs arguments (those in `takes`, bits by index, give their
+   references to the parameters; the others are counted), runs the
+   prologue (lu_jit_prologue where it makes cells: LU_JIT_ERROR when that
+   raises) and runs the unit: an enum lu_jit_result, as every unit
+   returns one (struct lu_unit fn). */
 struct lu_jit_direct {
     void *entry;
     int nargs;
 };
 int lu_jit_direct_nargs(PyCodeObject *code);
 
-/* A stale unit's epilogue jumps here, its machine frame popped, with r
-   its result: the activation it ended is counted (jit.c left), which may
-   free the unit; then r to the unit's caller. */
-int lu_jit_left(struct lu_unit *u, int r);
+/* A unit's epilogue jumps here, its machine frame popped, with r its
+   result, when it is stale or did not end its frame f itself (else f is
+   NULL): the activation it ended is counted (jit.c left), which may free
+   the unit; then f is ended (lu_frame_end, or lu_gen_finish), which may
+   free it too; then r to the unit's caller. */
+int lu_jit_left(struct lu_unit *u, int r, PyThreadState *ts, struct lu_frame *f);
 int lu_jit_prologue(struct lu_frame *frame);
 /* The end of a unit a C caller or a direct call entered (r not
-   LU_JIT_NONE), the frame's value in `value` when r is LU_JIT_RETURN:
-   the frame popped or suspended, or run on by the interpreter; `entry`
-   the C-entry marker linked under the frame (lu_jit_run), or NULL (a
-   direct call, whose caller's frame is under it). The call's value, or
-   NULL with an exception (a generator's step that ended: LU_MISSING). */
+   LU_JIT_NONE), the frame's value in `value` when r is LU_JIT_RETURN
+   (a generator's as lu_gen_returned makes it): the frame suspended, or
+   run on by the interpreter; a frame that returned or raised the unit
+   ended. `entry` is the C-entry marker linked under the frame
+   (lu_jit_run), or NULL (a direct call, whose caller's frame is under
+   it). The call's value, or NULL with an exception. */
 PyObject *lu_jit_finish(PyThreadState *ts, struct lu_frame *frame, int r, PyObject *value, struct lu_frame *entry);
 
 

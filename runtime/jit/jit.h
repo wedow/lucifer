@@ -18,20 +18,21 @@
 
 enum lu_jit_mode { LU_JIT_OFF, LU_JIT_ON, LU_JIT_ALWAYS };
 
-/* What lu_jit_enter did. */
+/* What lu_jit_enter did, as every unit's entry returns it. */
 enum lu_jit_result {
     LU_JIT_NONE,        /* nothing ran: interpret on from the frame as saved */
     LU_JIT_RETURN,      /* the frame's function returned *result (a new reference); the
-                           frame is still pushed, its stack empty */
+                           frame is ended: unlinked, its depth back, released, its datastack
+                           space given back (a generator's: lu_gen_finish) */
     LU_JIT_DEOPT,       /* frames were handed back at an unexecuted boundary: continue
-                           with ts->current_frame, which may be an inlined callee's */
-    LU_JIT_ERROR,       /* ts->current_frame raised: unwind from its instr */
+                           with ts->current_frame, which may be an inlined callee's;
+                           *result names the unit's own frame */
+    LU_JIT_ERROR,       /* ts->current_frame raised: unwind from its instr; *result as for DEOPT */
     LU_JIT_YIELD,       /* the frame, a generator's, yields *result (a new reference): it is saved at its
                            resume point with its values, as the interpreter's YIELD_VALUE saves it, and is
                            still to be suspended */
     LU_JIT_RAISED,      /* the frame's function raised (the exception is set) with no handler: the
-                           frame is still pushed, its slots released, as the interpreter's unwinding
-                           leaves it before it pops the frame */
+                           frame is ended as for RETURN */
 };
 
 /* Back-edges (at one site) or calls before a code is compiled

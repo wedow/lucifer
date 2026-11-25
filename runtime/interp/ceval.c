@@ -1357,6 +1357,9 @@ eval_frame(PyThreadState *ts, struct lu_frame *frame, int mode)
     Py_ssize_t lasti;           /* the raising instruction, in code units, for the unwinder */
     PyObject *result;
     PyObject *retval;           /* what a returning or yielding frame hands its caller */
+    struct lu_frame *caller;    /* a returning or raising frame's, read before it ends */
+    uint8_t ret;                /* how its caller takes its value */
+    int from_builtin;           /* it ran kernel code */
     /* The call tail's operands: the callable and the owned argument values,
        positional first, then the keywords named by kwnames. */
     PyObject *callable, *kwnames, **args, **base, **to_free;
@@ -2240,23 +2243,19 @@ op_INSTRUMENTED_RETURN_VALUE: {
 op_RETURN_VALUE:
     retval = POP();
     frame->stackpointer = sp;
-return_frame: {
-    struct lu_frame *caller = frame->previous;
-    uint8_t ret = frame->ret;
-    int from_builtin = (code->co_flags & LU_CO_KERNEL) != 0;
+return_frame:
+    caller = frame->previous;
+    ret = frame->ret;
+    from_builtin = (code->co_flags & LU_CO_KERNEL) != 0;
     if (frame->owner == LU_FRAME_GENERATOR) {
-        /* Leaves caller current: lu_gen_finish unlinks the frame, or compiled
-           code's return (OP_UNLINK) already did. */
-        lu_gen_finish(ts, frame);
-        if (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT) {
-            Py_DECREF(retval);
-            retval = LU_MISSING;
-        }
+        lu_gen_finish(ts, frame);       /* leaves caller current: it unlinks the frame */
+        retval = lu_gen_returned(ret, retval);
     }
     else {
         ts->current_frame = (struct _PyInterpreterFrame *)caller;      /* the frame leaves the stack first */
         lu_frame_drop(ts, frame);
     }
+returned:
     if (caller->owner == LU_FRAME_C_ENTRY) {
         ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
         return retval;
@@ -2271,7 +2270,6 @@ return_frame: {
         POLL();                 /* after a builtin's call, as CPython's CALL polls */
     }
     DISPATCH();
-}
 
 op_RETURN_GENERATOR:
     /* The function's frame moves into a new generator, which it returns. */
@@ -3098,12 +3096,17 @@ op_JUMP_BACKWARD: {
 jit_enter:
     /* Compiled code runs the frame from next_instr (runtime/jit/jit.h). */
     SAVE_FRAME();
+    /* A unit that returns or raises has ended its frame, which may be gone. */
+    caller = frame->previous;
+    ret = frame->ret;
+    from_builtin = (code->co_flags & LU_CO_KERNEL) != 0;
+    int was_gen = frame->owner == LU_FRAME_GENERATOR;
     switch (lu_jit_enter(ts, frame, &result)) {
     case LU_JIT_NONE:
         DISPATCH();
     case LU_JIT_RETURN:
-        retval = result;
-        goto return_frame;
+        retval = was_gen ? lu_gen_returned(ret, result) : result;
+        goto returned;
     case LU_JIT_DEOPT:
         frame = (struct lu_frame *)ts->current_frame;
         LOAD_FRAME();
@@ -3113,7 +3116,7 @@ jit_enter:
         LOAD_FRAME();
         goto error;
     case LU_JIT_RAISED:
-        goto unwound;           /* the frame raised and has no handler: it goes */
+        goto unwound_caller;    /* the frame raised, had no handler and is gone */
     case LU_JIT_YIELD:
         /* The unit saved the frame as YIELD_VALUE does: its oparg is the instruction's before the resume point. */
         retval = result;
@@ -4391,14 +4394,14 @@ exception_unwind: {
     if (!lu_no_tools_for_global_event(ts, PY_MONITORING_EVENT_PY_UNWIND)) {
         lu_monitor_unwind(ts, frame, INSTR_START());
     }
-unwound:;
-    struct lu_frame *caller = frame->previous;
+    caller = frame->previous;
     if (frame->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, frame);
     }
     else {
         lu_frame_pop(ts, frame);
     }
+unwound_caller:
     if (caller->owner == LU_FRAME_C_ENTRY) {
         ts->current_frame = (struct _PyInterpreterFrame *)caller->previous;
         return NULL;
