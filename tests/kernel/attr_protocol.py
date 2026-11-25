@@ -395,6 +395,20 @@ survey('copied with __getattr__', WithGetattr(), (load_a, load_missing, builtins
 for label, owner in (('type', type), ('module', types.ModuleType)):
     Fake = type('Fake', (), {'__getattribute__': owner.__getattribute__})
     survey('fake ' + label, Fake(), (load_a, load_missing, builtins_get))
+for dunder in ('__setattr__', '__delattr__'):
+    Copy = type('Copy', (), {dunder: getattr(ast.AST, dunder), '__getattr__': hook_getattr})
+    survey('copied ' + dunder + ' with __getattr__', Copy(), (load_missing, store_a, delete_c, builtins_get))
+# __getattr__ gained and lost mid-loop under a copied __getattribute__, and
+# reached through a base.
+Copied = type('Copied', (), {'__getattribute__': ast.AST.__getattribute__, 'a': 'class-a'})
+copied = Copied()
+survey('copied getattribute', copied, (load_a, load_missing, builtins_get))
+Copied.__getattr__ = hook_getattr
+survey('copied getattribute+getattr', copied, (load_a, load_missing, builtins_get))
+del Copied.__getattr__
+survey('copied getattribute-getattr', copied, (load_a, load_missing, builtins_get))
+CopiedUnder = type('CopiedUnder', (Fallback,), {'__getattribute__': ast.AST.__getattribute__, 'a': 'class-a'})
+survey('copied under a fallback', CopiedUnder(), (load_a, load_missing, builtins_get))
 
 
 # 12. Descriptors: __slots__ members, C members and getsets, tuplegetters,
@@ -525,6 +539,30 @@ Switched.__class__ = MetaA
 print('metaclass change back', hot(class_k, Switched))
 
 
+# The new metaclass keeps type's lookup but has a data descriptor of the
+# name, which comes before the class's own; or only a __getattr__.
+class MetaProp(type):
+    k = property(lambda cls: 'meta-prop-k')
+
+
+class MetaFallback(type):
+    def __getattr__(cls, name):
+        return 'meta-fallback-' + name
+
+
+def class_gone(c):
+    return c.gone
+
+
+print('metaclass data descriptor', hot(class_k, Switched), hot(class_gone, Switched))
+Switched.__class__ = MetaProp
+print('metaclass data descriptor after', hot(class_k, Switched), hot(class_gone, Switched))
+Switched.__class__ = MetaFallback
+print('metaclass fallback', hot(class_k, Switched), hot(class_gone, Switched))
+Switched.__class__ = MetaA
+print('metaclass fallback back', hot(class_k, Switched), hot(class_gone, Switched))
+
+
 # 11. super() bypasses the instance's __getattribute__.
 class Parent:
     def who(self):
@@ -587,8 +625,13 @@ class Liar:
 
 
 for label, obj in (('plain', Root()), ('node', node(Node)), ('hooked', Hooked()), ('module', mod),
-                   ('class', Root), ('liar', Liar())):
+                   ('class', Root), ('liar', Liar()), ('fallback', Fallback()), ('module subclass', ModSub('m')),
+                   ('class with a metaclass', WithMeta), ('copied', copied), ('copied under a fallback', CopiedUnder()),
+                   ('fake type', Fake())):
     print('isinstance', label, hot(negative, obj))
+Meta.__getattr__ = meta_getattr
+print('isinstance class with a metaclass __getattr__', hot(negative, WithMeta))
+del Meta.__getattr__
 
 
 class PropertyLiar(Liar):

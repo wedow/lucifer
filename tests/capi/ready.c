@@ -395,6 +395,29 @@ static PyTypeObject Dicted_Type = {
     .tp_dictoffset = offsetof(Dicted, dict),
 };
 
+/* ready.Bare: a static type with no instance dict that names object's
+   attribute functions as its own slots, so its dict holds their wrappers. */
+typedef struct {
+    PyObject_HEAD
+    int i;
+} Bare;
+
+static PyMemberDef bare_members[] = {
+    { "i", Py_T_INT, offsetof(Bare, i), 0, NULL },
+    { NULL }
+};
+
+static PyTypeObject Bare_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Bare",
+    .tp_basicsize = sizeof(Bare),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_getattro = PyObject_GenericGetAttr,
+    .tp_setattro = PyObject_GenericSetAttr,
+    .tp_members = bare_members,
+};
+
 /* ready.Vec3 inherits from Vec and adds a field and nothing else. */
 typedef struct {
     Vec base;
@@ -1467,7 +1490,7 @@ PyInit_ready(void)
         || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
         || PyType_Ready(&Unhashable_Type) < 0
         || PyType_Ready(&CmpOnly_Type) < 0 || PyType_Ready(&OldAttr_Type) < 0 || PyType_Ready(&DocSig_Type) < 0
-        || PyType_Ready(&OldAttrSub_Type) < 0 || PyType_Ready(&Dicted_Type) < 0) {
+        || PyType_Ready(&OldAttrSub_Type) < 0 || PyType_Ready(&Dicted_Type) < 0 || PyType_Ready(&Bare_Type) < 0) {
         return NULL;
     }
     BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
@@ -1489,6 +1512,7 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Vec", (PyObject *)&Vec_Type) < 0
         || PyModule_AddObjectRef(m, "Vec3", (PyObject *)&Vec3_Type) < 0
         || PyModule_AddObjectRef(m, "Dicted", (PyObject *)&Dicted_Type) < 0
+        || PyModule_AddObjectRef(m, "Bare", (PyObject *)&Bare_Type) < 0
         || PyModule_AddObjectRef(m, "Locked", (PyObject *)&Locked_Type) < 0
         || PyModule_AddObjectRef(m, "Counter", (PyObject *)&Counter_Type) < 0
         || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0

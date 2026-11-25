@@ -486,3 +486,50 @@ finally:
     stop.set()
     replacer.join()
 print('dict replaced under reads', bad)
+
+# A static type with no instance dict whose slots are object's attribute
+# functions (its dict holds their wrappers): a new name has no __dict__ to
+# go to, which the message says wherever the store slot is object's own
+# function, on the type and on a class over it; a class that overrides
+# __setattr__ or __delattr__ has another slot and the shorter message.
+from ready import Bare
+
+
+class BareSub(Bare):
+    __slots__ = ()
+
+
+class BareSet(Bare):
+    __slots__ = ()
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+
+
+class BareDel(Bare):
+    __slots__ = ()
+
+    def __delattr__(self, name):
+        object.__delattr__(self, name)
+
+
+def bare_store(o):
+    o.nope = 1
+
+
+def bare_delete(o):
+    del o.nope
+
+
+def bare_member(o):
+    o.i = 7
+    return o.i
+
+
+for cls in (Bare, BareSub, BareSet, BareDel):
+    o = cls()
+    print('no dict', cls.__name__, hot(bare_store, o), hot(bare_delete, o), hot(bare_member, o))
+BareSub.__delattr__ = BareDel.__delattr__
+print('no dict hook gained', hot(bare_store, BareSub()))
+del BareSub.__delattr__
+print('no dict hook lost', hot(bare_store, BareSub()))
