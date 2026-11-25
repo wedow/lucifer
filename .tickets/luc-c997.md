@@ -431,3 +431,15 @@ Each reproducer run against the oracle on master (7260c37d) and on stage 2 befor
 - L3 not fixed: passing a C getter's error through (instead of clearing it for the kernel to call the getter again) is not two lines: `builtin getattr` with a default and `hasattr` reach `lu_getattr_native` from `lu_native_call` and would then raise, and GENERIC_GETATTR must still reach `__getattr__`. For stage 5, with L2/D4 and L8/D6.
 - D4 is real: `capi_generic_getattr` (ctypes) shows `PyObject_GenericGetAttr` on a class answering type's lookup through the bases (`B.x`, `B.m` from a base, where CPython raises) and on a module reading the dict before `__class__`; listed in kernelcheck's XFAIL as luc-c997 until stage 5.
 - Also added: `attr_protocol` "isinstance property gained/lost" (the `__class__` property reached through `__bases__` assignment mid-loop; passes on master); `ready.Dicted` (a static type with its dict at `tp_dictoffset`, members of each kind, a getset, a Python subclass: reads, stores, deletes, `__dict__` replaced, emptied, shared).
+- Gate (head 0b0381fc's runtime): attr_protocol, the new programs and 60 neighbours in jit-off, plain, jit, jit-deopt; 14 thread programs in handoff, three runs; check-capi-ext, all 17; full tools/jitcheck: all pass (capi_generic_getattr XFAIL). The new kernel programs pass in a fresh worktree built with `make -j4` alone (plain, jit; threads in handoff).
+
+| row | JIT off, master | JIT off, head | JIT on, master | JIT on, head |
+|---|---|---|---|---|
+| -c pass | 115.1M | 113.8M (-1.2%) | 132.2M | 130.2M (-1.6%) |
+| stdlib imports | 1154.4M | 1138.0M (-1.4%) | 1356.1M | 1342.3M (-1.0%) |
+| pyflakes | 12.59G | 8.84G (-29.8%) | 9.93G | 8.35G (-15.9%) |
+| tomli_loads | 616.07G | 612.95G (-0.5%) | 103.41G | 103.42G (+0.0%) |
+| Richards | 405.39G | 399.98G (-1.3%) | 55.52G | 55.52G (0.0%) |
+| DeltaBlue | 73.71G | 70.40G (-4.5%) | 24.96G | 24.84G (-0.5%) |
+
+  Instructions, pinned, two runs per arm, minimum; master's runtime is 7260c37d's (origin/master since added tests and tools only).
