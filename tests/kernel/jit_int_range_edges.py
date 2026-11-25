@@ -104,9 +104,12 @@ for t in threads:
 for t in threads:
     t.join()
 print(sorted(sums))
+# Each thread steps the shared iterator until it is exhausted: CPython's
+# step is unsynchronized, so its threads can lose decrements of the length
+# and a fixed number of steps per thread need not exhaust it.
 shared = iter(range(100000))
 seen = []
-threads = [threading.Thread(target=consume, args=(shared, 30000, seen)) for _ in range(4)]
+threads = [threading.Thread(target=consume, args=(shared, 1 << 62, seen)) for _ in range(4)]
 for t in threads:
     t.start()
 for t in threads:
