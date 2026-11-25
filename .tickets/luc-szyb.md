@@ -731,3 +731,75 @@ Against R6's predictions:
 - **cli: no chain.** At most one purchase per unit among the top 20; every purchase is paid by losses counted in its own unit (by construction of the rule; nothing in the logs contradicts it). Stage 1's purchases in the top 20 are priced 85.5M (pyflakes), 198.3M (pygments), 0 (black), against the master's growth and hot-site builds there of about 155M, 145M and 83M by the model. Pygments' purchase is the larger one (Pattern.match's 2,250-IR unit in line in `_format_lines`), so cli compile ms is a risk on pygments.
 
 No pattern contradicts R6 as stated (tomli bought by value 1, richards within about two values, no cli chain priced above its losses). Stage 1 goes ahead. Risks carried to the table: django and genshi buy later than the master at protocol alone; tomli keeps 72M a value out of line at depth 2.
+
+## Stage 1 built and tabled alone (2026-11-25, not landable: three misses)
+
+Branch luc-site1 on origin/master ae250d27: lanes d6dca23c, change 9afb781e.
+
+What was built (runtime/jit/jit.c hot_exit, eval_call.c lu_ev_room):
+- A look values each site left out at its calls times today's out_cost and, once its callee has a unit, prices it at that callee's last build (`built_ins`, any entry). Sites by density; admitted while value per IR covers `BUILD_INS + BUILD_INS2 (2n + m)`; bought when the admitted sites' value covers `B(n + sum m)`. Kill cause `sites`, a `buy` event per site (callee, IR, calls).
+- Path key: the callee's code mixed with each frame's (code, pc) from the site to the root, as `lu_ev_prof` mixes places. The bought set is per entry (`jc->bought`: entry, key). At each call the evaluator looks the key up at every enclosing frame: the root's entry, and each in-line frame's code at its call entry, so a bought callee brings the sites its own unit bought (R4).
+- A bought site goes in line with a fresh allowance (today's hot-room mechanism), whether or not the budget is spent.
+- Arming: each site is armed for `due * calls_i / value_total` calls (its share of the shortfall at the proportions seen), at least `DEOPT_INS / out_cost`; `due` is the admitted set's shortfall, or the densest site's alone when none is admitted; when no site is priced, as many calls again as were made (today's rule). The first arm is unchanged (the unit's IR count).
+- Deleted: `grown`, `MAX_GROWN`, `LOOP_CALLS`, the hot-site quarter and turns clauses, `lu_jit_site_key`, `lu_jit_hot_site`, `hots`, `refused` (unit and func). First builds unchanged.
+
+Where it departs from Revision 1:
+- Copies on one path (arms, a peeled turn) all go in line once bought, not once per build as the hot site did.
+- A peel refused for room no longer feeds anything (it fed `grown` through `refused`); such a loop is not peeled later.
+- m is the callee code's last build of any entry, not specifically its call entry.
+
+Lanes (tools/jitcheck), master -> stage 1:
+- sitefinal (jit_site_final.py, 160k/320k): FAIL 222,893 -> 438,479 compiled calls -> PASS 157,585 -> 218,366.
+- siteshape (jit_site_shape.py): FAIL 339,139 -> 665,788 -> PASS 249,911 -> 265,909.
+- sitepath (jit_site_path.py, 320k, event log): FAIL no purchase of leaf -> PASS: the build that took leaf in added 348 IR (leaf's own unit 514).
+- sitechain (jit_site_chain.py, was jit_grown_generic.py / growchain): FAIL no purchase -> PASS 1 purchase, 18 sites, 146.6M predicted.
+- siteentry (jit_site_entry.py, was jit_entry_growth.py / entrygrowth): FAIL -> PASS, 11 builds of entry; no loop entry carries bought sites.
+- Held: churn (2,861 first, 13,452 rebuilt, bound 58,418 -> 2,902, 13,441, 58,459), classtests (7,585 -> 7,629 rebuilt), learnprice (4,390 -> 4,390), typed (633,375 -> 629,521 helpers; ledger 17,828 -> 17,859 rebuilt), grown (1,948 -> 1,978 IR), dispatch (equal), megaiter (476,123 -> 496,726 on master; 160,765 -> 161,469: the hot sites the quarter clause blocked are bought). growchain and entrygrowth are replaced (their property was MAX_GROWN and grown levels, which are gone); methodgrow is not on master.
+
+Gate: focused kernel programs (75: the jit_* call, growth, gen, mark, policy, site programs, jit_direct_calls, jit_namespace_collect, entry_tools_midcall) 75/75 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; tools/jitcheck 1 failing: toolsoff (cprofile output differs), which fails the same way on master; tools/jitcost PASS. New programs and lanes in a fresh worktree built with plain make -j4: 5/5 in all four lanes, lanes PASS.
+
+Table, R7's metric. Instructions:u on core leases, pinned, two runs per arm alternated, min of the two; master = origin/master ae250d27. pyperformance rows at the reference loops (django_template, richards 2; deepcopy 218; the rest 1), -w 1; "all values" is warm-up plus timed values at -n 3, compile included; best value at -n 20; best of three reported only. M instructions, compile in brackets. Regex windows as luc-1kz0 (-l 32/64/128, compile = build-pipeline self samples x 1.13). Cli rows whole process, compile ms from -X lucifer_jit_stats in the same pinned runs.
+
+| row | figure | master M (compile) | stage 1 M (compile) | stage 1 vs master | runs |
+|---|---|---|---|---|---|
+| django_template | all values, -n 3 | 4,693.4 (667.2) | 4,622.2 (572.6) | -1.5% | 2/2 |
+| django_template | best value, -n 20 | 853.6 (0.0) | 853.6 (0.0) | +0.0% | 2/2 |
+| django_template | best of three, -n 3 (reported) | 932.4 (25.4) | 917.4 (11.6) | -1.6% | 2/2 |
+| genshi | all values, -n 3 | 8,996.0 (1,088.2) | 8,859.8 (1,247.6) | -1.5% | 2/2 |
+| genshi | best value, -n 20 | 1,862.4 (2.0) | 1,623.4 (0.0) | -12.8% | 2/2 |
+| genshi | best of three, -n 3 (reported) | 1,876.6 (7.0) | 1,821.2 (79.2) | -3.0% | 2/2 |
+| richards | all values, -n 3 | 1,445.0 (283.6) | 1,445.0 (292.6) | +0.0% | 2/2 |
+| richards | best value, -n 20 | 240.0 (0.0) | 240.0 (0.0) | +0.0% | 2/2 |
+| richards | best of three, -n 3 (reported) | 245.8 (0.0) | 240.0 (0.0) | -2.4% | 2/2 |
+| tomli_loads | all values, -n 3 | 103,990.4 (2,748.0) | 93,998.4 (1,809.0) | -9.6% | 2/2 |
+| tomli_loads | best value, -n 20 | 22,512.1 (0.0) | 22,501.1 (0.0) | -0.0% | 2/2 |
+| tomli_loads | best of three, -n 3 (reported) | 25,034.1 (0.0) | 22,748.1 (55.0) | -9.1% | 2/2 |
+| deepcopy | all values, -n 3 | 5,470.8 (549.0) | 5,573.4 (705.6) | +1.9% | 2/2 |
+| deepcopy | best value, -n 20 | 947.4 (0.0) | 927.0 (0.0) | -2.2% | 2/2 |
+| deepcopy | best of three, -n 3 (reported) | 1,131.0 (37.8) | 1,151.8 (70.6) | +1.8% | 2/2 |
+| regex_v8 | all values, -n 3 | 8,099.0 (2,364.0) | 7,840.0 (2,115.0) | -3.2% | 2/2 |
+| regex_v8 | best value, -n 20 | 842.0 (20.0) | 833.0 (19.0) | -1.1% | 2/2 |
+| regex_v8 | best of three, -n 3 (reported) | 1,132.0 (215.0) | 1,089.0 (165.0) | -3.8% | 2/2 |
+| regex_v8 calls 64-128 | total / compile / run G | 54.27 / 4.06 / 50.22 | 51.49 / 1.15 / 50.34 | -5.1% total, -71.6% compile, +0.3% run | |
+| regex_v8 calls 128-256 | total / compile / run G | 104.56 / 5.83 / 98.72 | 100.18 / 0.73 / 99.45 | -4.2% total, -87.6% compile, +0.7% run | |
+| pyflakes whole | G; compile ms; IR | 8.070; 329; 175,619 | 8.436; 396; 195,228 | +4.5% | 2/2 |
+| black whole | G; compile ms; IR | 12.797; 586; 264,079 | 12.797; 588; 264,081 | +0.0% | 2/2 |
+| pygments whole | G; compile ms; IR | 13.881; 435; 161,453 | 13.496; 504; 163,320 | -2.8% | 2/2 |
+| cli compile ms (sum) | ms | 1350 | 1488 | +10.2% | |
+| awfy-Richards per iteration | M | 129.42 | 129.42 | -0.0% | |
+| awfy-DeltaBlue per iteration | M | 5.33 | 5.33 | +0.0% | |
+| awfy-CD per iteration | M | 249.87 | 248.68 | -0.5% | |
+
+Misses (landing bar: no row worse than 1% on either figure, cli compile ms not above master):
+- **deepcopy, all values at -n 3: +1.9%** (compile 705.6M against 549.0M; best value at -n 20 is -2.2%). Event log (-l 218 -n 3): stage 1 makes 7 site purchases where master made 5 doublings, each paid at its price: `_deepcopy_list` buys `_append` (12.5M paid / 12.5M price), `deepcopy` buys `object.__reduce_ex__` (18.7 / 18.7), `_deepcopy_dict` buys `_keep_alive` and `deepcopy` itself (1,336 IR; 52.6 / 52.4, the unit to 3,547 IR), `_deepcopy_tuple` three sites (33.9 / 33.9), `benchmark@57` four (18.8 / 18.8), `_reconstruct@3` three (20.0 / 20.0), `__import__` two (17.6 / 17.6). Master's doublings were bought later (deepcopy at 65,536 entries, 45.9M paid for 34.4M). The extra compile is purchases paid inside the short window that the steady state repays (-2.2%).
+- **pyflakes whole: +4.5%** (8.070G -> 8.436G; compile 329 -> 396 ms; IR built 175.6k -> 195.2k). Three purchases, 127.3M by the model, against master's one growth (34.9M): Checker.handleChildren (2,334 IR, 58.8M), Checker.NAME (1,035 IR, 37.0M), _is_typing_helper@3 (1,151 IR, 31.5M), each paid at its price at protocol plus callee losses. The larger units are then rebuilt for what their roots learn at their new size (builds 466 -> 470, IR +14k), which the purchase's price does not include.
+- **cli compile ms: +10.2%** (1,350 -> 1,488 ms: pyflakes +67, black +2, pygments +69). Pygments' whole run is -2.8%, but its purchase of Pattern.match into `HtmlFormatter._format_lines` (2,666 IR, 149.2M) makes later learned rebuilds of that unit larger (IR 161.0k -> 165.3k).
+
+Rows that gain: tomli_loads all values -9.6% (compile 2,748 -> 1,809M; best of three -9.1%, steady state equal), genshi best value at -n 20 -12.8% (1,862.4 -> 1,623.4M; pre measured 1,601.2) and all values -1.5%, django all values -1.5%, regex_v8 all values -3.2% and its windows' compile -72% and -88% (run +0.3%, +0.7%), richards best of three -2.4% (Packet.append_to in value 2, as the falsifier predicted), AWFY CD -0.5%.
+
+Reading: the site grain recovers the rows R6 named (tomli, genshi, richards, regex windows), and the losses are not a doubling's breadth (R8's abandon condition is not met). They are purchases that pay their own build but not the rebuilds the larger unit then incurs, on cold cli code and on deepcopy's short window. Check 6 (D) was not run: the bar is not met.
+
+## State (2026-11-25)
+
+- Revision 1 is current. Falsifier (check 4 offline): done, no contradiction. Stage 1: built and gated on luc-site1 (lanes d6dca23c, change 9afb781e), tabled alone against master: misses deepcopy all values +1.9%, pyflakes whole +4.5%, cli compile ms +10.2%; not landable as is. Check 6 not run; stage 2 not built.
+- Open question for the coordinator: price a purchase with the rebuilds its larger unit will incur (the cli and deepcopy misses), or accept those losses against the tomli, genshi and regex gains.
