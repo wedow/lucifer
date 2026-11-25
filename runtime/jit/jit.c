@@ -1809,11 +1809,8 @@ PyObject *
 lu_jit_new_gen(PyThreadState *ts, struct lu_frame *frame)
 {
     PyCodeObject *code = frame->code;
-    lu_codeunit *at = lu_code_start(code);
-    while (at->op.code == MAKE_CELL || at->op.code == COPY_FREE_VARS) {
-        at++;
-    }
-    if (at->op.code != RETURN_GENERATOR) {
+    lu_codeunit *at = lu_code_gen_start(code);
+    if (at == NULL) {
         return LU_JIT_DECLINED;
     }
     PyObject *gen = NULL;

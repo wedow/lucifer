@@ -5149,7 +5149,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            lu_gen_finish then releases only. */
         load(a, R11, R15, offsetof(struct lu_frame, previous));
         store(a, R14, offsetof(PyThreadState, current_frame), R11);
-        if (f->code->co_flags & LU_CO_GENERATORS) {
+        if (lu_code_gen_start(f->code) != NULL) {
             const int32_t gen = -(int32_t)offsetof(struct lu_gen, frame);
             const int32_t prev = gen + (int32_t)offsetof(struct lu_gen, exc_state.previous_item);
             store8_mi(a, R15, gen + (int32_t)offsetof(struct lu_gen, frame_state), LU_GEN_CLEARED);
@@ -5194,7 +5194,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         store(a, RAX, 0, RCX);
         op_rm(a, 0, 0x0FB6, RAX, R15, offsetof(struct lu_frame, home));
         op_rm(a, 0, 0x88, RAX, R15, offsetof(struct lu_frame, owner));      /* its owner's again: lu_gen_finish's, a generator's */
-        if (!(f->code->co_flags & LU_CO_GENERATORS)) {
+        if (lu_code_gen_start(f->code) == NULL) {
             frame_end(a, in->imm ? LU_JIT_RAISED : LU_JIT_RETURN);           /* imm: the exception set, no value */
             jmp(a, a->epilogue);
         }

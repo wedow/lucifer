@@ -38,6 +38,19 @@ lu_gen_of(struct lu_frame *f)
    over the frame `f`'s contents; `f` is left empty for lu_frame_pop. */
 PyObject *lu_gen_new(PyThreadState *ts, struct lu_frame *f);
 
+/* The code's RETURN_GENERATOR, its first instruction after MAKE_CELL and
+   COPY_FREE_VARS, or NULL: whether its frames past it are a generator's,
+   whatever its flags say (code.replace() keeps the bytecode). */
+static inline lu_codeunit *
+lu_code_gen_start(PyCodeObject *code)
+{
+    lu_codeunit *at = lu_code_start(code);
+    while (at->op.code == MAKE_CELL || at->op.code == COPY_FREE_VARS) {
+        at++;
+    }
+    return at->op.code == RETURN_GENERATOR ? at : NULL;
+}
+
 /* Whether callable is gen_throw, whose frames come linked down a
    delegation chain as the interpreter runs it. */
 int lu_gen_throws(PyObject *callable);
