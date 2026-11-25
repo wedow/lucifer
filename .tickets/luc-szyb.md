@@ -303,3 +303,48 @@ Reading. Pre wins the best of three on all three rows and loses the whole proces
 - **genshi: refuted.** Pre's lead is not growth awaiting payback. It is a steady-state gap: +13.4% best value and +11.9% whole process at -n 20, and +2.0% over all values at -n 3. Master's -0.5% whole-process edge at -n 3 is again only the outside-the-values saving (241M against a 183M deficit in the values).
 
 Abandon condition ("the premise": pre's lead is paid inside the process while the replay with true savings still buys later). For richards and genshi the first half is met: their leads are paid inside the benchmark's values. Whether the premise fails therefore rests on check 4 (the replay), which has not been run. For django the condition is not met. Ruling 2 (the acceptance metric) is needed for django_template alone. Best of three rewards growth that 20 values do not pay back, and no payback rule can recover that row on that metric.
+
+### Check 3: greedy with the budget unchanged (2026-11-25)
+
+What was built (wip commit on luc-site0, about 250 lines with check 1's log; not for landing):
+- **Counts.** A count run per program on the wip binary with `LUCIFER_SITES=2`. Every site taken in line gets a counter that never leaves: an extra `lu_out` entry after the unit's real outs, incremented by the existing `COUNT_OUT` with no look. Sites out of line keep today's counters. Each unit's counts are written at its kill and at each value's end (a hook in the value marks), and at process exit for the cli programs.
+- **Site log.** At every build the evaluator logs each site's decision with its stable name `code:line@pc<parent:line@next` (today's site key, with names in place of addresses), its callee, and the IR made while the callee's frame was built.
+- **Plan (offline, from the count run).** Per root and budget level (1000 << grown), today's allowance is spent in order of calls per IR instead of bytecode order:
+  - Allowance: the IR the count run's last build at that level actually took in line. Today's builds overshoot the nominal budget, because the test is at the call and an admitted callee adds whatever it adds.
+  - IR per site: its own in-line IR in that build (its frame's IR less its in-line children's), else its callee's own unit.
+  - A name counts as one decision, as the run-time key is. A name is admitted only once one of its parent names is. A parent ranks by the densest site below it.
+  - Hot sites (let past the budget) are left to today's rule.
+- **Measured run.** `LUCIFER_SITEPLAN` makes `lu_ev_room` admit a listed site whatever the budget, refuse a listed one (counted as today, so growth and the hot-site rule still see it), and apply today's test to anything unlisted. Lookups are memoized per site key, root and budget. Growth, hot sites, learned rebuilds and marks are unchanged.
+- **Caveat: an oracle, not the in-process counters the design names.** The counts come from a separate run of the same workload, so this bounds what selection alone can give, in-sample. The out-of-line counters alone cannot rank in-line sites against each other, because in-line sites have no count today.
+
+What the plans change, at each root's last count-run build (sites; calls in the count run):
+- tomli: 281 sites go out (3.4M calls) and 62 come in (9.7M calls). The eleven root-level sites of luc-iama all come in: `key_value_rule@59, 63, 67, 68, 74, 224, 273` at 316k calls a value each, plus `@370 Flags.set`.
+- django: 366 out (0 calls), 75 in (168k).
+- genshi: 344 out (14k), 122 in (973k).
+- richards: 129 out (20), 29 in (4.4k).
+- cli: pyflakes 431 out (6k) and 113 in (167k); black 541 out (39k) and 115 in (75k); pygments 291 out (6k) and 90 in (899k).
+
+Table. Arms are master, wip without a plan (the control: same binary as wip + plan) and wip + plan. Two runs per arm alternated, min of the two (spread 0.0-0.4%). Best value of -w 1 -n 3, M instructions (compile in brackets). Gap references: ad1eb461 measured here for tomli; pre from check 5 for the others.
+
+| row | master | wip, no plan | wip + plan | plan vs no plan | reference | gap | share of gap recovered |
+|---|---|---|---|---|---|---|---|
+| tomli_loads best value | 24,935.1 (1.0) | 24,934.1 (0.0) | 24,217.1 (392.0) | -2.9% | ad1eb461 22,239.1 | 2,695.0 | 27% |
+| tomli_loads whole process | 106,749 | 106,877 | 101,985 | -4.6% | | | |
+| django_template best value | 908.8 (13.0) | 908.8 (13.2) | 898.6 (26.6) | -1.1% | pre 855.8 | 53.0 | 19% |
+| django_template whole process | 9,708 | 9,799 | 9,732 | -0.7% | | | |
+| genshi best value | 1,918.4 (45.2) | 1,918.4 (45.0) | 1,866.4 (51.4) | -2.7% | pre 1,791.8 | 126.6 | 41% |
+| genshi whole process | 12,848 | 12,975 | 12,566 | -3.2% | | | |
+| richards best value | 246.6 (0.0) | 246.8 (0.0) | 242.4 (0.0) | -1.8% | pre 242.6 | 4.2 | 105% |
+| richards whole process | 4,690 | 4,817 | 4,800 | -0.4% | | | |
+| pyflakes whole (G; compile ms; IR) | 8.097; 347; 176,361 | 8.094; 347; 176,362 | 8.101; 355; 179,249 | +0.1% | | | |
+| black whole | 12.713; 641; 262,225 | 12.714; 658; 262,226 | 12.589; 599; 253,802 | -1.0% | | | |
+| pygments whole | 13.581; 430; 157,503 | 13.582; 437; 157,503 | 13.188; 448; 159,864 | -2.9% | | | |
+
+The wip binary without a plan matches master on every value. Its whole process is 0.1-2.7% higher: start-up compile is about 100M more, not investigated, and the same in both wip arms.
+
+Reading:
+- Selection alone, with the allowance unchanged and oracle counts, recovers about a quarter to two fifths of the tomli, django and genshi gaps, and all of richards' small one (HandlerTask's nested `Task.addPacket -> Packet.append_to` goes in line).
+- It gains 0.4-4.6% on every whole-process row except pyflakes (+0.1%). Cli IR built moves -3.1% to +1.6%. Compile ms rose on two of the three cli rows (+8 ms pyflakes, +11 ms pygments; black -59 ms).
+- **luc-iama's first mechanism is confirmed directly.** In key_value_rule's last build 9,500 of the 15,424 in-line IR sits at sites with no call in the last value (check 1). Spending the same allowance by density takes all eleven cut sites back in line. That recovers 27% of tomli's gap to ad1eb461, not all of it: the rest is per-pass cost of the in-line code itself (c684ad72's attribute path, luc-1kz0), which no selection removes.
+- The remaining django gap (81%) is pre's growth, which this arm does not touch (check 5: unpaid by -n 3). Genshi's remaining 59% is its steady-state units.
+- **Abandon conditions.** Stage 3's fallback ("spend the fixed allowance in density order") is shown to work as a mechanism: it gains on every row but pyflakes, with counts that the run-time key can only approximate. It is not yet a landable rule, because its counts here are an oracle and in-line sites have no counter today. Nothing here falsifies stage 1. On tomli, selection accounts for about a quarter of the cliff's cost. The rest is not the budget's size either: it is per-pass cost of the in-line code.
