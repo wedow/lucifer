@@ -475,29 +475,6 @@ lu_attr_way(PyTypeObject *tp, int field)
     int way = lu_attr_stored(tp, field);
     return way != LU_ATTR_UNSET ? way : lu_attr_classify(tp, field);
 }
-/* A site's own predicate, `legacy` (its value is the macro's), checked
-   against what the word says, `expected` (both pure: they are evaluated
-   again on a disagreement). They must agree, except where the type has one
-   of the disagreements the site is known to have (`gap`, LU_ATTR_GAP_*
-   bits), or a writer is between its dict change and its slot rewrite: out
-   of line, anything else is fatal. Each site that is switched to the word
-   loses its check. */
-enum {
-    LU_ATTR_GAP_WRAPPER = 1,    /* the type finds a C slot wrapper of a generic function: lookups miss it */
-    LU_ATTR_GAP_THUNK = 2,      /* the slot is the thunk: slot tests miss what it does */
-};
-__attribute__((cold)) uint32_t lu_attr_check_begin(PyTypeObject *tp, int gap);
-__attribute__((cold)) void lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ,
-                                             int legacy, uint32_t tag);
-#define LU_ATTR_CHECK(site, tp, field, expected, legacy, gap) \
-    __extension__({ \
-        int legacy_ = !!(legacy); \
-        uint32_t tag_; \
-        if (__builtin_expect(legacy_ != !!(expected), 0) && (tag_ = lu_attr_check_begin(tp, gap)) != 0) { \
-            lu_attr_check_end(site, tp, field, gap, !!(legacy) != !!(expected), legacy_, tag_);  /* again, under the lock */ \
-        } \
-        legacy_; \
-    })
 /* Whether instances of tp read attributes with object's algorithm, before
    any __getattr__. */
 static inline int

@@ -945,9 +945,7 @@ subclass_flags(struct ctx *c, const struct classes *cs)
    issubclass) is a subclass of one of the classes, relied on as of t's
    version: 1 or 0, or -1 when that cannot be told here. A negative
    isinstance answer stands only where obj.__class__ is t: t keeps
-   object's __class__, and object's attribute lookup (its slot, as
-   runtime/interp/ceval.c's object_attr_hook reads it, or object's
-   __getattribute__ by lookup). */
+   object's __class__ and reads it with object's lookup (its word). */
 static int
 known_subclass(struct ctx *c, PyTypeObject *t, const struct classes *cs, int instance)
 {
@@ -961,10 +959,7 @@ known_subclass(struct ctx *c, PyTypeObject *t, const struct classes *cs, int ins
     }
     if (!sub && instance) {
         if (_PyType_Lookup(t, LU_ID(__class__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__class__))
-            || !LU_ATTR_CHECK("known_subclass", t, LU_ATTR_READ, lu_attr_generic_read(t),
-                              t->tp_getattro == PyObject_GenericGetAttr
-                              || _PyType_Lookup(t, LU_ID(__getattribute__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__getattribute__)),
-                              LU_ATTR_GAP_WRAPPER)) {
+            || !lu_attr_slot_ours(t, LU_ATTR_READ) || !lu_attr_generic_read(t)) {
             return -1;
         }
     }

@@ -149,26 +149,24 @@ replace_owner(struct ctx *c, lu_v attr, lu_v self)
 
 /* Whether instances of tp can be kept as VK_INST: made by object.__new__
    (class_init), their attributes their own (__slots__ alone or values
-   inline, no dict of their own yet), found and set by object's own
-   __getattribute__ and __setattr__, and nothing run when they die. */
+   inline, no dict of their own yet), read and stored with object's own
+   algorithm (as of tp's version), and nothing run when they die. */
 static int
-instance_kind(PyTypeObject *tp)
+instance_kind(struct ctx *c, PyTypeObject *tp)
 {
     int slots_only = tp->tp_dictoffset == 0 && !(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT);
+    uint32_t version;
     return (tp->tp_flags & Py_TPFLAGS_HEAPTYPE) && tp->tp_finalize == NULL && tp->tp_del == NULL
-        && (slots_only || (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES))
-        && LU_ATTR_CHECK("instance_kind", tp, LU_ATTR_READ,
-                         lu_attr_way(tp, LU_ATTR_READ) == LU_ATTR_GENERIC && lu_attr_way(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC,
-                         _PyType_Lookup(tp, LU_ID(__getattribute__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__getattribute__))
-                         && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
-                         && _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL, LU_ATTR_GAP_WRAPPER);
+        && (slots_only || (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)) && lu_ev_class_as_of(c, tp, &version)
+        && lu_attr_way(tp, LU_ATTR_READ) == LU_ATTR_GENERIC && lu_attr_way(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC
+        && lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)tp), version);
 }
 
 lu_v
 lu_ev_new_instance(struct ctx *c, PyTypeObject *tp)
 {
     lu_v k = lu_ev_konst(c, (PyObject *)tp);
-    if (!instance_kind(tp)) {
+    if (!instance_kind(c, tp)) {
         lu_v obj = lu_ev_helper(c, H_new_object, 1, &k, 0);
         lu_ev_def_type(c, obj, tp);
         return obj;
@@ -658,11 +656,7 @@ class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
         return 0;
     }
     PyObject *k = _PyType_Lookup(cls, name);
-    if (k == NULL || _PyType_Lookup(meta, name) != NULL
-        || !LU_ATTR_CHECK("class_attribute", meta, LU_ATTR_READ, lu_attr_way(meta, LU_ATTR_READ) == LU_ATTR_TYPE,
-                          _PyType_Lookup(meta, LU_ID(__getattr__)) == NULL
-                          && _PyType_Lookup(meta, LU_ID(__getattribute__)) == _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__)),
-                          0)) {
+    if (k == NULL || _PyType_Lookup(meta, name) != NULL || lu_attr_way(meta, LU_ATTR_READ) != LU_ATTR_TYPE) {
         return 0;
     }
     int wrapped = Py_IS_TYPE(k, &PyStaticMethod_Type) || Py_IS_TYPE(k, &PyClassMethod_Type);
