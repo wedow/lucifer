@@ -148,24 +148,21 @@ lu_jit_kind(PyObject *o)
         : t == &PyUnicode_Type ? LU_KIND_STR : t == &PyBytes_Type ? LU_KIND_BYTES : LU_KIND_OTHER;
 }
 
-/* Returns the operands' kinds as the word holds them (0 with the tier off). */
-static inline unsigned
+static inline void
 lu_jit_observe(lu_codeunit *word, PyObject *left, PyObject *right)
 {
     if (_PyRuntime.jit.mode == LU_JIT_OFF) {
-        return 0;
+        return;
     }
     unsigned kinds = lu_jit_kind(left) | lu_jit_kind(right) << 8;
     uint16_t seen = __atomic_load_n(&word->cache, __ATOMIC_RELAXED);
     if ((seen | kinds) != seen) {
         __atomic_store_n(&word->cache, (uint16_t)(seen | kinds), __ATOMIC_RELAXED);
     }
-    return kinds;
 }
 
 /* CALL's first cache word: whether the site ran, all the tier reads of it
-   (lu_ev_feedback); the kinds of a call's arguments matter only to a warm
-   code's builtin calls (lu_jit_observe_classes), which take them as they go. */
+   (lu_ev_feedback). */
 static inline void
 lu_jit_observe_ran(lu_codeunit *word)
 {
@@ -376,63 +373,8 @@ lu_jit_observe_callee(PyCodeObject *code, lu_codeunit *cache, PyObject *callable
     }
 }
 
-/* The operand classes an operator site has met where a kind (above) says
-   only OTHER: BINARY_OP (its subscript too), COMPARE_OP and CONTAINS_OP
-   (the container left). Pairs of exact types, up to LU_OPCLASS_WAYS, then
-   the site is megamorphic. Classes are freed only by a collection (a
-   class is in a cycle through its __mro__), which forgets them first, as
-   callee tables do; static types are immortal. Read without the lock. */
+/* The types a profile keeps of one value before it is megamorphic. */
 #define LU_OPCLASS_WAYS 4
-struct lu_opclasses {
-    int n;                      /* entries published, release-stored after the entry */
-    int mega;
-    struct { PyTypeObject *left, *right; } e[LU_OPCLASS_WAYS];
-    /* An iterator's step that no arm names (a megamorphic FOR_ITER, or a
-       call of the kernel's next_item): the class its generic path meets
-       most, by a majority vote of those steps (lu_jit_class_vote), joins
-       the armed classes (each step taken in line, generic for the rest)
-       once its votes reach `need`, which each class armed doubles. Up to
-       LU_OPCLASS_WAYS; armed[] is published before narmed. */
-    PyTypeObject *hot, *armed[LU_OPCLASS_WAYS];
-    int narmed;
-    uint32_t votes, need;
-};
-
-/* The site's table, or NULL. The site is the operator's code unit. */
-struct lu_opclasses *lu_jit_opclasses(PyCodeObject *code, int pc);
-void lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject *right);
-/* The site's table, made empty if it had none: a build asked for its
-   classes, which the interpreter notes from then on. */
-struct lu_opclasses *lu_jit_want_classes(PyCodeObject *code, int pc);
-/* The generic path of a step at the site met an iterator of class tp: its
-   vote, and the units that depend on the table recompile when it arms a
-   class. */
-void lu_jit_class_vote(struct lu_opclasses *t, PyTypeObject *tp);
-
-/* The interpreter's generic path of an operator at `instr` met left and
-   right, of `kinds` (lu_jit_observe's): a warm code's site with a table
-   learns their classes when either is of no kind. */
-static inline void
-lu_jit_observe_classes(PyCodeObject *code, lu_codeunit *instr, unsigned kinds, PyObject *left, PyObject *right)
-{
-    if (((kinds & 0xff) == LU_KIND_OTHER || kinds >> 8 == LU_KIND_OTHER) && lu_jit_warm(code)) {
-        lu_jit_opclass_note(code, (int)(instr - lu_code_start(code)), Py_TYPE(left), Py_TYPE(right));
-    }
-}
-
-/* A unary operator at `instr` met v: the site learns its class, an int's
-   only once another class has made it polymorphic. */
-static inline void
-lu_jit_observe_unary(PyCodeObject *code, lu_codeunit *instr, PyObject *v)
-{
-    if (_PyRuntime.jit.mode == LU_JIT_OFF || !lu_jit_warm(code)) {
-        return;
-    }
-    int pc = (int)(instr - lu_code_start(code));
-    if (!PyLong_CheckExact(v) || lu_jit_opclasses(code, pc) != NULL) {
-        lu_jit_opclass_note(code, pc, Py_TYPE(v), Py_TYPE(v));
-    }
-}
 
 /* A fact compiled code relies on between polls (lu_jit_invalidate). */
 struct lu_fdep {

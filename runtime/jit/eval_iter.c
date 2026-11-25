@@ -246,8 +246,8 @@ lu_ev_for_iter(struct ctx *c)
         if (done) {
             return 0;
         }
-        lu_v args[3] = { it, lu_ev_const_i(c, 0), lu_ev_unit(c) };
-        v = lu_ev_helper(c, H_for_iter, 3, args, 0);            /* MISSING at the end */
+        lu_v args[2] = { it, lu_ev_unit(c) };
+        v = lu_ev_helper(c, H_for_iter, 2, args, 0);            /* MISSING at the end */
         lu_ev_fork(c, lu_ev_emit(c, OP_IS, REP_BIT, v, lu_ev_konst(c, LU_MISSING), LU_NOV, 0), exit_pc);
     }
     if (c->g->cur >= 0) {

@@ -839,10 +839,9 @@ static PyObject *polled(struct lu_task *t, PyObject *r);
 
 /* The next item, LU_MISSING when exhausted, or NULL with an exception. A
    generator runs as the interpreter's FOR_ITER resumes it: its return is
-   the loop's end, with no StopIteration. Another class votes in the
-   site's table (classes, or NULL) for the class to take in line. */
+   the loop's end, with no StopIteration. */
 static PyObject *
-h_for_iter(PyObject *it, struct lu_opclasses *classes, struct lu_unit *u)
+h_for_iter(PyObject *it, struct lu_unit *u)
 {
     generic(u, LU_GENERIC_ITER);
     PyTypeObject *t = Py_TYPE(it);
@@ -858,9 +857,6 @@ h_for_iter(PyObject *it, struct lu_opclasses *classes, struct lu_unit *u)
         }
         f->ret = LU_RETURN_FOR_ITER;
         return run_resumed(task, f);
-    }
-    if (classes != NULL) {
-        lu_jit_class_vote(classes, t);
     }
     if (t == &PyDictIterKey_Type || t == &PyDictIterValue_Type || t == &PyDictIterItem_Type) {
         return lu_dictiter_next(it);
@@ -1805,7 +1801,7 @@ const struct lu_helper lu_helpers[H_COUNT] = {
     [H_set_function_attribute] = { (void *)h_set_function_attribute, "set_function_attribute", REP_NONE, FX_SEEN, 3 },
     [H_cell_store] = { (void *)h_cell_store, "cell_store", REP_NONE, FX_SEEN, 2 },
     [H_get_iter] = { (void *)h_get_iter, "get_iter", REP_OBJ, FX_RAISE | FX_PY, 1 },
-    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, FX_RAISE | FX_PY, 3 },
+    [H_for_iter] = { (void *)h_for_iter, "for_iter", REP_OBJ, FX_RAISE | FX_PY, 2 },
     [H_seqiter_next] = { (void *)h_seqiter_next, "seqiter_next", REP_OBJ, FX_SEEN, 1 },
     [H_seqiter_step] = { (void *)h_seqiter_step, "seqiter_step", REP_OBJ, FX_SEEN, 1 },
     [H_field_get] = { (void *)lu_field_get, "field_get", REP_OBJ, FX_SEEN, 2 },

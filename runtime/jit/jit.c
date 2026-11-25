@@ -113,7 +113,6 @@ struct lu_jit_code {
     uint8_t *grown;             /* per code unit: doublings of the inlining budget of the unit entered there, which
                                    its own calls left out bought (hot_exit); another entry starts at the base */
     struct lu_callees **callees;        /* per code unit: a call site's callees */
-    struct lu_opclasses **opclasses;    /* per code unit: an operator site's operand classes */
     struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
     unsigned long learned;              /* how often one of them changed */
     int built_ins;                      /* instructions its last build made: about what the next costs */
@@ -2419,123 +2418,6 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
     }
 }
 
-/* Operator class tables (jit.h), kept as callee tables are. A site has
-   one only once a build asked for it; the first pair it learns recompiles
-   the units built without any, later ones nothing: a unit that meets one
-   leaves at its arm's guard, and one that keeps leaving is retired and
-   compiled again with the pair. */
-
-struct lu_opclasses *
-lu_jit_opclasses(PyCodeObject *code, int pc)
-{
-    struct lu_jit_code *jc = state_of(code);
-    struct lu_opclasses **t = jc != NULL ? __atomic_load_n(&jc->opclasses, __ATOMIC_ACQUIRE) : NULL;
-    return t != NULL && pc >= 0 && pc < jc->ncode ? __atomic_load_n(&t[pc], __ATOMIC_ACQUIRE) : NULL;
-}
-
-struct lu_opclasses *
-lu_jit_want_classes(PyCodeObject *code, int pc)
-{
-    struct lu_jit_code *jc = state_cold(code);
-    PyMutex_Lock(&_PyRuntime.pic_lock);
-    if (jc->opclasses == NULL) {
-        __atomic_store_n(&jc->opclasses, calloc((size_t)jc->ncode, sizeof(struct lu_opclasses *)), __ATOMIC_RELEASE);
-    }
-    struct lu_opclasses *t = jc->opclasses[pc];
-    if (t == NULL) {
-        t = calloc(1, sizeof(struct lu_opclasses));
-        __atomic_store_n(&jc->opclasses[pc], t, __ATOMIC_RELEASE);
-    }
-    PyMutex_Unlock(&_PyRuntime.pic_lock);
-    return t;
-}
-
-void
-lu_jit_opclass_note(PyCodeObject *code, int pc, PyTypeObject *left, PyTypeObject *right)
-{
-    struct lu_opclasses *t = lu_jit_opclasses(code, pc);
-    if (t == NULL || __atomic_load_n(&t->mega, __ATOMIC_RELAXED)) {
-        return;
-    }
-    int n = __atomic_load_n(&t->n, __ATOMIC_ACQUIRE);
-    for (int i = 0; i < n; i++) {
-        if (t->e[i].left == left && t->e[i].right == right) {
-            return;
-        }
-    }
-    PyMutex_Lock(&_PyRuntime.pic_lock);
-    int first = t->n == 0, known = 0;
-    for (int i = 0; i < t->n; i++) {
-        known |= t->e[i].left == left && t->e[i].right == right;
-    }
-    if (!known && !t->mega) {
-        if (t->n < LU_OPCLASS_WAYS) {
-            t->e[t->n].left = left;
-            t->e[t->n].right = right;
-            __atomic_store_n(&t->n, t->n + 1, __ATOMIC_RELEASE);
-        }
-        else {
-            __atomic_store_n(&t->mega, 1, __ATOMIC_RELEASE);
-        }
-    }
-    else {
-        first = 0;
-    }
-    PyMutex_Unlock(&_PyRuntime.pic_lock);
-    if (first) {
-        lu_jit_invalidate(LU_DEP_CALLEES, (uintptr_t)t, 0);
-    }
-}
-
-/* The votes for the first class armed at a site: the steps a loop that
-   meets it all along makes before it runs in line. */
-#define LU_HOT_VOTES 256
-
-void
-lu_jit_class_vote(struct lu_opclasses *t, PyTypeObject *tp)
-{
-    /* Races lose votes or let a wrong class lead: an armed class is a
-       speculation the generic path backs, and only the lock arms one. */
-    PyTypeObject *hot = __atomic_load_n(&t->hot, __ATOMIC_RELAXED);
-    uint32_t votes = __atomic_load_n(&t->votes, __ATOMIC_RELAXED);
-    if (hot != tp) {
-        if (votes > 0) {
-            __atomic_store_n(&t->votes, votes - 1, __ATOMIC_RELAXED);
-        }
-        else {
-            __atomic_store_n(&t->hot, tp, __ATOMIC_RELAXED);
-            __atomic_store_n(&t->votes, 1, __ATOMIC_RELAXED);
-        }
-        return;
-    }
-    uint32_t need = __atomic_load_n(&t->need, __ATOMIC_RELAXED);
-    if (votes + 1 < (need != 0 ? need : LU_HOT_VOTES)) {
-        __atomic_store_n(&t->votes, votes + 1, __ATOMIC_RELAXED);
-        return;
-    }
-    int armed = 0;
-    PyMutex_Lock(&_PyRuntime.pic_lock);
-    int known = 0;
-    for (int i = 0; i < t->narmed; i++) {
-        known |= t->armed[i] == tp;
-    }
-    if (t->hot == tp && !known && t->narmed < LU_OPCLASS_WAYS) {
-        t->armed[t->narmed] = tp;
-        __atomic_store_n(&t->narmed, t->narmed + 1, __ATOMIC_RELEASE);
-        t->need = (t->need != 0 ? t->need : LU_HOT_VOTES) * 2;
-        armed = 1;
-    }
-    t->hot = NULL;
-    t->votes = 0;
-    PyMutex_Unlock(&_PyRuntime.pic_lock);
-    if (armed) {
-        if (_PyRuntime.jit.debug) {
-            fprintf(stderr, "jit: step arms %s\n", tp->tp_name);
-        }
-        lu_jit_invalidate(LU_DEP_CALLEES, (uintptr_t)t, 0);
-    }
-}
-
 void
 lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
 {
@@ -2566,29 +2448,6 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
             if (lu_base_opcode(code, pc) != CALL_FUNCTION_EX) {
                 lu_cache_store32(lu_code_start(code) + pc + 2, 0);     /* the next call relearns its callee */
             }
-        }
-    }
-    for (int pc = 0; jc != NULL && jc->opclasses != NULL && pc < jc->ncode; pc++) {
-        struct lu_opclasses *t = jc->opclasses[pc];
-        int k = 0;
-        for (int i = 0; t != NULL && i < t->n; i++) {
-            if (!dead((PyObject *)t->e[i].left) && !dead((PyObject *)t->e[i].right)) {
-                t->e[k++] = t->e[i];
-            }
-        }
-        if (t != NULL) {
-            t->n = k;
-            if (t->hot != NULL && dead((PyObject *)t->hot)) {
-                t->hot = NULL;
-                t->votes = 0;
-            }
-            int a = 0;
-            for (int i = 0; i < t->narmed; i++) {
-                if (!dead((PyObject *)t->armed[i])) {
-                    t->armed[a++] = t->armed[i];
-                }
-            }
-            t->narmed = a;
         }
     }
 }
@@ -2656,10 +2515,6 @@ lu_jit_code_free(PyCodeObject *code)
         free(jc->callees[i]);
     }
     free(jc->callees);
-    for (int i = 0; jc->opclasses != NULL && i < jc->ncode; i++) {
-        free(jc->opclasses[i]);
-    }
-    free(jc->opclasses);
     free(jc->scan);
     free(jc->hot);
     for (struct lu_prof *p = jc->profs, *next; p != NULL; p = next) {

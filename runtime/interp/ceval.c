@@ -1826,15 +1826,6 @@ op_CALL:
         PyObject *callable = sp[-oparg - 2];
         lu_jit_observe_ran(next_instr);
         lu_jit_observe_callee(code, next_instr, callable, sp[-oparg - 1]);
-        if (oparg >= 1 && lu_jit_warm(code)
-            && (Py_IS_TYPE(callable, &PyCFunction_Type)
-                || (PyType_Check(callable) && !(((PyTypeObject *)callable)->tp_flags & Py_TPFLAGS_HEAPTYPE))
-                || (PyFunction_Check(callable)
-                    && (((PyCodeObject *)((PyFunctionObject *)callable)->func_code)->co_flags & LU_CO_KERNEL)))) {
-            /* A builtin's or a kernel function's call: the classes its kernel code dispatches on. */
-            PyObject *first = sp[-oparg], *second = oparg >= 2 ? sp[-oparg + 1] : first;
-            lu_jit_observe_classes(code, next_instr - 1, lu_jit_kind(first) | lu_jit_kind(second) << 8, first, second);
-        }
     }
     next_instr += 3;            /* CALL's and INSTRUMENTED_CALL's cache words */
     if (monitored == NULL) {
@@ -3695,10 +3686,6 @@ op_FOR_ITER: {
     PyObject *iter = TOP();
     PyTypeObject *itp = Py_TYPE(iter);
     lu_jit_observe_iter(next_instr, itp);
-    if (itp != &PyListIter_Type && itp != &PyTupleIter_Type && itp != &PyRangeIter_Type && itp != &PyGen_Type
-        && _PyRuntime.jit.mode != LU_JIT_OFF && lu_jit_warm(code)) {
-        lu_jit_opclass_note(code, (int)(this_instr - lu_code_start(code)), itp, itp);  /* its step, per class */
-    }
     SKIP_CACHES();
     PyObject *v;
     if (itp == &PyListIter_Type || itp == &PyTupleIter_Type) {
@@ -3754,8 +3741,7 @@ op_COMPARE_OP: {
     /* Ints (bools too) and equality that needs no Python code here; the rest is the kernel's compare. */
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
-    unsigned kinds = lu_jit_observe(next_instr, left, right);
-    lu_jit_observe_classes(code, next_instr - 1, kinds, left, right);
+    lu_jit_observe(next_instr, left, right);
     SKIP_CACHES();
     int r = lu_compare_native(left, right, oparg);
     if (r < 0) {
@@ -3915,8 +3901,7 @@ op_BINARY_OP: {
     /* lhs, rhs -- res; exact ints here, everything else reflects in the kernel. */
     PyObject *right = sp[-1];
     PyObject *left = sp[-2];
-    unsigned kinds = lu_jit_observe(next_instr + 1, left, right);
-    lu_jit_observe_classes(code, next_instr - 1, kinds, left, right);
+    lu_jit_observe(next_instr + 1, left, right);
     SKIP_CACHES();
     if (oparg == 26) {   /* NB_SUBSCR */
         PyObject *item = lu_subscr_native(left, right);
@@ -3992,7 +3977,6 @@ op_BINARY_OP: {
 op_UNARY_NEGATIVE:
 op_UNARY_INVERT: {
     PyObject *v = TOP();
-    lu_jit_observe_unary(code, next_instr - 1, v);
     if (PyLong_CheckExact(v)) {
         PyObject *res = opcode == UNARY_NEGATIVE ? lu_long_negate(v) : lu_long_invert(v);
         if (res == NULL) {
