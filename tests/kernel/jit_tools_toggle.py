@@ -1,6 +1,8 @@
 # A tool switched on and off once, before the hot run: sys.settrace,
-# sys.setprofile, or sys.monitoring events of a tool id, then None; or
-# only sys.settrace(sys.gettrace()), which restores no tool at all. The
+# sys.setprofile, or sys.monitoring events of a tool id, then None; a
+# cProfile run; a debugger-style trace function that traces nothing; local
+# events set on one code and cleared; or only sys.settrace(sys.gettrace()),
+# which restores no tool at all. The
 # functions and kernel builtins already hot before the toggle, and the
 # ones first called after it, run as they did before it. tools/jitcheck's
 # toolsoff lane runs this at two sizes for each tool under
@@ -66,6 +68,22 @@ def toggle(tool):
         mon.free_tool_id(3)
     elif tool == 'restore':
         sys.settrace(sys.gettrace())
+    elif tool == 'cprofile':
+        import cProfile
+        cProfile.Profile().runcall(hot, callee, K().m, 50)
+    elif tool == 'breakpoint':
+        sys.settrace(lambda frame, event, arg: None)
+        hot(callee, K().m, 50)
+        sys.settrace(None)
+    elif tool == 'local':
+        mon = sys.monitoring
+        mon.use_tool_id(3, 'local')
+        mon.register_callback(3, mon.events.LINE, lambda code, line: None)
+        mon.set_local_events(3, callee.__code__, mon.events.LINE)
+        callee(1, 2)
+        mon.set_local_events(3, callee.__code__, 0)
+        mon.register_callback(3, mon.events.LINE, None)
+        mon.free_tool_id(3)
 
 
 toggle(TOOL)
