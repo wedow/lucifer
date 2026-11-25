@@ -1,13 +1,12 @@
-# luc-1kz0: a function entered on every iteration that calls a large callee
-# at many sites, more than its first build's budget takes in line. The
-# callee loses on its own generic paths: its loop reads attributes of
-# objects of more classes than an attribute site keeps, which a caller
-# cannot tell apart either. Its calls out of line, valued with those losses,
-# buy a doubling of the caller's budget; the grown unit takes more of the
-# calls in line, but the callee's generic reads stay generic in the copies,
-# so the losses per entry hardly fall. tools/jitcheck runs this with the
-# tier's event log and requires that the caller's start grew at most MAX_GROWN times, each
-# again: its doublings, bought out of the work it ran, stop at MAX_GROWN
+# luc-szyb (from luc-1kz0): a function entered on every iteration that
+# calls a large callee at 24 sites, more than its first build's budget
+# takes in line. The callee loses on its own generic paths: its loop reads
+# attributes of objects of more classes than an attribute site keeps, which
+# a caller cannot tell apart either. Its calls out of line, valued with
+# those losses, buy sites in line; the copies stay generic, so their losses
+# do not fall. tools/jitcheck runs this with the tier's event log and
+# requires that the start bought sites, each once (at most its 24), every
+# purchase paid at least its price.
 import sys
 
 

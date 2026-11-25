@@ -232,6 +232,14 @@ require that a count of the tier's does not grow with the iterations:
          its first build takes in line, entered with little work each
          time: IR instructions built. Calls made out of line are not worth
          a build twice as large.
+  sitefinal tests/kernel/jit_site_final.py, whose function's one hot call,
+         once per entry, comes after the calls of a rare arm that hold more
+         than four doublings of the inlining budget: compiled calls. The
+         hot call's counted calls buy it in line.
+  siteshape tests/kernel/jit_site_shape.py, whose hot call, once per entry,
+         is of a function whose own unit bought its own hot call: compiled
+         calls. The callee goes in line as its own unit is built, its call
+         with it.
   common tests/kernel/jit_rare_then_common.py, the rare lane's loop whose
          rare iterable turns common after 3,000 calls: exits. Its guard's
          exits pay for the build that takes both.
@@ -355,14 +363,19 @@ machine instructions per IR instruction (runtime/jit/jit.c):
   learnprice tests/kernel/jit_learned_price.py, a large inlined callee
          whose early places meet their first objects late.
   typed  tests/kernel/jit_typed_items.py (the helpers lane's program).
-The entrygrowth lane runs tests/kernel/jit_entry_growth.py at 2N with the event
-log: its function's start buys a larger inlining budget with its calls out
-of line, and the loops of an arm that runs only in the second half are
-entered from the interpreter after that: they are built at the base budget,
-since the doubling was that entry's purchase, not the code's.
-The growchain lane runs tests/kernel/jit_grown_generic.py at 2N with the
-event log: a start calling a large generic callee at many sites; its
-doublings are at most MAX_GROWN, each paid at least its price.
+The siteentry lane runs tests/kernel/jit_site_entry.py at 2N with the event
+log: its function's start buys sites in line with its calls out of line,
+and the loops of an arm that runs only in the second half are entered from
+the interpreter after that: they are built with no bought sites, since the
+sites were that entry's purchase, not the code's.
+The sitechain lane runs tests/kernel/jit_site_chain.py at 2N with the event
+log: a start calling a large generic callee at 24 sites buys sites, each
+once (at most 24), every purchase paid at least its price.
+The sitepath lane runs tests/kernel/jit_site_path.py at 16N with the event
+log: a helper in line under two parents calls leaf out of line in both
+copies, hot in one; the start buys leaf, and the build that takes it in
+line adds one copy of it: fewer instructions than leaf's own unit (a copy
+of it is about two thirds of that; two would be more).
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
 in no file: it looks it up in /tmp/perf-PID.map) resolve to py:: symbols.
@@ -486,6 +499,8 @@ GROWTH = {
     'megaiter': ('jit_mega_iter.py', r'compiled calls (\d+)', 24),
     'xreturns': ('jit_worker_returns.py', r'frames ended in C (\d+)', 0),
     'imports': ('jit_import_hot.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
+    'sitefinal': ('jit_site_final.py', r'compiled calls (\d+)', 0.5),
+    'siteshape': ('jit_site_shape.py', r'compiled calls (\d+)', 0.5),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
 }
@@ -494,7 +509,9 @@ GROWTH_N = 20000
 # iterations (typed: fill's two learned rebuilds, 1,212 and 1,214 IR, are each paid by stale passes of about 840
 # instructions, about 18,000 of them, the second after 40,000 iterations): both sizes are past the purchases, and the
 # lane checks the steady state after them.
-START = {'typed': 4}
+# sitefinal, siteshape: the purchases come after a learned rebuild (about 40,000 iterations), each when the calls
+# counted since have paid it (a call a few tens of thousands more): both sizes are past them.
+START = {'typed': 4, 'sitefinal': 8, 'siteshape': 8}
 # lane: (program, flags), checked from its event log (check_ledger).
 LEDGER = {'churn': ('jit_rebuild_churn.py', ('-X', 'lucifer_jit=on')), 'classtests': ('jit_isinstance_growth.py', ()),
           'learnprice': ('jit_learned_price.py', ()), 'typed': ('jit_typed_items.py', ())}
@@ -634,45 +651,67 @@ def check_ledger(args, lane):
     return 1 if problems else 0
 
 
+def events(args, name, n, stats=False):
+    """A kernel program's run at n with the tier's event log: its problems against the oracle, and stderr."""
+    program = ROOT / 'tests' / 'kernel' / name
+    p = subprocess.run([args.lucifer, '-X', 'lucifer_jit=always', *(['-X', 'lucifer_jit_stats'] if stats else []),
+                        str(program), str(n)], capture_output=True, text=True, timeout=args.timeout,
+                       env=dict(os.environ, PYTHONHASHSEED='0', LUCIFER_JIT_DEBUG='units'))
+    same = (p.returncode, p.stdout) == run([args.oracle, str(program), str(n)], args.timeout)[:2]
+    return ([] if same else ['output differs']), p.stderr
+
+
 def check_chain(args):
-    """entry's doublings: at most MAX_GROWN, each paid at least its price."""
-    program = ROOT / 'tests' / 'kernel' / 'jit_grown_generic.py'
-    n = 2 * GROWTH_N
-    p = subprocess.run([args.lucifer, '-X', 'lucifer_jit=always', str(program), str(n)], capture_output=True,
-                       text=True, timeout=args.timeout, env=dict(os.environ, PYTHONHASHSEED='0', LUCIFER_JIT_DEBUG='units'))
-    problems = []
-    if (p.returncode, p.stdout) != run([args.oracle, str(program), str(n)], args.timeout)[:2]:
-        problems.append('output differs')
-    most = int(re.search(r'^#define MAX_GROWN (\d+)', (ROOT / 'runtime' / 'jit' / 'jit.c').read_text(), re.M)[1])
-    grown = re.findall(r'^jit-ev \S+ kill entry@1 .* ins (\d+) paid (\d+) cost (\d+): grown ', p.stderr, re.M)
-    if len(grown) > most:
-        problems.append(f'{len(grown)} doublings, more than {most}')
-    problems += [f'grown at {ins} IR: paid {paid}, price {cost}' for ins, paid, cost in grown if int(paid) < int(cost)]
-    print(f"{'FAIL' if problems else 'PASS'} growchain" + (': ' + '; '.join(problems[:5]) if problems else
-          f" ({len(grown)} doublings, {sum(int(c) for _, _, c in grown)} predicted)"))
+    """entry's purchases: some, each site once (at most its 24), each paid at least its price."""
+    problems, err = events(args, 'jit_site_chain.py', 2 * GROWTH_N)
+    kills = re.findall(r'^jit-ev \S+ kill entry@1 .* paid (\d+) cost (\d+): sites ', err, re.M)
+    buys = re.findall(r'^jit-ev \S+ buy entry@1 ', err, re.M)
+    if not kills:
+        problems.append('no sites bought')
+    if len(buys) > 24:
+        problems.append(f'{len(buys)} sites bought, more than the 24 it has')
+    problems += [f'bought for {cost}, paid {paid}' for paid, cost in kills if int(paid) < int(cost)]
+    print(f"{'FAIL' if problems else 'PASS'} sitechain" + (': ' + '; '.join(problems[:5]) if problems else
+          f" ({len(kills)} purchases, {len(buys)} sites, {sum(int(c) for _, c in kills)} predicted)"))
     return 1 if problems else 0
 
 
 def check_entries(args):
-    """A doubling of the inlining budget belongs to the entry whose losses bought it: entry's start is built grown,
-    and the entries of its second arm's loops, built after that, at the base budget."""
-    program = ROOT / 'tests' / 'kernel' / 'jit_entry_growth.py'
-    n = 2 * GROWTH_N
-    p = subprocess.run([args.lucifer, '-X', 'lucifer_jit=always', '-X', 'lucifer_jit_stats', str(program), str(n)],
-                       capture_output=True, text=True, timeout=args.timeout,
-                       env=dict(os.environ, PYTHONHASHSEED='0', LUCIFER_JIT_DEBUG='units'))
-    problems = []
-    if (p.returncode, p.stdout) != run([args.oracle, str(program), str(n)], args.timeout)[:2]:
-        problems.append('output differs')
-    builds = re.findall(r'^jit-ev \S+ build entry@(\d+) ok ins (\d+) .* grown (\d+) ', p.stderr, re.M)
-    grew = next((i for i, (pc, _, grown) in enumerate(builds) if pc == '1' and int(grown) > 0), None)
-    if grew is None:
-        problems.append('the start never grew')
-    elif not any(pc != '1' for pc, _, _ in builds[grew + 1:]):
-        problems.append('no loop entry built after the start grew')
-    problems += [f'entry@{pc} built grown {grown} ({ins} IR)' for pc, ins, grown in builds if pc != '1' and grown != '0']
-    print(f"{'FAIL' if problems else 'PASS'} entrygrowth" + (': ' + '; '.join(problems[:5]) if problems else
+    """Sites belong to the entry whose calls bought them: entry's start buys sites, and the entries of its second
+    arm's loops, built after that, have none."""
+    problems, err = events(args, 'jit_site_entry.py', 2 * GROWTH_N, stats=True)
+    builds = re.findall(r'^jit-ev \S+ build entry@(\d+) ok ins (\d+) .* bought (\d+) ', err, re.M)
+    bought = next((i for i, (pc, _, n) in enumerate(builds) if pc == '1' and int(n) > 0), None)
+    if bought is None:
+        problems.append('the start bought no site')
+    elif not any(pc != '1' for pc, _, _ in builds[bought + 1:]):
+        problems.append('no loop entry built after the start bought')
+    problems += [f'entry@{pc} built with {n} bought ({ins} IR)' for pc, ins, n in builds if pc != '1' and n != '0']
+    print(f"{'FAIL' if problems else 'PASS'} siteentry" + (': ' + '; '.join(problems[:5]) if problems else
           f' ({len(builds)} builds of entry)'))
+    return 1 if problems else 0
+
+
+def check_path(args):
+    """entry buys leaf on its hot path, and the build that takes it adds one copy of leaf, not the cold path's too."""
+    problems, err = events(args, 'jit_site_path.py', 16 * GROWTH_N)
+    leaf = [int(n) for n in re.findall(r'^jit-ev \S+ build leaf@1 ok ins (\d+) ', err, re.M)]
+    took = []
+    lines = err.splitlines()
+    for i, line in enumerate(lines):
+        if re.match(r'jit-ev \S+ buy entry@1 leaf ', line):
+            kill = next((re.search(r' ins (\d+) paid', l) for l in lines[i:] if re.match(r'jit-ev \S+ kill entry@1 ', l)),
+                        None)
+            built = next((re.search(r' ok ins (\d+) ', l) for l in lines[i:] if re.match(r'jit-ev \S+ build entry@1 ', l)),
+                         None)
+            if kill and built:
+                took.append(int(built[1]) - int(kill[1]))
+    if not took or not leaf:
+        problems.append('entry never bought leaf')
+    problems += [f'the build that took leaf in added {d} IR, more than one copy of its {leaf[-1]}' for d in took
+                 if d >= leaf[-1]]
+    print(f"{'FAIL' if problems else 'PASS'} sitepath" + (': ' + '; '.join(problems[:5]) if problems else
+          f" (leaf {leaf[-1]} IR; the build that took it added {', '.join(map(str, took))})"))
     return 1 if problems else 0
 
 
@@ -703,7 +742,7 @@ def main():
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'growchain', 'entrygrowth', 'perf']))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'sitechain', 'siteentry', 'sitepath', 'perf']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
@@ -734,10 +773,12 @@ def main():
     for lane in LEDGER:
         if lane in args.modes.split(','):
             failed += check_ledger(args, lane)
-    if 'growchain' in args.modes.split(','):
+    if 'sitechain' in args.modes.split(','):
         failed += check_chain(args)
-    if 'entrygrowth' in args.modes.split(','):
+    if 'siteentry' in args.modes.split(','):
         failed += check_entries(args)
+    if 'sitepath' in args.modes.split(','):
+        failed += check_path(args)
     if 'perf' in args.modes.split(','):
         failed += check_perf(args)
     print(f'{failed} failing')

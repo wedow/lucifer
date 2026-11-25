@@ -1,11 +1,11 @@
-# luc-1kz0: a function entered at its start on every iteration, whose calls
-# out of line (on every entry, and in the loops of a rare arm) buy a larger
-# inlining budget for that entry; a second rare arm, run only in the second half (once the
-# start has grown), runs loops the interpreter enters a few times each
-# (their own entries). A doubling is bought by the losses of the entry that made the
-# calls: an entry at one of the loops starts at the base budget.
+# luc-szyb (from luc-1kz0): a function entered at its start on every
+# iteration, whose calls out of line (on every entry, and in the loops of a
+# rare arm) buy sites in line for that entry; a second rare arm, run only in
+# the second half (once the start has bought), runs loops the interpreter
+# enters a few times each (their own entries). Sites are bought by the
+# entry whose calls paid for them: an entry at one of the loops has none.
 # tools/jitcheck runs this with the tier's event log and requires that
-# entry's start was built grown and that no loop entry of it was.
+# entry's start bought sites and that no loop entry built after that has.
 import sys
 
 
