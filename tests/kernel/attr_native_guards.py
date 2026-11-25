@@ -159,3 +159,24 @@ for cls in (Owner, Fallback):
     print(cls.__name__, 'raising get', hot(load_a, o), hot(load_x, o), hot(store_a, o))
 Owner.a = Raising(KeyError)
 print('raising get swapped', hot(load_a, Owner()), hot(load_a, Fallback()))
+
+
+# A dict with a key that is not a str (a general table): the value a store
+# replaces is released after the store, and its finalizer sees the new one.
+class Last:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def __del__(self):
+        print('released, now', self.owner.__dict__.get('v'))
+
+
+for key in (0, S('k')):
+    for cls, make in ((Plain, Plain), (Node, Node)):
+        o = make()
+        o.__dict__[key] = 'other'
+        o.v = Last(o)
+        o.v = 'new'
+        o.v = Last(o)
+        del o.v
+        print(cls.__name__, type(key).__name__, sorted(map(str, o.__dict__)))

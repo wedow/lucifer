@@ -380,11 +380,13 @@ PyType_FromMetaclass(PyTypeObject *metaclass, PyObject *module, PyType_Spec *spe
     }
     /* Atomic: the class is in its base's subclass list, whose walks store
        its attribute word. The spec's slots are written below without
-       lu_set_slot, so none of them stays decided by type.__new__. */
+       lu_set_slot: none of them stays decided by type.__new__, so no walk
+       decides them again once this returns. */
+    lu_attr_undecide(tp);
     unsigned long flags = __atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED), want;
     do {
-        want = (flags & ~(unsigned long)(REPLACED_FLAGS | LU_TPFLAGS_GET_DECIDED | LU_TPFLAGS_SET_DECIDED))
-            | (spec->flags & REPLACED_FLAGS) | (base->tp_flags & Py_TPFLAGS_HAVE_GC);
+        want = (flags & ~(unsigned long)REPLACED_FLAGS) | (spec->flags & REPLACED_FLAGS)
+            | (base->tp_flags & Py_TPFLAGS_HAVE_GC);
     } while (!__atomic_compare_exchange_n(&tp->tp_flags, &flags, want, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
     tp->tp_basicsize = basicsize;
     if (spec->itemsize != 0) {

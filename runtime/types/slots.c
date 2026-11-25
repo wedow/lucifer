@@ -385,6 +385,14 @@ lu_attr_update(PyTypeObject *tp, int decide)
     PyMutex_Unlock(&attr_lock);
 }
 
+void
+lu_attr_undecide(PyTypeObject *tp)
+{
+    PyMutex_Lock(&attr_lock);
+    __atomic_fetch_and(&tp->tp_flags, ~(LU_TPFLAGS_GET_DECIDED | LU_TPFLAGS_SET_DECIDED), __ATOMIC_RELAXED);
+    PyMutex_Unlock(&attr_lock);
+}
+
 /* Whether tp's word and slots are what a refresh would make them now; not
    while a writer is between its dict change and its slot rewrite. The
    caller holds attr_lock. */

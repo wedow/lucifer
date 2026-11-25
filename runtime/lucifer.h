@@ -499,6 +499,9 @@ void lu_attr_refresh(PyTypeObject *tp, int subclasses);
 /* tp's word, under the lock that decides attribute slots; with `decide`,
    a class's attribute slots decided again first (runtime/types/slots.c). */
 void lu_attr_update(PyTypeObject *tp, int decide);
+/* tp's attribute slots are C's from now on (PyType_FromSpec): no decision
+   writes them, from the time this returns. */
+void lu_attr_undecide(PyTypeObject *tp);
 /* The kernel has booted: every type's word, and a class's attribute slots. */
 void lu_attr_boot(void);
 

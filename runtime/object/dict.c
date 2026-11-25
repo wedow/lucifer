@@ -1352,28 +1352,32 @@ ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
 {
     PyDictObject *mp = (PyDictObject *)dict;
     int r = 0, watched = 0;
+    Py_hash_t hash = -1;
     *old = NULL;
     Py_INCREF(dict);            /* held: a caller's may be borrowed, and the lock may wait */
     Py_BEGIN_CRITICAL_SECTION(dict);
-    if (!lu_dk_is_unicode(mp->ma_keys)) {
-        r = -2;                 /* a key that is not an exact str: equal to key only Python says */
+    /* A table with keys that are not exact strs: C compares them with key
+       unless one is a key only Python says is equal or not (-2). */
+    Py_ssize_t ix = lu_dk_is_unicode(mp->ma_keys) ? ns_find(dict, key) : probe_native(mp->ma_keys, key, &hash, 1);
+    if (ix >= 0) {
+        *old = value != NULL ? swap_value(mp, ix, value, &watched) : remove_entry(mp, ix, &watched);
+        r = 1;
     }
-    else {
-        Py_ssize_t ix = ns_find(dict, key);
-        if (ix >= 0) {
-            *old = value != NULL ? swap_value(mp, ix, value, &watched) : remove_entry(mp, ix, &watched);
-            r = 1;
-        }
-        else if (value != NULL) {
-            r = lu_dict_insert(mp, key, lu_str_hash(key), value) < 0 ? -1 : 1;
-        }
+    else if (ix != -1) {
+        r = -2;
+    }
+    else if (value != NULL) {
+        r = lu_dict_insert(mp, key, hash != -1 ? hash : lu_str_hash(key), value) < 0 ? -1 : 1;
     }
     Py_END_CRITICAL_SECTION();
     if (watched) {
         lu_jit_release();
     }
     if (r == -2) {
-        r = value == NULL ? PyDict_Pop(dict, key, old) : PyDict_SetItem(dict, key, value) < 0 ? -1 : 1;
+        /* Python compares: the old value is held across the store, so that
+           it too is released after it. */
+        r = value == NULL ? PyDict_Pop(dict, key, old)
+            : PyDict_GetItemRef(dict, key, old) < 0 || PyDict_SetItem(dict, key, value) < 0 ? -1 : 1;
     }
     Py_DECREF(dict);
     return r;
@@ -1401,8 +1405,9 @@ lu_ns_lacks(PyObject *dict, PyObject *key)
     if (!lu_dk_is_unicode(dk)) {
         return 0;
     }
-    Py_ssize_t ix = probe_unicode(dk, key, name_hash(key));
-    return (ix != LU_PROBE_CHANGED ? ix : ns_find(dict, key)) < 0;
+    /* A table that changed under the probe may now hold a key only Python
+       compares: not known to lack it. */
+    return probe_unicode(dk, key, name_hash(key)) == DKIX_EMPTY;
 }
 
 int

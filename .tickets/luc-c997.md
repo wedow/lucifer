@@ -443,3 +443,11 @@ Each reproducer run against the oracle on master (7260c37d) and on stage 2 befor
 | DeltaBlue | 73.71G | 70.40G (-4.5%) | 24.96G | 24.84G (-0.5%) |
 
   Instructions, pinned, two runs per arm, minimum; master's runtime is 7260c37d's (origin/master since added tests and tools only).
+
+### 2026-11-25 focused review of the fix commits
+
+- M-1: on a table with keys that are not exact strs the exchange stored through `PyDict_SetItem`, which released the replaced value inside, and handed back no old value: a class's old value would die before `lu_type_modified` took back its cache tags. Not reachable today (Lucifer refuses non-str keys in a class dict: `type('A', (), {0: 0})` raises SystemError and `setattr(cls, S('y'), v)` TypeError, where CPython makes both; divergences of their own, not fixed here), so no failing test; fixed anyway: such a table is probed natively under the lock (`probe_native`) and the value swapped out; only a key Python must compare goes through `PyDict_GetItemRef` and `PyDict_SetItem` with the old value held across. Test: `attr_native_guards` "general table" (an int key and a str-subclass key, the replaced value's finalizer; passes before and after).
+- L-1: `lu_ns_lacks` answers "lacks" only from an unchanged unicode probe; a table that changed under it deopts.
+- L-2: `PyType_FromSpec` clears the decided bits under `attr_lock` (`lu_attr_undecide`) before it writes any slot, so no walk can decide a spec type's attribute slots after that.
+- L-3: luc-deth.
+- Brief gate: the kernel programs (64) in four lanes, threads in handoff, ready_run. DeltaBlue JIT on 24.75G, Richards off 399.98G, pyflakes off 8.87G, tomli off 613.0G: no row moved against the numbers above.
