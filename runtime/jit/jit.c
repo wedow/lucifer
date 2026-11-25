@@ -1131,6 +1131,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     u->globals = frame->globals;
     u->builtins = frame->builtins;
     u->built = __atomic_load_n(&marks, __ATOMIC_ACQUIRE);
+    u->version = __atomic_load_n(&frame->code->_co_instrumentation_version, __ATOMIC_ACQUIRE);
     f.code = frame->code;
     f.unit = u;
     f.entry_pc = (int)(frame->instr - lu_code_start(frame->code));
@@ -1539,6 +1540,19 @@ serial_exit(struct lu_task *t, struct lu_jit_act *act)
     }
 }
 
+/* The code was instrumented for tools other than those the unit was built
+   under (the poll word's version): the unit runs what it took in line as it
+   was then, and its polls never pass. It dies; the next build is current. */
+static int
+tools_moved(struct lu_jit_code *jc, struct lu_unit *u, uintptr_t version)
+{
+    if (u->version == version) {
+        return 0;
+    }
+    kill(jc, u, "tools", u->code, u->entry_pc, 0, 0);
+    return 1;
+}
+
 enum lu_jit_result
 lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
 {
@@ -1567,6 +1581,9 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
             return LU_JIT_NONE;
         }
         u = find(jc, pc, frame);
+        if (u != NULL && tools_moved(jc, u, code->_co_instrumentation_version)) {
+            return LU_JIT_NONE;
+        }
     }
     if (u == NULL && (u = compile_at(ts, frame, pc)) == NULL) {
         return LU_JIT_NONE;
@@ -1685,7 +1702,7 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     }
     /* A unit is live only while its entry does not wait (kill marks it dead). */
     struct lu_unit *u = find(jc, at, frame);
-    if (u == NULL) {
+    if (u == NULL || tools_moved(jc, u, poll & ~LU_POLL_EVENTS_MASK)) {
         return 0;
     }
     struct lu_jit_act act = { u, task->jit_act, 0 };

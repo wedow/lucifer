@@ -696,7 +696,19 @@ lu_jit_deopt(PyThreadState *ts, struct lu_frame *root, struct lu_deopt *d,
         top = f;
     }
     ts->current_frame = (struct _PyInterpreterFrame *)top;
-    int failed = nomem || unpushed || m.failed;
+    /* The frames go on in the interpreter, which instruments a code only
+       at RESUME: each is brought up to the tools as RESUME would (a tool
+       turned on since the unit's build finds them instrumented). */
+    int uninstrumented = 0;
+    uintptr_t version = __atomic_load_n(&ts->interp->monitoring_version, __ATOMIC_RELAXED);
+    for (struct lu_frame *f = top; !nomem && !unpushed && !uninstrumented; f = f->previous) {
+        uninstrumented = __atomic_load_n(&f->code->_co_instrumentation_version, __ATOMIC_ACQUIRE) != version
+            && lu_instrument(f->code, ts->interp) < 0;
+        if (f == root) {
+            break;
+        }
+    }
+    int failed = nomem || unpushed || uninstrumented || m.failed;
     if (d->error && !unpushed && !nomem) {
         /* The raising instruction consumed its operands; the interpreter
            unwinds from the instruction after it. */

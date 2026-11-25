@@ -175,6 +175,7 @@ struct lu_unit {
        it folds: only frames of the same enter it (functions that share a
        code object each have their own units); among its constants. */
     PyObject *globals, *builtins;
+    uintptr_t version;          /* the tools version it was built under, which its polls expect */
     int (*fn)(PyThreadState *ts, struct lu_frame *frame, PyObject **result);
     void *direct;               /* a call entry's direct entry (struct lu_jit_direct), or NULL */
     void *mem;

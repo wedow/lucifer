@@ -102,7 +102,6 @@ HANDOFF_XFAIL = {
 # name -> ticket: the same, for known divergences in every lane.
 XFAIL = {
     "entry_tracebacks": "luc-mj6t",
-    "jit_local_events_inlined": "luc-o80b",
     "threads_kill_under_calls": "luc-33lu",
 }
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.

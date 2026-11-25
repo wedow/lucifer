@@ -1291,8 +1291,13 @@ lu_instrument(PyCodeObject *code, PyInterpreterState *interp)
 #define C_RETURN_EVENTS ((1 << PY_MONITORING_EVENT_C_RETURN) | (1 << PY_MONITORING_EVENT_C_RAISE))
 #define C_CALL_EVENTS (C_RETURN_EVENTS | (1 << PY_MONITORING_EVENT_CALL))
 
+int lu_jit_sync(struct lu_frame *f);
+
 /* With the world stopped: every code object a task is running, so that loops
-   that never reach RESUME again are instrumented too. */
+   that never reach RESUME again are instrumented too. A frame compiled code
+   runs is inside a call it made (runtime/interp/frame.c): it is made real,
+   so that its unit leaves when the call returns (its frame check) and the
+   interpreter goes on, as instrumented, with the frames it is handed. */
 static int
 instrument_all_executing_code_objects(PyInterpreterState *interp)
 {
@@ -1301,7 +1306,10 @@ instrument_all_executing_code_objects(PyInterpreterState *interp)
     for (PyThreadState *ts = interp->tasks; ts != NULL && !err; ts = ts->next) {
         for (struct lu_frame *f = (struct lu_frame *)ts->current_frame; f != NULL && !err;
              f = f->previous) {
-            if (f->owner != LU_FRAME_C_ENTRY && f->code != NULL) {
+            if (f->owner == LU_FRAME_JIT && f->jit_desc != NULL) {
+                err = lu_jit_sync(f);
+            }
+            if (!err && f->owner != LU_FRAME_C_ENTRY && f->code != NULL) {
                 err = instrument_lock_held(f->code, interp);
             }
         }
@@ -1381,8 +1389,16 @@ lu_monitoring_set_local_events(PyCodeObject *code, int tool_id, lu_event_set eve
     if (get_local_events(local, tool_id) == events) {
         return 0;
     }
+    uint32_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
+    if (new_version == 0) {
+        PyErr_Format(PyExc_OverflowError, "events set too many times");
+        return -1;
+    }
     set_local_events(local, tool_id, events);
-    return force_instrument(code, interp);
+    /* Compiled code that runs the code, in line or not, was built under the
+       version before: it leaves, as for a global change. */
+    set_global_version(interp, new_version);
+    return instrument_all_executing_code_objects(interp) || instrument_lock_held(code, interp) ? -1 : 0;
 }
 
 int
