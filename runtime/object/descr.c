@@ -1360,7 +1360,8 @@ type_setattr_native(PyTypeObject *cls, PyObject *name, PyObject *value)
     if (value == NULL || PyFunction_Check(value) || (cls->tp_flags & Py_TPFLAGS_IMMUTABLETYPE) || n == 0
         || (n >= 4 && PyUnicode_READ_CHAR(name, 0) == '_' && PyUnicode_READ_CHAR(name, 1) == '_'
             && PyUnicode_READ_CHAR(name, n - 1) == '_' && PyUnicode_READ_CHAR(name, n - 2) == '_')
-        || _PyType_Lookup(meta, LU_ID(__setattr__)) != _PyType_Lookup(&PyType_Type, LU_ID(__setattr__))) {
+        || !LU_ATTR_CHECK("type_setattr_native", meta, LU_ATTR_STORE, lu_attr_way(meta, LU_ATTR_STORE) == LU_ATTR_TYPE,
+                          _PyType_Lookup(meta, LU_ID(__setattr__)) == _PyType_Lookup(&PyType_Type, LU_ID(__setattr__)), 0)) {
         return 0;
     }
     PyObject *descr = _PyType_LookupRef(meta, name);
@@ -1373,13 +1374,17 @@ int
 lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
 {
     PyTypeObject *tp = Py_TYPE(obj);
-    if (PyType_Check(obj) && (tp->tp_setattro == lu_slot_tp_setattro || tp->tp_setattro == PyObject_GenericSetAttr)) {
+    if (PyType_Check(obj)
+        && LU_ATTR_CHECK("lu_setattr_native type", tp, LU_ATTR_STORE, lu_attr_way(tp, LU_ATTR_STORE) != LU_ATTR_SLOT,
+                         tp->tp_setattro == lu_slot_tp_setattro || tp->tp_setattro == PyObject_GenericSetAttr, 0)) {
         return type_setattr_native((PyTypeObject *)obj, name, value);
     }
     if (!PyUnicode_CheckExact(name)
-        || (tp->tp_setattro != PyObject_GenericSetAttr       /* the slot says so (lu_set_slot) */
-            && (tp->tp_setattro != lu_slot_tp_setattro
-                || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))))) {
+        || !LU_ATTR_CHECK("lu_setattr_native", tp, LU_ATTR_STORE, lu_attr_way(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC,
+                          tp->tp_setattro == PyObject_GenericSetAttr       /* the slot says so (lu_set_slot) */
+                          || (tp->tp_setattro == lu_slot_tp_setattro
+                              && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))),
+                          LU_ATTR_GAP_WRAPPER)) {
         return 0;
     }
     PyObject *descr = _PyType_LookupRef(tp, name);
@@ -1623,15 +1628,33 @@ prim_descr_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
    or PyObject_GenericSetAttr for a base of the type tp, which the kernel's
    hooks run as generic access (slot_tp_getattr_hook's test; with tp None,
    for any type, as that hook does before __getattr__). */
+static int
+generic_wrapper_of(PyObject *d, PyObject *name, PyObject *tp)
+{
+    PyWrapperDescrObject *w = (PyWrapperDescrObject *)d;
+    return d != NULL && Py_IS_TYPE(d, &PyWrapperDescr_Type)
+        && (w->d_wrapped == (void *)PyObject_GenericGetAttr || w->d_wrapped == (void *)PyObject_GenericSetAttr)
+        && PyUnicode_EqualToUTF8(name, w->d_base->name)
+        && (tp == Py_None || (PyType_Check(tp) && PyType_IsSubtype((PyTypeObject *)tp, PyDescr_TYPE(w))));
+}
+
 static PyObject *
 prim_generic_wrapper(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 {
     ARGS(3);
-    PyWrapperDescrObject *d = (PyWrapperDescrObject *)args[0];
-    int generic = Py_IS_TYPE(args[0], &PyWrapperDescr_Type)
-        && (d->d_wrapped == (void *)PyObject_GenericGetAttr || d->d_wrapped == (void *)PyObject_GenericSetAttr)
-        && PyUnicode_EqualToUTF8(args[1], d->d_base->name)
-        && (args[2] == Py_None || (PyType_Check(args[2]) && PyType_IsSubtype((PyTypeObject *)args[2], PyDescr_TYPE(d))));
+    int generic = generic_wrapper_of(args[0], args[1], args[2]);
+    if (generic && args[2] != Py_None) {
+        /* the kernel asks of the dunder the type finds: its word says generic */
+        PyTypeObject *tp = (PyTypeObject *)args[2];
+        int field = PyUnicode_EqualToUTF8(args[1], "__getattribute__") ? LU_ATTR_READ
+            : PyUnicode_EqualToUTF8(args[1], "__setattr__") ? LU_ATTR_STORE : LU_ATTR_DELETE;
+#define GENERIC_WAY (field == LU_ATTR_READ ? lu_attr_generic_read(tp) : lu_attr_way(tp, field) == LU_ATTR_GENERIC)
+        if (!GENERIC_WAY) {     /* the lookup again only then: the hooks call this on every access */
+            LU_ATTR_CHECK("generic_wrapper", tp, field, GENERIC_WAY,
+                          generic_wrapper_of(_PyType_Lookup(tp, args[1]), args[1], args[2]), 0);
+        }
+#undef GENERIC_WAY
+    }
     return Py_NewRef(generic ? Py_True : Py_False);
 }
 

@@ -250,43 +250,200 @@ object_tp_richcompare(PyObject *self, PyObject *other, int op)
     return call_special_in(&PyBaseObject_Type, self, names[op], &other, 1, NULL);
 }
 
-/* The attribute hooks a class keeps from object (no __getattr__ and
-   object's __getattribute__; object's __setattr__ and __delattr__): its
-   slot is object's own function, as update_one_slot gives a class the
-   specific function of the wrapper it finds, so C tests the slot instead
-   of looking the hooks up; a C type's slot wrappers likewise give their C
-   function (an ast node class gets ast.AST's). Object keeps its thunk,
-   which static types inherit: an extension type that sets
-   PyObject_GenericGetAttr itself still differs from its base and gets its
-   own wrapper, as in CPython. */
+/* The attribute protocol word (runtime/lucifer.h). */
+
+/* Whether d, which tp finds under `name`, is the C slot wrapper of `name`
+   that wraps object's generic function, made for a base of tp (for any
+   type when tp is NULL): slot_tp_getattr_hook's test, which runs such a
+   wrapper as generic access. */
 static int
-keeps_object_hook(PyTypeObject *tp, PyObject *a, PyObject *b, PyObject *absent)
+generic_wrapper(PyObject *d, PyObject *name, PyTypeObject *tp)
 {
-    PyObject *own = _PyType_Lookup(&PyBaseObject_Type, a);
-    return own != NULL && _PyType_Lookup(tp, a) == own
-        && (b == NULL || _PyType_Lookup(tp, b) == _PyType_Lookup(&PyBaseObject_Type, b))
-        && (absent == NULL || _PyType_Lookup(tp, absent) == NULL);
+    PyWrapperDescrObject *w = (PyWrapperDescrObject *)d;
+    return d != NULL && Py_IS_TYPE(d, &PyWrapperDescr_Type)
+        && (w->d_wrapped == (void *)PyObject_GenericGetAttr || w->d_wrapped == (void *)PyObject_GenericSetAttr)
+        && PyUnicode_EqualToUTF8(name, w->d_base->name) && (tp == NULL || PyType_IsSubtype(tp, PyDescr_TYPE(w)));
 }
 
+/* Whether d is what `owner` itself has under `name` (object's, type's or
+   module's own dunder). */
+static int
+owners(PyObject *d, PyTypeObject *owner, PyObject *name)
+{
+    return d != NULL && d == _PyType_Lookup(owner, name);
+}
+
+/* What the kernel's hook (lib/kernel/object.py getattr_hook, setattr_hook,
+   delattr_hook) does for instances of tp when tp's slot is the thunk. */
+static int
+thunk_way(PyTypeObject *tp, int field)
+{
+    if (field == LU_ATTR_READ) {
+        PyObject *get = _PyType_Lookup(tp, LU_ID(__getattribute__));
+        int fallback = _PyType_Lookup(tp, LU_ID(__getattr__)) != NULL;
+        if (owners(get, &PyBaseObject_Type, LU_ID(__getattribute__))
+            || generic_wrapper(get, LU_ID(__getattribute__), fallback ? NULL : tp)) {
+            return fallback ? LU_ATTR_GENERIC_GETATTR : LU_ATTR_GENERIC;
+        }
+        return fallback ? LU_ATTR_CUSTOM
+            : owners(get, &PyType_Type, LU_ID(__getattribute__)) && PyType_IsSubtype(tp, &PyType_Type) ? LU_ATTR_TYPE
+            : owners(get, &PyModule_Type, LU_ID(__getattribute__)) && PyType_IsSubtype(tp, &PyModule_Type) ? LU_ATTR_MODULE
+            : LU_ATTR_CUSTOM;
+    }
+    PyObject *name = field == LU_ATTR_STORE ? LU_ID(__setattr__) : LU_ID(__delattr__);
+    PyObject *set = _PyType_Lookup(tp, name);
+    return owners(set, &PyBaseObject_Type, name) || generic_wrapper(set, name, tp) ? LU_ATTR_GENERIC
+        : owners(set, &PyType_Type, name) && PyType_IsSubtype(tp, &PyType_Type) ? LU_ATTR_TYPE
+        : LU_ATTR_CUSTOM;
+}
+
+int
+lu_attr_classify(PyTypeObject *tp, int field)
+{
+    void *slot = field == LU_ATTR_READ ? (void *)tp->tp_getattro : (void *)tp->tp_setattro;
+    return slot == (void *)PyObject_GenericGetAttr || slot == (void *)PyObject_GenericSetAttr ? LU_ATTR_GENERIC
+        : slot == (void *)lu_slot_tp_getattro || slot == (void *)lu_slot_tp_setattro ? thunk_way(tp, field)
+        : LU_ATTR_SLOT;
+}
+
+/* The slot a class gets for an attribute thunk, as update_one_slot decides
+   it: object's own function where the hook would run object's algorithm
+   (object itself keeps its thunk, which static types inherit: an extension
+   type that sets PyObject_GenericGetAttr itself still differs from its base
+   and gets its own wrapper, as in CPython); the C function of a base's slot
+   wrapper the class finds (a class over a C type with its own getattro),
+   except for __getattribute__ under a __getattr__; the thunk otherwise. */
 static void *
 attribute_thunk(PyTypeObject *tp, void *thunk)
 {
     if (thunk == (void *)lu_slot_tp_getattro) {
-        if (keeps_object_hook(tp, LU_ID(__getattribute__), NULL, LU_ID(__getattr__))) {
-            return (void *)PyObject_GenericGetAttr;
-        }
-        void *specific = _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL
+        int way = thunk_way(tp, LU_ATTR_READ);
+        void *specific = way == LU_ATTR_CUSTOM && _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL
             ? lu_wrapper_specific(tp, LU_ID(__getattribute__)) : NULL;
-        return specific != NULL ? specific : thunk;
+        return way == LU_ATTR_GENERIC ? (void *)PyObject_GenericGetAttr : specific != NULL ? specific : thunk;
     }
     if (thunk == (void *)lu_slot_tp_setattro) {
-        if (keeps_object_hook(tp, LU_ID(__setattr__), LU_ID(__delattr__), NULL)) {
+        if (thunk_way(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC && thunk_way(tp, LU_ATTR_DELETE) == LU_ATTR_GENERIC) {
             return (void *)PyObject_GenericSetAttr;
         }
         void *specific = lu_wrapper_specific(tp, LU_ID(__setattr__));
         return specific != NULL && specific == lu_wrapper_specific(tp, LU_ID(__delattr__)) ? specific : thunk;
     }
     return thunk;
+}
+
+/* Serializes every decision of an attribute slot and every write of the
+   word: the last writer, which runs after its own dict change, reads every
+   change before it. */
+static PyMutex attr_lock;
+
+static unsigned long
+attr_word(PyTypeObject *tp)
+{
+    return (unsigned long)lu_attr_classify(tp, LU_ATTR_READ) << LU_ATTR_READ
+        | (unsigned long)lu_attr_classify(tp, LU_ATTR_STORE) << LU_ATTR_STORE
+        | (unsigned long)lu_attr_classify(tp, LU_ATTR_DELETE) << LU_ATTR_DELETE;
+}
+
+/* Whether a heap type's attribute slots are the ones attribute_thunk
+   decides: the thunks or object's functions (a C function of its own, or
+   a base's, was given by C or by a wrapper and stays). */
+static int
+decided_here(PyTypeObject *tp)
+{
+    void *get = (void *)tp->tp_getattro, *set = (void *)tp->tp_setattro;
+    return (tp->tp_flags & Py_TPFLAGS_HEAPTYPE)
+        && (get == (void *)lu_slot_tp_getattro || get == (void *)PyObject_GenericGetAttr)
+        && (set == (void *)lu_slot_tp_setattro || set == (void *)PyObject_GenericSetAttr);
+}
+
+/* Stores the word, after the slots it reads; the caller holds attr_lock.
+   Until the kernel has booted nothing is stored: static types' dicts are
+   still being filled, and the accessor decides as it goes. */
+static void
+store_word(PyTypeObject *tp)
+{
+    if (!PyInterpreterState_Get()->kernel_booted) {
+        return;
+    }
+    unsigned long word = attr_word(tp), old = __atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED);
+    while (!__atomic_compare_exchange_n(&tp->tp_flags, &old, (old & ~LU_TPFLAGS_ATTR) | word, 0,
+                                        __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {
+    }
+}
+
+/* tp's word from its slots; when `decide`, a heap type's attribute slots
+   decided first, where they are the ones attribute_thunk decides. */
+void
+lu_attr_update(PyTypeObject *tp, int decide)
+{
+    PyMutex_Lock(&attr_lock);
+    if (decide && decided_here(tp)) {
+        tp->tp_getattro = (getattrofunc)attribute_thunk(tp, (void *)lu_slot_tp_getattro);
+        tp->tp_setattro = (setattrofunc)attribute_thunk(tp, (void *)lu_slot_tp_setattro);
+    }
+    store_word(tp);
+    PyMutex_Unlock(&attr_lock);
+}
+
+/* Whether tp's word and slots are what a refresh would make them now; not
+   while a writer is between its dict change and its slot rewrite. The
+   caller holds attr_lock. */
+static int
+attr_current(PyTypeObject *tp)
+{
+    unsigned long word = __atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED) & LU_TPFLAGS_ATTR;
+    int current = (word == 0 || word == attr_word(tp))
+        && (!decided_here(tp)
+            || ((void *)tp->tp_getattro == attribute_thunk(tp, (void *)lu_slot_tp_getattro)
+                && (void *)tp->tp_setattro == attribute_thunk(tp, (void *)lu_slot_tp_setattro)));
+    return current;
+}
+
+static int
+has_gap(PyTypeObject *tp, int gap)
+{
+    PyObject *names[3] = { LU_ID(__getattribute__), LU_ID(__setattr__), LU_ID(__delattr__) };
+    for (int i = 0; (gap & LU_ATTR_GAP_WRAPPER) && i < 3; i++) {
+        if (generic_wrapper(_PyType_Lookup(tp, names[i]), names[i], NULL)) {
+            return 1;
+        }
+    }
+    return ((gap & LU_ATTR_GAP_THUNK)
+            && (tp->tp_getattro == lu_slot_tp_getattro || tp->tp_setattro == lu_slot_tp_setattro))
+        || ((gap & LU_ATTR_GAP_FALLBACK) && _PyType_Lookup(tp, LU_ID(__getattr__)) != NULL);
+}
+
+/* A site and the word disagree: unless the kernel is still booting or the
+   type has the site's gap, the site's predicate, the word, the gap and then
+   whether the word is current are evaluated again under attr_lock, which
+   holds the word and slots still (a writer that changed the dict before
+   the lookups and has not rewritten the slots shows as a word that is not
+   current); the disagreement is the site's only if it is still there. */
+int
+lu_attr_check_begin(PyTypeObject *tp, int gap)
+{
+    if (!PyInterpreterState_Get()->kernel_booted || has_gap(tp, gap)) {
+        return 0;
+    }
+    PyMutex_Lock(&attr_lock);
+    return 1;
+}
+
+void
+lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ, int legacy)
+{
+    int fatal = differ && !has_gap(tp, gap) && attr_current(tp);
+    PyMutex_Unlock(&attr_lock);
+    if (!fatal) {
+        return;
+    }
+    char message[300];
+    unsigned long flags = __atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED);
+    snprintf(message, sizeof message, "attribute word check at %s: type %.100s, field %d, word %lu/%lu/%lu, "
+             "decided %d, legacy %d", site, tp->tp_name, field, flags >> LU_ATTR_READ & 7,
+             flags >> LU_ATTR_STORE & 7, flags >> LU_ATTR_DELETE & 7, lu_attr_classify(tp, field), legacy);
+    Py_FatalError(message);
 }
 
 static void *
@@ -848,6 +1005,8 @@ lu_nb_slot_kind(PyTypeObject *tp, size_t offset)
 
 #define NSLOTS (int)(sizeof slots / sizeof slots[0])
 
+static int set_slot(PyTypeObject *tp, const struct slot *s, int how, PyTypeObject *from);
+
 int
 lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from)
 {
@@ -856,6 +1015,27 @@ lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from)
         return -1;
     }
     const struct slot *s = &slots[index];
+    /* An attribute slot is decided, written and its word stored in one
+       step: see attr_lock. */
+    int attribute = s->where == IN_TYPE
+        && (s->offset == offsetof(PyTypeObject, tp_getattro) || s->offset == offsetof(PyTypeObject, tp_setattro));
+    if (attribute) {
+        PyMutex_Lock(&attr_lock);
+    }
+    int err = set_slot(tp, s, how, from);
+    if (attribute) {
+        store_word(tp);
+        PyMutex_Unlock(&attr_lock);
+    }
+    if (err == 0 && s->where == IN_TYPE) {
+        lu_type_refresh_plain(tp);      /* tp_finalize, tp_del or tp_dealloc may be what changed */
+    }
+    return err;
+}
+
+static int
+set_slot(PyTypeObject *tp, const struct slot *s, int how, PyTypeObject *from)
+{
     void *value;
     switch (how) {
     case 0: value = NULL; break;
@@ -887,9 +1067,6 @@ lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from)
         return -1;
     }
     *(void **)(base + s->offset) = value;
-    if (base == (char *)tp) {
-        lu_type_refresh_plain(tp);      /* tp_finalize, tp_del or tp_dealloc may be what changed */
-    }
     return 0;
 }
 

@@ -157,9 +157,11 @@ instance_kind(PyTypeObject *tp)
     int slots_only = tp->tp_dictoffset == 0 && !(tp->tp_flags & Py_TPFLAGS_MANAGED_DICT);
     return (tp->tp_flags & Py_TPFLAGS_HEAPTYPE) && tp->tp_finalize == NULL && tp->tp_del == NULL
         && (slots_only || (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES))
-        && _PyType_Lookup(tp, LU_ID(__getattribute__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__getattribute__))
-        && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
-        && _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL;
+        && LU_ATTR_CHECK("instance_kind", tp, LU_ATTR_READ,
+                         lu_attr_way(tp, LU_ATTR_READ) == LU_ATTR_GENERIC && lu_attr_way(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC,
+                         _PyType_Lookup(tp, LU_ID(__getattribute__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__getattribute__))
+                         && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
+                         && _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL, LU_ATTR_GAP_WRAPPER);
 }
 
 lu_v
@@ -646,8 +648,10 @@ class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
     }
     PyObject *k = _PyType_Lookup(cls, name);
     if (k == NULL || _PyType_Lookup(meta, name) != NULL
-        || _PyType_Lookup(meta, LU_ID(__getattr__)) != NULL
-        || _PyType_Lookup(meta, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))) {
+        || !LU_ATTR_CHECK("class_attribute", meta, LU_ATTR_READ, lu_attr_way(meta, LU_ATTR_READ) == LU_ATTR_TYPE,
+                          _PyType_Lookup(meta, LU_ID(__getattr__)) == NULL
+                          && _PyType_Lookup(meta, LU_ID(__getattribute__)) == _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__)),
+                          0)) {
         return 0;
     }
     int wrapped = Py_IS_TYPE(k, &PyStaticMethod_Type) || Py_IS_TYPE(k, &PyClassMethod_Type);

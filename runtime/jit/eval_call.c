@@ -953,16 +953,12 @@ known_subclass(struct ctx *c, PyTypeObject *t, const struct classes *cs, int ins
     for (int i = 0; i < cs->n && !sub; i++) {
         sub = PyType_IsSubtype(t, class_at(c, cs, i));
     }
-    for (int i = 0; !sub && instance && i < 2; i++) {
-        if (i == 1 && t->tp_getattro == PyObject_GenericGetAttr) {
-            break;
-        }
-        PyObject *name = i == 0 ? LU_ID(__class__) : LU_ID(__getattribute__);
-        PyObject *own = _PyType_LookupRef(t, name), *base = _PyType_LookupRef(&PyBaseObject_Type, name);
-        int plain = own == base;
-        Py_XDECREF(own);
-        Py_XDECREF(base);
-        if (!plain) {
+    if (!sub && instance) {
+        if (_PyType_Lookup(t, LU_ID(__class__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__class__))
+            || !LU_ATTR_CHECK("known_subclass", t, LU_ATTR_READ, lu_attr_generic_read(t),
+                              t->tp_getattro == PyObject_GenericGetAttr
+                              || _PyType_Lookup(t, LU_ID(__getattribute__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__getattribute__)),
+                              LU_ATTR_GAP_WRAPPER)) {
             return -1;
         }
     }

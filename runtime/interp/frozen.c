@@ -128,8 +128,9 @@ lu_kernel_boot(PyInterpreterState *interp)
     }
     /* The kernel fills static types' dicts without telling anyone; from here
        on a change to one is a PyType_Modified. */
-    interp->specializing = 1;
     interp->kernel_booted = 1;          /* every kernel function is registered */
+    lu_attr_boot();
+    interp->specializing = 1;
     interp->common_consts[0] = PyExc_AssertionError;
     interp->common_consts[1] = PyExc_NotImplementedError;
     interp->common_consts[2] = (PyObject *)&PyTuple_Type;

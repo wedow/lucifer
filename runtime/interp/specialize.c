@@ -173,11 +173,15 @@ enum descr_kind {
 };
 
 /* `name` in tp's MRO as of tp's version *version, which is 0 when tp has no
-   version or changed during the lookup. *descr is a new reference, or NULL. */
+   version or changed during the lookup, and *way, the field `field` of tp's
+   attribute protocol word as of that version: read after it, so that a
+   word paired with a current version is the word of that version.
+   *descr is a new reference, or NULL. */
 static enum descr_kind
-analyze(PyTypeObject *tp, PyObject *name, PyObject **descr, uint32_t *version)
+analyze(PyTypeObject *tp, PyObject *name, int field, int *way, PyObject **descr, uint32_t *version)
 {
     *version = lu_type_assign_version(tp) ? __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) : 0;
+    *way = lu_attr_way(tp, field);
     *descr = _PyType_LookupRef(tp, name);
     if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) != *version) {
         *version = 0;
@@ -197,11 +201,12 @@ analyze(PyTypeObject *tp, PyObject *name, PyObject **descr, uint32_t *version)
     return dt->tp_descr_get == NULL ? DESCR_NON_DESCRIPTOR : DESCR_OTHER;
 }
 
-/* Whether `tp` finds attributes with the default __getattribute__ of `base`. */
+/* Whether instances of a type whose read field is `way` find attributes
+   with object's algorithm, before any __getattr__. */
 static int
-default_getattribute(PyTypeObject *tp, PyTypeObject *base)
+generic_read(int way)
 {
-    return _PyType_Lookup(tp, LU_ID(__getattribute__)) == _PyType_Lookup(base, LU_ID(__getattribute__));
+    return way == LU_ATTR_GENERIC || way == LU_ATTR_GENERIC_GETATTR;
 }
 
 /* Whether a cache may name descr without owning it (see the rules above). */
@@ -251,12 +256,10 @@ specialize_class(PyObject *owner, lu_codeunit *site, PyObject *name)
     PyTypeObject *cls = (PyTypeObject *)owner, *meta = Py_TYPE(cls);
     PyObject *descr, *meta_descr;
     uint32_t version, meta_version;
-    if (!default_getattribute(meta, &PyType_Type)) {
-        return fail(site);
-    }
-    analyze(meta, name, &meta_descr, &meta_version);
-    enum descr_kind kind = analyze(cls, name, &descr, &version);
-    if (meta_descr != NULL || (kind != DESCR_METHOD && kind != DESCR_NON_DESCRIPTOR)
+    int way, unused;
+    analyze(meta, name, LU_ATTR_READ, &way, &meta_descr, &meta_version);
+    enum descr_kind kind = analyze(cls, name, LU_ATTR_READ, &unused, &descr, &version);
+    if (way != LU_ATTR_TYPE || meta_descr != NULL || (kind != DESCR_METHOD && kind != DESCR_NON_DESCRIPTOR)
         || version == 0 || meta_version == 0) {
         fail(site);
     }
@@ -302,17 +305,14 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
                uint32_t *second, PyObject **descr)
 {
     *second = 0;
-    *descr = NULL;
-    if (!default_getattribute(tp, &PyBaseObject_Type)) {
-        return LOAD_ATTR;
-    }
-    enum descr_kind kind = analyze(tp, name, descr, version);
+    int way;
+    enum descr_kind kind = analyze(tp, name, LU_ATTR_READ, &way, descr, version);
     int managed = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) != 0;
     /* After the version: a name that shadows the class's joins the shared
        names before the version changes. */
     Py_ssize_t inline_index = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) ? lu_inline_index(tp, name) : -1;
     int op = LOAD_ATTR;
-    if (*version == 0 || (!managed && tp->tp_dictoffset != 0)) {
+    if (*version == 0 || !generic_read(way) || (!managed && tp->tp_dictoffset != 0)) {
         op = LOAD_ATTR;
     }
     else if (is_slot_member(*descr)) {
@@ -373,7 +373,7 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
     }
     else if (!method && (Py_IS_TYPE(*descr, &PyProperty_Type) || Py_IS_TYPE(*descr, &PyGetSetDescr_Type))
              && lu_property_fget(*descr) != NULL && PyFunction_Check(lu_property_fget(*descr))
-             && _PyType_Lookup(tp, LU_ID(__getattr__)) == NULL) {
+             && way == LU_ATTR_GENERIC) {
         /* A property whose getter is a function, or a kernel getset (whose
            getter is kernel Python): the getter called, which is read from
            the property each time (its __init__ may change it). Not where a
@@ -407,14 +407,15 @@ PyObject *
 lu_specialize_class_value(PyTypeObject *cls, PyObject *name, uint32_t v[3])
 {
     PyTypeObject *meta = Py_TYPE(cls);
-    if (!enabled() || !default_getattribute(meta, &PyType_Type)) {
+    if (!enabled()) {
         return NULL;
     }
     PyObject *descr, *meta_descr;
-    analyze(meta, name, &meta_descr, &v[1]);
-    analyze(cls, name, &descr, &v[0]);
+    int way, unused;
+    analyze(meta, name, LU_ATTR_READ, &way, &meta_descr, &v[1]);
+    analyze(cls, name, LU_ATTR_READ, &unused, &descr, &v[0]);
     Py_XDECREF(meta_descr);
-    if (descr == NULL || meta_descr != NULL || v[0] == 0 || v[1] == 0) {
+    if (descr == NULL || way != LU_ATTR_TYPE || meta_descr != NULL || v[0] == 0 || v[1] == 0) {
         Py_XDECREF(descr);
         return NULL;
     }
@@ -431,14 +432,15 @@ PyObject *
 lu_specialize_class_method(PyTypeObject *cls, PyObject *name, uint32_t v[2])
 {
     PyTypeObject *meta = Py_TYPE(cls);
-    if (!enabled() || !default_getattribute(meta, &PyType_Type)) {
+    if (!enabled()) {
         return NULL;
     }
     PyObject *descr, *meta_descr;
-    analyze(meta, name, &meta_descr, &v[1]);
-    analyze(cls, name, &descr, &v[0]);
+    int way, unused;
+    analyze(meta, name, LU_ATTR_READ, &way, &meta_descr, &v[1]);
+    analyze(cls, name, LU_ATTR_READ, &unused, &descr, &v[0]);
     Py_XDECREF(meta_descr);
-    if (descr == NULL || meta_descr != NULL || v[0] == 0 || v[1] == 0
+    if (descr == NULL || way != LU_ATTR_TYPE || meta_descr != NULL || v[0] == 0 || v[1] == 0
         || !(Py_IS_TYPE(descr, &PyClassMethod_Type) || Py_IS_TYPE(descr, &PyStaticMethod_Type))) {
         Py_XDECREF(descr);
         return NULL;
@@ -449,16 +451,15 @@ lu_specialize_class_method(PyTypeObject *cls, PyObject *name, uint32_t v[2])
 PyObject *
 lu_specialize_instance_method(PyTypeObject *tp, PyObject *name, uint32_t *version, int *managed)
 {
-    getattrofunc get = tp->tp_getattro;
-    if (!enabled() || (get != lu_slot_tp_getattro && get != PyObject_GenericGetAttr)
-        || !default_getattribute(tp, &PyBaseObject_Type)) {
+    if (!enabled()) {
         return NULL;
     }
     PyObject *descr;
-    analyze(tp, name, &descr, version);
+    int way;
+    analyze(tp, name, LU_ATTR_READ, &way, &descr, version);
     *managed = (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) != 0;
     int shadowed = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) && lu_inline_index(tp, name) >= 0;
-    if (descr == NULL || *version == 0 || shadowed || (!*managed && tp->tp_dictoffset != 0)
+    if (descr == NULL || *version == 0 || !generic_read(way) || shadowed || (!*managed && tp->tp_dictoffset != 0)
         || !(Py_IS_TYPE(descr, &PyClassMethod_Type) || Py_IS_TYPE(descr, &PyStaticMethod_Type))) {
         Py_XDECREF(descr);
         return NULL;
@@ -470,10 +471,8 @@ int
 lu_specialize_load_fresh(PyTypeObject *tp, PyObject *name, int method, uint32_t *version, uint16_t *index,
                          PyObject **descr)
 {
-    getattrofunc get = tp->tp_getattro;
     uint32_t second = 0;
-    int op = enabled() && (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr)
-        ? instance_shape(tp, NULL, name, method, version, &second, descr) : LOAD_ATTR;
+    int op = enabled() ? instance_shape(tp, NULL, name, method, version, &second, descr) : LOAD_ATTR;
     *index = (uint16_t)second;
     if (op == LOAD_ATTR) {
         *descr = NULL;
@@ -486,10 +485,6 @@ lu_specialize_load_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
 {
     if (!enabled()) {
         return;
-    }
-    getattrofunc get = Py_TYPE(owner)->tp_getattro;
-    if (get != lu_slot_tp_getattro && get != PyObject_GenericGetAttr) {
-        return fail(site);
     }
     if (PyModule_CheckExact(owner)) {
         specialize_module(owner, site, name);
@@ -520,13 +515,14 @@ store_inline_offset(PyTypeObject *tp, PyObject *name, enum descr_kind kind)
 int
 lu_specialize_store_fresh(PyTypeObject *tp, PyObject *name, uint32_t *version, uint16_t *index)
 {
-    if (!enabled() || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))
-        || !(tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
+    if (!enabled() || !(tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
         return STORE_ATTR;
     }
     PyObject *descr;
-    enum descr_kind kind = analyze(tp, name, &descr, version);
-    Py_ssize_t offset = *version != 0 && !is_slot_member(descr) ? store_inline_offset(tp, name, kind) : -1;
+    int way;
+    enum descr_kind kind = analyze(tp, name, LU_ATTR_STORE, &way, &descr, version);
+    Py_ssize_t offset = *version != 0 && way == LU_ATTR_GENERIC && !is_slot_member(descr)
+        ? store_inline_offset(tp, name, kind) : -1;
     Py_XDECREF(descr);
     *index = (uint16_t)(offset >= 0 ? offset : 0);
     return offset >= 0 ? STORE_ATTR_INSTANCE_VALUE : STORE_ATTR;
@@ -536,15 +532,16 @@ void
 lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
 {
     PyTypeObject *tp = Py_TYPE(owner);
-    if (!enabled() || _PyType_Lookup(tp, LU_ID(__setattr__)) != _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
+    if (!enabled()) {
         return;
     }
     PyObject *descr;
     uint32_t version;
-    enum descr_kind kind = analyze(tp, name, &descr, &version);
+    int way;
+    enum descr_kind kind = analyze(tp, name, LU_ATTR_STORE, &way, &descr, &version);
     Py_ssize_t index;
     lu_codeunit *c = site + 1;
-    if (version == 0) {
+    if (version == 0 || way != LU_ATTR_GENERIC) {
         fail(site);
     }
     else if (is_slot_member(descr) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {

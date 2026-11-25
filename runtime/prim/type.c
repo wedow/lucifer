@@ -405,7 +405,44 @@ lu_type_modified(PyTypeObject *tp)
 void
 PyType_Modified(PyTypeObject *tp)
 {
+    lu_attr_refresh(tp, 1);             /* C may have changed a slot: the words follow it */
     lu_type_modified(tp);
+}
+
+/* tp and the classes under it. No lock is held while a word is decided:
+   its lookups assign versions under type_lock. */
+static void
+attr_walk(PyTypeObject *tp, int decide)
+{
+    lu_attr_update(tp, decide);
+    PyObject *subs = subclasses_snapshot(tp);
+    for (Py_ssize_t i = 0; subs != NULL && i < PyList_GET_SIZE(subs); i++) {
+        attr_walk((PyTypeObject *)PyList_GET_ITEM(subs, i), decide);
+    }
+    if (subs == NULL) {
+        PyErr_Clear();          /* out of memory: the subclasses keep their words */
+    }
+    Py_XDECREF(subs);
+}
+
+void
+lu_attr_refresh(PyTypeObject *tp, int subclasses)
+{
+    if (subclasses) {
+        attr_walk(tp, 0);
+    }
+    else {
+        lu_attr_update(tp, 0);
+    }
+}
+
+void
+lu_attr_boot(void)
+{
+    for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
+        lu_attr_update(*t, 0);
+    }
+    attr_walk(&PyBaseObject_Type, 1);   /* and every class the kernel made while its bases' dicts were filled */
 }
 
 /* The watcher API (typeobject.c). Id 0 is CPython's own, so ids start at 1. */
@@ -1464,8 +1501,9 @@ ready_type(PyTypeObject *tp, PyTypeObject *base, struct lu_static_type_state *st
             return -1;
         }
     }
+    lu_attr_refresh(tp, 0);
     set_version(tp, next_global_version_tag());
-    tp->tp_flags |= Py_TPFLAGS_READY;
+    __atomic_fetch_or(&tp->tp_flags, Py_TPFLAGS_READY, __ATOMIC_RELAXED);
     for (Py_ssize_t b = 0; b < PyTuple_GET_SIZE(tp->tp_bases); b++) {
         if (add_subclass((PyTypeObject *)PyTuple_GET_ITEM(tp->tp_bases, b), tp) < 0) {
             return -1;
@@ -2089,7 +2127,7 @@ prim_type_layout(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     ARGS(1); TYPE_ARG(0);
     PyTypeObject *tp = (PyTypeObject *)args[0];
     PyObject *t = PyTuple_New(5);
-    long long v[5] = { (long long)tp->tp_flags, tp->tp_basicsize, tp->tp_itemsize, tp->tp_dictoffset,
+    long long v[5] = { (long long)(tp->tp_flags & LU_TPFLAGS_PUBLIC), tp->tp_basicsize, tp->tp_itemsize, tp->tp_dictoffset,
                        tp->tp_weaklistoffset };
     for (int i = 0; t != NULL && i < 5; i++) {
         PyObject *n = PyLong_FromLongLong(v[i]);

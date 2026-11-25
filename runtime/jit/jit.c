@@ -2275,8 +2275,11 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name, struct lu_u
     PyObject *prop = NULL;
     uint32_t tag = pic->store && op == STORE_ATTR && lu_type_assign_version(tp)
         ? __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) : 0;     /* before what it vouches for */
-    if (tag != 0 && tp->tp_setattro == PyObject_GenericSetAttr
-        && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__))) {
+    if (tag != 0
+        && LU_ATTR_CHECK("pic store", tp, LU_ATTR_STORE, lu_attr_way(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC,
+                         tp->tp_setattro == PyObject_GenericSetAttr
+                         && _PyType_Lookup(tp, LU_ID(__setattr__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__setattr__)),
+                         LU_ATTR_GAP_WRAPPER | LU_ATTR_GAP_THUNK)) {
         /* A store through a property: its setter, under the class's version,
            where object's __setattr__ is the class's (as the specializer asks
            of its stores); a type as owner (a metaclass property) sets

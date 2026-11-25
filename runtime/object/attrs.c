@@ -206,7 +206,7 @@ lu_inline_values_init(PyTypeObject *tp)
     names->usable = capacity;
     names->fixed = capacity > ROOM_MAX;
     ((PyHeapTypeObject *)tp)->ht_cached_keys = (PyDictKeysObject *)names;
-    tp->tp_flags |= Py_TPFLAGS_INLINE_VALUES;
+    __atomic_fetch_or(&tp->tp_flags, Py_TPFLAGS_INLINE_VALUES, __ATOMIC_RELAXED);    /* the word shares it */
     lu_type_refresh_plain(tp);
     return 0;
 }

@@ -420,6 +420,76 @@ void lu_subtype_dealloc(PyObject *self);
    could change without a refresh (emit.c release_instance). */
 #define LU_TPFLAGS_PLAIN_RELEASE (1UL << 40)
 void lu_type_refresh_plain(PyTypeObject *tp);
+/* The flags CPython defines, which type.__flags__ and PyType_GetFlags show. */
+#define LU_TPFLAGS_PUBLIC ((1UL << 40) - 1)
+
+/* The attribute protocol word (runtime/types/slots.c): which protocol
+   instances of a type use to read, store and delete attributes, three
+   3-bit fields of tp_flags. A pure function of the type's attribute slots
+   and, where a slot is the kernel's thunk, of what the kernel's hook finds
+   in the MRO; written with the slots, under one lock, after the type's
+   dict changed and before its tag is taken back again, so a reader that
+   holds a tag reads the word after it. */
+enum {
+    LU_ATTR_UNSET,              /* not decided yet (the kernel's boot): the accessor decides it */
+    LU_ATTR_GENERIC,            /* object's algorithm */
+    LU_ATTR_TYPE,               /* type's: the instances are classes */
+    LU_ATTR_CUSTOM,             /* the kernel hook calls the dunder it finds */
+    LU_ATTR_SLOT,               /* a C slot of its own: call it */
+    LU_ATTR_MODULE,             /* read: object's, then the module dict's __getattr__ */
+    LU_ATTR_GENERIC_GETATTR,    /* read: object's, then the type's __getattr__ on AttributeError */
+};
+/* The fields: the bit each starts at. */
+#define LU_ATTR_READ 41
+#define LU_ATTR_STORE 44
+#define LU_ATTR_DELETE 47
+#define LU_TPFLAGS_ATTR (0x1ffUL << LU_ATTR_READ)
+/* The field decided from tp's slots and MRO as they are now, not stored. */
+int lu_attr_classify(PyTypeObject *tp, int field);
+static inline int
+lu_attr_way(PyTypeObject *tp, int field)
+{
+    int way = (int)((__atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED) >> field) & 7);
+    return way != LU_ATTR_UNSET ? way : lu_attr_classify(tp, field);
+}
+/* A site's own predicate, `legacy` (its value is the macro's), checked
+   against what the word says, `expected` (both pure: they are evaluated
+   again on a disagreement). They must agree, except where the type has one
+   of the disagreements the site is known to have (`gap`, LU_ATTR_GAP_*
+   bits), or a writer is between its dict change and its slot rewrite: out
+   of line, anything else is fatal. Each site that is switched to the word
+   loses its check. */
+enum {
+    LU_ATTR_GAP_WRAPPER = 1,    /* the type finds a C slot wrapper of a generic function: lookups miss it */
+    LU_ATTR_GAP_THUNK = 2,      /* the slot is the thunk: slot tests miss what it does */
+    LU_ATTR_GAP_FALLBACK = 4,   /* the type has __getattr__ */
+};
+int lu_attr_check_begin(PyTypeObject *tp, int gap);
+void lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ, int legacy);
+#define LU_ATTR_CHECK(site, tp, field, expected, legacy, gap) \
+    __extension__({ \
+        int legacy_ = !!(legacy); \
+        if (legacy_ != !!(expected) && lu_attr_check_begin(tp, gap)) { \
+            lu_attr_check_end(site, tp, field, gap, !!(legacy) != !!(expected), legacy_);  /* again, under the lock */ \
+        } \
+        legacy_; \
+    })
+/* Whether instances of tp read attributes with object's algorithm, before
+   any __getattr__. */
+static inline int
+lu_attr_generic_read(PyTypeObject *tp)
+{
+    int way = lu_attr_way(tp, LU_ATTR_READ);
+    return way == LU_ATTR_GENERIC || way == LU_ATTR_GENERIC_GETATTR;
+}
+/* The word of tp, and of each of its subclasses, from their slots as they
+   are (PyType_Ready, PyType_FromSpec, PyType_Modified). */
+void lu_attr_refresh(PyTypeObject *tp, int subclasses);
+/* tp's word, under the lock that decides attribute slots; with `decide`,
+   a class's attribute slots decided again first (runtime/types/slots.c). */
+void lu_attr_update(PyTypeObject *tp, int decide);
+/* The kernel has booted: every type's word, and a class's attribute slots. */
+void lu_attr_boot(void);
 
 /* Watcher ids per kind, as CPython's TYPE_/DICT_/FUNC_/CODE_MAX_WATCHERS. */
 #define LU_MAX_WATCHERS 8

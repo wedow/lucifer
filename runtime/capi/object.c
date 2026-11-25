@@ -450,7 +450,7 @@ PyObject_SelfIter(PyObject *obj)
 unsigned long
 PyType_GetFlags(PyTypeObject *tp)
 {
-    return tp->tp_flags;
+    return tp->tp_flags & LU_TPFLAGS_PUBLIC;
 }
 
 /* Attribute and call protocols. */
