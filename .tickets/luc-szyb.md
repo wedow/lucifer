@@ -685,3 +685,49 @@ On this metric:
 - **Stage 2:** check 6 gives recall under half or miss cost over 1%. Stage 1 then stands alone, and the cold half waits for in-context counts.
 - **The reduced design as a route to genshi:** stage 1's log shows no out-of-line calls left and the steady gap unchanged. The gap then belongs to marks and learned rebuilds.
 
+
+## Stage 1 falsifier: check 4 offline, protocol alone (2026-11-25)
+
+Replay of R6's stage 1 rule on stage 0's count runs, no build. The count runs (wip binary of luc-site0, `LUCIFER_SITES=2`, -w 1 -n 3 at the reference loops) were repeated once with the units event log on the same stream, so every build carries its cause.
+
+Rule replayed, per unit (root and entry):
+- First builds and the master's own rebuilds (first, learned, marks, dependencies) happen as logged; each resets the unit's counts. The master's purchases (grown, hot-site) do not happen; the IR they added is taken off later own rebuilds, and the sites they took in stay candidates.
+- Candidates: the sites the unit's build left out for budget, at any depth. A site is priced once its callee has a unit: m = the callee's last build. A bought site brings the sites its callee's own unit leaves out (R4), counted under this unit's names.
+- Value: counted calls since the unit's build times 420 (CALL_COST alone; the runtime adds the callee unit's losses, so it buys no later than this). Calls are spread evenly over their window (400 steps a value).
+- At each step: sites by density, admitted while the density covers the marginal price `6500 + 5(2n + m)`; the set is bought when its value covers `B(n + sum m)`, `B(n) = n(6500 + 5n)`. A purchase resets the counts.
+- Caveats: names are today's site key (one parent frame), so copies under one parent share a count; a build is placed at the start of its value; cli programs are one window (the whole run), so their purchase points assume an even rate.
+
+Value index: 0 is the warm-up value (start-up included), 1-3 the timed values; genshi's xml values are 4-7.
+
+| unit | own builds | first IR | sites out at first build | stage 1 purchases: value -> IR after (price / paid, M) [sites] | protocol loss while out, M by value | master's purchases (value, kind, IR) |
+|---|---|---|---|---|---|---|
+| tomli key_value_rule@3 | 4 | 1,330 | 26 | 0.03 -> 1,822 (28.4 / 29.0) [skip_chars' getitem, contains; @68 genexpr; @67, @74 get_iter; @224 Flags.is_]; 0.14 -> 2,408 (44.6 / 45.6) [@273 get_or_create_nest, @63 type.__call__, @59 len]; 0.73 -> 3,352 (78.0 / 78.0) [parse_key_value_pair@74 parse_value, 944] | 203, 72, 72, 72 | 0 grown 2,110; 0 grown 3,988; 0 grown 7,792; 1 grown 15,733 |
+| richards HandlerTask.fn | 2 | 1,094 | 6 | 2.35 -> 1,163 (14.3 / 14.3) [addPacket@82 Packet.append_to, 39] | 5, 7, 2 | none |
+| richards DeviceTask, IdleTask, WorkTask .fn | 2-6 | 367-1,057 | 0-2 | none | 0 | none |
+| django VariableNode.render | 3 | 1,175 | 13 | 3.83 -> 2,862 (59.6 / 59.6) [resolve@166, @206 getattr, 880 each] | 24, 34, 34, 31 | 2 grown 2,878 |
+| django render_value_in_context, Node.render_annotated, getattr | 2-6 | 1,020-1,184 | 3-30 | none | 0 | none |
+| genshi XMLSerializer.__call__@116 | 3 | 1,760 | 52 | 5.30 -> 2,557 (49.3 / 49.3) [8 sites: _get x2, contains x2, Attrs.get, type.__call__, truth, int.__lt__] | 44, 30, 65, 65 (values 4-7) | 4 hot-site 4,085 |
+| genshi XMLSerializer.__call__@97 | 1 | 1,621 | 15 | 7.29 -> 1,895 (30.3 / 30.3) [_get x2] | 8, 12, 12, 5 | none |
+| genshi XMLSerializer.__call__@55 | 1 | 1,962 | 14 | none | 5 | none |
+| regex_v8 block0@12 | 2 | 2,035 | 85 | none | 6, 3 | none |
+| regex_v8 Pattern.sub | 2 | 1,239 | 13 | 0.76 -> 1,556 (22.2 / 22.2) [8 _subx sites, 18-31 IR] | 33, 14, 9, 9 | 1 grown 3,547 |
+
+Cli top-20 units by predicted compile (one window). Units not listed buy nothing.
+
+| program | unit | own builds | first IR | stage 1 purchase: share of run -> IR (price / paid, M) [site] | protocol loss while out, M | master's purchases (kind, IR) |
+|---|---|---|---|---|---|---|
+| pyflakes | Checker.NAME | 8 | 1,092 | 0.83 -> 1,269 (16.3 / 16.3) [lookup_attr@47 generic_getattr] | 21.4 | grown 2,590 |
+| pyflakes | Checker.handleChildren | 1 | 2,389 | 0.73 -> 3,126 (69.2 / 69.3) [5 sites: isinstance x3, contains, handleNode] | 108.0 | grown 3,973 |
+| pygments | HtmlFormatter._format_lines@45 | 3 | 2,582 | 0.60 -> 4,868 (150.1 / 150.2) [get_tokens_unprocessed@56 Pattern.match, 2,250] | 231.6 | grown 3,046 |
+| pygments | Pattern.match | 3 | 1,198 | 0.48 -> 2,521 (48.2 / 48.4) [match@48 _new_match] | 52.3 | none |
+| black | (none of the 20) | | | none | 0-14.4 each | Pattern.match grown 3,119; Driver.parse_tokens hot-site 1,166 |
+
+Against R6's predictions:
+- **tomli: holds, earlier and smaller.** The root's out sites are bought in value 0 (at 0.03 and 0.14) and parse_value at 0.73, three rebuilds priced 151M in all against the master's four doublings to 15,733 IR (1.92G by the model). The unit stays at 3,352 IR. 72M a value is still lost at protocol after that: parse_value's own sites at depth 2 (three calls of Pattern.match, own unit 1,959 IR, match_to_number 472, Match.end 64, compare 340; about 28k calls a value each), whose price at that size is about 190M against about 35M a value. Check 3's plan kept those in line under the 16,000 allowance; stage 1 does not, so its run part may stay above check 3's arm.
+- **richards: holds.** Packet.append_to is bought in value 2, after about 28k calls (11.2k in value 0, 17.0k a value after), 14.3M as R5 predicted.
+- **django: later than master at protocol alone.** VariableNode.render buys its two getattr sites late in value 3; the master grows it in value 2. The runtime values the calls at today's out_cost (420 plus getattr's unit losses per entry), so it buys earlier than this replay; by how much the logs cannot say.
+- **genshi: later than master's hot site.** @116 buys eight sites in xml value 1 (the master's hot-site build is in xml value 0, 4,085 IR), and 65M a value is still lost at protocol after the learned rebuild of xml value 2. @97 buys its two _get sites only in xml value 3. R6's "up to -2.7%" is at risk on genshi's -n 3 figure.
+- **regex_v8 Pattern.sub:** bought in value 0 at 1,556 IR, where the master grows it to 3,547 in value 1.
+- **cli: no chain.** At most one purchase per unit among the top 20; every purchase is paid by losses counted in its own unit (by construction of the rule; nothing in the logs contradicts it). Stage 1's purchases in the top 20 are priced 85.5M (pyflakes), 198.3M (pygments), 0 (black), against the master's growth and hot-site builds there of about 155M, 145M and 120M by the model. Pygments' purchase is the larger one (Pattern.match's 2,250-IR unit in line in `_format_lines`), so cli compile ms is a risk on pygments.
+
+No pattern contradicts R6 as stated (tomli bought by value 1, richards within about two values, no cli chain priced above its losses). Stage 1 goes ahead. Risks carried to the table: django and genshi buy later than the master at protocol alone; tomli keeps 72M a value out of line at depth 2.
