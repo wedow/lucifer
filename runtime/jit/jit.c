@@ -909,6 +909,30 @@ static struct {
     int nforgot, capforgot;
 } dying = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
+/* A reference a collection took from a profile or a callee table, with the
+   world stopped: released once it runs again (lu_jit_reclaim_free). */
+static void
+forgot_add(PyObject *o)
+{
+    pthread_mutex_lock(&dying.lock);
+    if (dying.nforgot == dying.capforgot) {
+        dying.capforgot = dying.capforgot ? 2 * dying.capforgot : 16;
+        dying.forgot = realloc(dying.forgot, sizeof(PyObject *) * (size_t)dying.capforgot);
+    }
+    dying.forgot[dying.nforgot++] = o;
+    pthread_mutex_unlock(&dying.lock);
+}
+
+/* A collection left the site's table k entries. */
+static void
+forget_callees(PyCodeObject *code, int pc, struct lu_callees *t, int k)
+{
+    t->n = k;
+    if (lu_base_opcode(code, pc) != CALL_FUNCTION_EX) {
+        lu_cache_store32(lu_code_start(code) + pc + 2, 0);     /* the next call relearns its callee */
+    }
+}
+
 static void
 dying_unlink(struct lu_unit *u)
 {
@@ -1051,16 +1075,25 @@ weaken(struct lu_jit_code *jc, int keeping, int (*unreachable)(PyObject *), void
                     p->met[k++] = p->met[i];
                 }
                 else {
-                    pthread_mutex_lock(&dying.lock);
-                    if (dying.nforgot == dying.capforgot) {
-                        dying.capforgot = dying.capforgot ? 2 * dying.capforgot : 16;
-                        dying.forgot = realloc(dying.forgot, sizeof(PyObject *) * (size_t)dying.capforgot);
-                    }
-                    dying.forgot[dying.nforgot++] = p->met[i];
-                    pthread_mutex_unlock(&dying.lock);
+                    forgot_add(p->met[i]);
                 }
             }
             __atomic_store_n(&p->n, k, __ATOMIC_RELEASE);
+        }
+    }
+    for (int pc = 0; !keeping && jc->callees != NULL && pc < jc->ncode; pc++) {
+        struct lu_callees *t = jc->callees[pc];
+        int k = 0;
+        for (int i = 0; t != NULL && i < t->n; i++) {
+            if ((t->e[i].kind & LU_CALLEE_CODE) && unreachable(t->e[i].globals)) {
+                forgot_add(t->e[i].globals);
+            }
+            else {
+                t->e[k++] = t->e[i];
+            }
+        }
+        if (t != NULL && k < t->n) {
+            forget_callees(jc->code, pc, t, k);
         }
     }
     for (struct lu_unit *u = jc->units; u != NULL; u = u->next) {
@@ -2534,6 +2567,9 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
     }
     if (!known && !t->mega) {
         if (t->n < LU_CALLEE_WAYS) {
+            if (want.kind & LU_CALLEE_CODE) {
+                Py_INCREF(want.globals);        /* weak to the collector (lu_jit_traverse) */
+            }
             t->e[t->n] = want;
             __atomic_store_n(&t->n, t->n + 1, __ATOMIC_RELEASE);
         }
@@ -2575,12 +2611,12 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
             if (!dead(t->e[i].obj)) {
                 t->e[k++] = t->e[i];
             }
+            else if (t->e[i].kind & LU_CALLEE_CODE) {
+                forgot_add(t->e[i].globals);
+            }
         }
         if (t != NULL && k < t->n) {
-            t->n = k;
-            if (lu_base_opcode(code, pc) != CALL_FUNCTION_EX) {
-                lu_cache_store32(lu_code_start(code) + pc + 2, 0);     /* the next call relearns its callee */
-            }
+            forget_callees(code, pc, t, k);
         }
     }
 }
@@ -2600,6 +2636,13 @@ lu_jit_traverse(visitproc visit, void *arg)
         for (struct lu_prof *p = jc->profs; p != NULL; p = p->next) {
             for (int i = 0; i < p->n; i++) {
                 visit(p->met[i], arg);
+            }
+        }
+        for (int pc = 0; jc->callees != NULL && pc < jc->ncode; pc++) {
+            for (int i = 0; jc->callees[pc] != NULL && i < jc->callees[pc]->n; i++) {
+                if (jc->callees[pc]->e[i].kind & LU_CALLEE_CODE) {
+                    visit(jc->callees[pc]->e[i].globals, arg);
+                }
             }
         }
     }
@@ -2656,6 +2699,11 @@ lu_jit_code_free(PyCodeObject *code)
     }
     free(jc->pics);
     for (int i = 0; jc->callees != NULL && i < jc->ncode; i++) {
+        for (int k = 0; jc->callees[i] != NULL && k < jc->callees[i]->n; k++) {
+            if (jc->callees[i]->e[k].kind & LU_CALLEE_CODE) {
+                Py_DECREF(jc->callees[i]->e[k].globals);
+            }
+        }
         free(jc->callees[i]);
     }
     free(jc->callees);

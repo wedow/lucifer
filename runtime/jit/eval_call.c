@@ -121,7 +121,12 @@ speculate_callee(struct ctx *c, lu_v callable, lu_v *self, lu_v *funcv, int *nde
             || ((e.kind & LU_CALLEE_BOUND) != 0) != (*self != LU_NOV)) {
             return NULL;
         }
+        /* Held across the build of the function, which may collect. */
+        Py_INCREF(e.obj);
+        Py_INCREF(e.globals);
         PyObject *one = function_of_code(c, callable, e.obj, e.globals, 0);
+        Py_DECREF(e.globals);
+        Py_DECREF(e.obj);
         *funcv = one != NULL ? callable : LU_NOV;
         *ndef = e.ndefaults;
         return one;

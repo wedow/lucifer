@@ -329,8 +329,9 @@ void lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *));
 enum { LU_CALLEE_BOUND = 1, LU_CALLEE_CODE = 2, LU_CALLEE_CMETH = 4 };
 struct lu_callee {
     PyObject *obj;              /* the function, or with LU_CALLEE_CODE its code */
-    PyObject *globals;          /* LU_CALLEE_CODE: the functions' globals, LU_CALLEE_CMETH: the method
-                                   def, compared but never read */
+    PyObject *globals;          /* LU_CALLEE_CODE: the functions' globals (a reference the collector
+                                   counts but reaches nothing through: lu_jit_traverse), LU_CALLEE_CMETH:
+                                   the method def, compared but never read */
     int kind;
     int ndefaults;              /* LU_CALLEE_CODE: the positional defaults of the first function met (-1: none) */
 };
@@ -398,18 +399,20 @@ void lu_jit_code_free(PyCodeObject *code);
    this one is in the dependency buckets until its own clear, and an
    invalidation may still mark this code's sites. */
 void lu_jit_code_clear(PyCodeObject *code);
-/* Visits what every code's units and profiles hold (the units' constants,
-   the types and classes the profiles met), with the world stopped: the
-   collector counts these references but reaches nothing through them. */
+/* Visits what every code's units, profiles and callee tables hold (the
+   units' constants, the types and classes the profiles met, code-keyed
+   callees' globals), with the world stopped: the collector counts these
+   references but reaches nothing through them. */
 void lu_jit_traverse(visitproc visit, void *arg);
 
 /* A collection frees dead units (runtime/jit/jit.c): with the world
    stopped, it takes those no activation is in off every list a thread
    reads, and frees them once the world runs again. lu_jit_collect first
    lets go of what the program dropped: a unit that holds an object
-   `unreachable` names dies, and a profile forgets it; a unit an activation
-   is in, and the units and profiles of a code being compiled, `keep` what
-   they hold instead. lu_jit_reclaim does the rest alone. */
+   `unreachable` names dies, and a profile or callee table forgets it; a
+   unit an activation is in, and the units and profiles of a code being
+   compiled, `keep` what they hold instead. lu_jit_reclaim does the rest
+   alone. */
 struct lu_unit *lu_jit_collect(PyInterpreterState *interp, int (*unreachable)(PyObject *),
                                void (*keep)(PyObject *));
 struct lu_unit *lu_jit_reclaim(PyInterpreterState *interp);
