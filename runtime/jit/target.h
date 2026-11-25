@@ -207,6 +207,7 @@ struct lu_unit {
         int64_t armed;          /* the calls counted from that look's -armed */
         int64_t before;         /* calls made there before it was armed */
         PyCodeObject *callee;   /* the code called there (a constant of the unit) */
+        int copies;             /* the build's copies of the call on that path, all of which go in line */
     } *outs;
     int nouts;
     uint64_t enough;            /* what its build cost */
@@ -215,8 +216,6 @@ struct lu_unit {
     uint64_t quiet;             /* what it paid towards learned rebuilds since a place of its root last
                                    learned (jit.c learning) */
     int nins;                   /* the IR instructions its build made */
-    int settled;                /* generic passes are not counted (-X lucifer_jit_stats off): helpers.c looks
-                                   no further */
     int dead;
     int serial;                 /* stores without locks while serial (facts.c): keeps the task's unlocked_jit */
     /* While dead and not yet freed: the list of such units, and
@@ -552,9 +551,8 @@ int lu_jit_stale_pass(struct lu_prof *p, struct lu_unit *u);
 void lu_jit_prof_built(struct lu_prof *p, int base, int calls);
 /* A helper of a generic path ran for unit u, which called it: counted
    under -X lucifer_jit_stats (jit.c lu_jit_generic); helpers.c calls it
-   only then (u not settled). */
-enum lu_generic { LU_GENERIC_ITER, LU_GENERIC_ATTR, LU_GENERIC_OP, LU_GENERIC_CALL, LU_GENERIC_KINDS };
-void lu_jit_generic(struct lu_unit *u, enum lu_generic kind);
+   only then. */
+void lu_jit_generic(void);
 
 /* Whether the register allocator treats the instruction as a call, which
    clobbers every register but the preserved ones: an IF_CALL instruction.

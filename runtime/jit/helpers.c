@@ -209,10 +209,10 @@ h_exc_push(PyObject *exc)
    builds; NULL: no generic pass), counted under -X lucifer_jit_stats (jit.c
    lu_jit_generic); else a load and a test. */
 static inline void
-generic(struct lu_unit *u, enum lu_generic kind)
+generic(struct lu_unit *u)
 {
-    if (u != NULL && !__atomic_load_n(&u->settled, __ATOMIC_RELAXED)) {
-        lu_jit_generic(u, kind);
+    if (u != NULL && _PyRuntime.jit.stats) {
+        lu_jit_generic();
     }
 }
 
@@ -533,7 +533,7 @@ h_load_attr(PyObject *owner, PyObject *name)
 static PyObject *
 h_load_attr_pic(PyObject *owner, PyObject *name, int64_t pic, struct lu_unit *u)
 {
-    generic(u, LU_GENERIC_ATTR);
+    generic(u);
     if (pic != 0) {
         lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name, u);
     }
@@ -543,7 +543,7 @@ h_load_attr_pic(PyObject *owner, PyObject *name, int64_t pic, struct lu_unit *u)
 static int
 h_store_attr(PyObject *owner, PyObject *name, PyObject *v, int64_t pic, struct lu_unit *u)
 {
-    generic(u, LU_GENERIC_ATTR);
+    generic(u);
     if (pic != 0) {
         lu_jit_pic_note((struct lu_pic *)(intptr_t)pic, owner, name, u);
     }
@@ -651,7 +651,7 @@ h_build_string(PyObject **argv, intptr_t n)
 static PyObject *
 h_binary_op(PyObject *a, PyObject *b, int64_t op, struct lu_unit *u)
 {
-    generic(u, LU_GENERIC_OP);
+    generic(u);
     if (op == NB_SUBSCR) {
         PyObject *item = lu_subscr_native(a, b);
         if (item != NULL || PyErr_Occurred()) {
@@ -693,7 +693,7 @@ h_binary_op(PyObject *a, PyObject *b, int64_t op, struct lu_unit *u)
 static PyObject *
 h_compare_op(PyObject *a, PyObject *b, int64_t oparg, struct lu_unit *u)
 {
-    generic(u, LU_GENERIC_OP);
+    generic(u);
     int r = lu_compare_native(a, b, (int)oparg);
     if (r < 0) {
         PyObject *args[3] = { a, b, lu_small_int((int)oparg) };
@@ -773,7 +773,7 @@ static PyObject *polled(struct lu_task *t, PyObject *r);
 static PyObject *
 h_for_iter(PyObject *it, struct lu_unit *u)
 {
-    generic(u, LU_GENERIC_ITER);
+    generic(u);
     PyTypeObject *t = Py_TYPE(it);
     if (t == &PyListIter_Type || t == &PyTupleIter_Type || t == &PyRangeIter_Type) {
         PyObject *v = t == &PyRangeIter_Type ? lu_rangeiter_next(it) : lu_seqiter_next(it);
@@ -1166,7 +1166,7 @@ h_call_any(PyObject **argv, intptr_t n)
 {
     /* Its argument array is the interpreter's: the running activation names the unit. */
     struct lu_jit_act *act = lu_current_task()->jit_act;
-    generic(act != NULL ? act->unit : NULL, LU_GENERIC_CALL);
+    generic(act != NULL ? act->unit : NULL);
     return h_call(argv, n);
 }
 

@@ -194,6 +194,7 @@ static struct {
 
 static void event(const char *fmt, ...);
 static void ride(struct lu_jit_code *jc, struct lu_unit *u);
+static void rides(struct lu_jit_code *jc, int now);
 static const char *qualname(PyCodeObject *code);
 
 /* The ledger: what builds, exits and calls cost, in machine instructions
@@ -707,7 +708,9 @@ relearn(struct lu_jit_code *jc, struct lu_deopt *d)
         fprintf(stderr, "jit: recompile %s: learned since its build\n", PyUnicode_AsUTF8(d->unit->code->co_qualname));
     }
     const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+    PyMutex_Lock(&jc->prof_lock);
     ride(jc, d->unit);
+    PyMutex_Unlock(&jc->prof_lock);
     kill(jc, d->unit, "learned-since-build", in->code, in->pc,
          (double)__atomic_load_n(&d->unit->unlearned, __ATOMIC_RELAXED),
          (double)d->unit->enough);
@@ -753,8 +756,8 @@ prof_exit(struct lu_deopt *d)
         fprintf(stderr, "jit: recompile %s: learned %s fails\n", PyUnicode_AsUTF8(d->unit->code->co_qualname), what);
     }
     const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
+    rides(jc, now);
     for (struct lu_unit *u = now ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL; u = u->next) {
-        ride(jc, u);
         kill(jc, u, what[0] == 't' ? "learned-type-fails" : "learned-kind-fails", in->code, in->pc, paid, price);
     }
 }
@@ -1273,7 +1276,7 @@ keep_outs(struct lu_unit *u, const struct lu_func *f)
     u->nouts = f->nouts;
     u->outs = malloc(sizeof(struct lu_out) * (size_t)f->nouts);
     for (int i = 0; i < f->nouts; i++) {
-        u->outs[i] = (struct lu_out){ f->outs[i], -(int64_t)f->nins, f->nins, 0, f->out_callees[i] };
+        u->outs[i] = (struct lu_out){ f->outs[i], -(int64_t)f->nins, f->nins, 0, f->out_callees[i], f->out_copies[i] };
     }
 }
 
@@ -1331,7 +1334,6 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     if (ok) {
         keep_outs(u, &f);
         u->enough = (uint64_t)build_cost(f.nins);
-        u->settled = !_PyRuntime.jit.stats;     /* with the counts on, generic passes are counted */
         u->nins = f.nins;
         __atomic_store_n(&jc->built_ins, f.nins, __ATOMIC_RELAXED);
     }
@@ -2013,9 +2015,9 @@ handling_frame(struct lu_deopt *d)
    frame's handler keeps taking (compiled code takes only the root's and
    kernel frames', which make no traceback entry) is treated as a side
    exit there: the function is called instead, and its own unit takes it. */
-/* Calls made at site i of the unit's out-of-line calls. Read under
-   another root's lock while the owner re-arms them, so a torn read is
-   possible: never below 0. */
+/* Calls made at site i of the unit's out-of-line calls. The counter is a
+   plain increment that a re-arm races with, so a read can be off by the
+   arm: never below 0. */
 static int64_t
 out_calls(const struct lu_out *o)
 {
@@ -2036,7 +2038,7 @@ struct look {
     int n, priced, admitted;
     int *order;                 /* the priced sites, densest first */
     double *value, *size;
-    double total, since;        /* all sites' value; what their calls made since the last look */
+    double priced_total, since; /* the priced sites' value; what all calls made since the last look */
     double ins, paid;           /* the build with the admitted sites, and their value */
 };
 
@@ -2052,10 +2054,10 @@ look_at(struct lu_unit *u, struct look *l)
         struct lu_jit_code *cc = state_of(u->outs[i].callee);
         int64_t made = out_calls(&u->outs[i]);
         l->value[i] = (double)made * CALL_COST;
-        l->size[i] = cc != NULL ? (double)__atomic_load_n(&cc->built_ins, __ATOMIC_RELAXED) : 0;
-        l->total += l->value[i];
+        l->size[i] = cc != NULL ? (double)__atomic_load_n(&cc->built_ins, __ATOMIC_RELAXED) * u->outs[i].copies : 0;
         l->since += (double)(made > u->outs[i].before ? made - u->outs[i].before : 0) * CALL_COST;
         if (l->size[i] > 0) {
+            l->priced_total += l->value[i];
             int j = l->priced++;
             for (; j > 0 && l->value[l->order[j - 1]] * l->size[i] < l->value[i] * l->size[l->order[j - 1]]; j--) {
                 l->order[j] = l->order[j - 1];
@@ -2077,6 +2079,9 @@ look_at(struct lu_unit *u, struct look *l)
 static void
 look_buy(struct lu_jit_code *jc, struct lu_unit *u, const struct look *l, const char *how)
 {
+    if (l->admitted == 0) {
+        return;
+    }
     jc->bought = realloc(jc->bought, sizeof(struct lu_bought) * (size_t)(jc->nbought + l->admitted));
     for (int k = 0; k < l->admitted; k++) {
         int i = l->order[k];
@@ -2098,7 +2103,7 @@ look_free(struct look *l)
 
 /* Unit u dies to be built again for another reason: the sites whose value
    covers their marginal price at that build go in line in it, at no
-   rebuild of their own. */
+   rebuild of their own. Under jc's prof_lock. */
 static void
 ride(struct lu_jit_code *jc, struct lu_unit *u)
 {
@@ -2106,11 +2111,24 @@ ride(struct lu_jit_code *jc, struct lu_unit *u)
         return;
     }
     struct look l;
-    PyMutex_Lock(&jc->prof_lock);
     look_at(u, &l);
     look_buy(jc, u, &l, " riding");
-    PyMutex_Unlock(&jc->prof_lock);
     look_free(&l);
+}
+
+/* Every unit of jc dies (when `now`): each one's sites ride. The lock is
+   taken before the walk of jc's units, so the walk never parks. */
+static void
+rides(struct lu_jit_code *jc, int now)
+{
+    if (!now) {
+        return;
+    }
+    PyMutex_Lock(&jc->prof_lock);
+    for (struct lu_unit *u = __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
+        ride(jc, u);
+    }
+    PyMutex_Unlock(&jc->prof_lock);
 }
 
 /* A site the unit left out of line for want of budget was called as often
@@ -2128,14 +2146,18 @@ static void
 hot_exit(struct lu_deopt *d)
 {
     struct lu_unit *u = d->unit;
-    if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
-        return;
-    }
     struct lu_jit_code *jc = state_of(u->code);
     struct look l;
     PyMutex_Lock(&jc->prof_lock);
+    if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {        /* another look bought: one purchase */
+        PyMutex_Unlock(&jc->prof_lock);
+        return;
+    }
     look_at(u, &l);
     double price = build_cost((int)l.ins);
+    /* The quiet is a clock of the unit's work since a place last learned,
+       counted in what it lost: calls out of line count as stale passes
+       and exits do, so a learned rebuild and a purchase share it. */
     int calm = quiet(u, (uint64_t)l.since, (uint64_t)price);
     int buy = l.admitted > 0 && l.paid >= price && calm;
     if (buy) {
@@ -2143,8 +2165,12 @@ hot_exit(struct lu_deopt *d)
     }
     else {
         /* The shortfall of the admitted sites (of their price, or of the
-           quiet), or of the densest one alone; none priced yet, as many
-           calls again as were made. */
+           quiet), or of the densest one alone, spread over the priced
+           sites' calls; unpriced sites, as many calls again as were made.
+           No site is armed for more than that or fewer calls than a look
+           (this exit) costs: the counter is a plain increment, and one
+           that overwrites a re-arm overstates the calls by the arm, so by
+           at most the calls already made, as before. */
         double due = -1;
         if (l.admitted > 0) {
             double hush = price / 2 - (double)__atomic_load_n(&u->quiet, __ATOMIC_RELAXED);
@@ -2153,15 +2179,17 @@ hot_exit(struct lu_deopt *d)
         else if (l.priced > 0) {
             due = build_cost(u->nins + (int)l.size[l.order[0]]) - l.value[l.order[0]];
         }
+        double least = (double)exit_cost(d) / CALL_COST;
         for (int i = 0; i < l.n; i++) {
             struct lu_out *o = &u->outs[i];
-            int64_t made = out_calls(o), arm = made;
-            if (due >= 0 && l.total > 0) {
-                double share = due * (double)made / l.total, least = (double)DEOPT_INS / CALL_COST;
-                arm = (int64_t)(share > least ? share : least) + 1;
+            int64_t made = out_calls(o);
+            double most = (double)made > least ? (double)made : least, arm = most;
+            if (due >= 0 && l.priced_total > 0 && l.size[i] > 0) {
+                arm = due * (double)made / l.priced_total;
+                arm = arm < least ? least : arm > most ? most : arm;
             }
             o->before = made;
-            o->armed = arm > 0 ? arm : 1;
+            o->armed = (int64_t)arm + 1;
             __atomic_store_n(&o->left, -o->armed, __ATOMIC_RELAXED);
         }
     }
@@ -2176,7 +2204,7 @@ hot_exit(struct lu_deopt *d)
 }
 
 void
-lu_jit_generic(struct lu_unit *u, enum lu_generic kind)
+lu_jit_generic(void)
 {
     count(&stats.generic, 1);
 }
@@ -2355,9 +2383,9 @@ lu_jit_note_exit(struct lu_deopt *d)
             { "mark-catch", "mark-raises", "mark-noinline", "mark-noborrow", "mark-nospec" },
             { "old-unit-catch", "old-unit-raises", "old-unit-noinline", "old-unit-noborrow", "old-unit-nospec" } };
         const char *why = whys[again != 0][caught >= 0 ? 0 : out ? 1 : d->reason != EXIT_GUARD ? 2 : d->borrow ? 3 : 4];
+        rides(root, 1);
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             /* An old unit's death buys nothing: the mark was bought. */
-            ride(root, u);
             kill(root, u, why, site, site_pc, again ? 0 : (double)n, again ? 0 : price);
         }
     }

@@ -406,6 +406,7 @@ struct lu_func {
     uint64_t *outs;             /* calls left out of line for want of budget, each path once (lu_ev_room): the unit
                                    counts the calls made there */
     PyCodeObject **out_callees; /* and the code each calls (a constant of the unit) */
+    int *out_copies;            /* and the copies of it the build met */
     int nouts, capouts;
     int budget;                 /* instructions past which the evaluator inlines no more (jit.c) */
     struct lu_fdep *deps;       /* the facts the code relies on between polls */

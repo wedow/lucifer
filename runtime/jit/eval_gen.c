@@ -283,6 +283,7 @@ resume_at(struct ctx *c, lu_v it, int pc, int exit_pc, int nops)
     struct resume *known = resume_find(g, co, 0, 0, pc);
     int depth = known != NULL ? known->depth : 0;
     struct ctx *k = lu_ir_alloc(g->f, sizeof(struct ctx));
+    k->bought = 0;                  /* a generator's own bought sites stay its unit's */
     k->ret = exit_pc >= 0 ? LU_RETURN_FOR_ITER : LU_RETURN_NEXT;
     k->gen = it;
     k->g = g;
@@ -544,6 +545,7 @@ adopt_at(struct ctx *c, lu_v it, lu_v at, PyFunctionObject *fn, PyObject *seen, 
     word_set(c, it, STATE_WORD, STATE_AS_WORD(LU_GEN_EXECUTING));
     word_set(c, it, FRAME_WORD(owner), OWNER_AS_WORD(LU_FRAME_JIT));
     struct ctx *k = lu_ir_alloc(g->f, sizeof(struct ctx));
+    k->bought = 0;                  /* a generator's own bought sites stay its unit's */
     k->ret = exit_pc >= 0 ? LU_RETURN_FOR_ITER : LU_RETURN_NEXT;
     k->gen = it;
     k->adopted = 1;

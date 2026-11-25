@@ -191,15 +191,16 @@ lu_ev_room(struct ctx *c, int again, PyCodeObject *callee)
     c->g->hot_room = 0;
     /* The call's path: the callee and each frame's call from the root's,
        mixed as a profile place's. A site bought by the root's entry, or
-       by the own unit of a frame it is in line in (its path from that
-       frame), goes in line with the allowance a unit begins with. Copies
-       on one path (the arms of a call over learned classes, a loop's
-       peeled turn) are one site. */
+       by the own unit of a frame that went in line as a bought site (its
+       path from that frame: a bought callee is built as its own unit is),
+       goes in line with the allowance a unit begins with. Copies on one
+       path (the arms of a call over learned classes, a loop's peeled turn)
+       are one site, priced as all of them. */
     uint64_t key = (uint64_t)(uintptr_t)callee;
     int bought = 0;
     for (struct ctx *k = c; k != NULL; k = k->parent) {
         key = lu_jit_ctx_mix(key, k->code, k->pc);
-        bought = bought || (again == 0 && c->g->budget >= 0
+        bought = bought || (again == 0 && c->g->budget >= 0 && (k->parent == NULL || k->bought)
                             && lu_jit_bought(k->code, k->parent != NULL ? -1 : f->entry_pc, key));
     }
     if (bought) {
@@ -217,8 +218,11 @@ lu_ev_room(struct ctx *c, int again, PyCodeObject *callee)
         note_key(&f->outs, &f->nouts, &f->capouts, key);
         f->out_callees = realloc(f->out_callees, sizeof(PyCodeObject *) * (size_t)f->capouts);
         f->out_callees[i] = callee;
+        f->out_copies = realloc(f->out_copies, sizeof(int) * (size_t)f->capouts);
+        f->out_copies[i] = 0;
         lu_ev_konst(c, (PyObject *)callee);     /* the unit keeps it */
     }
+    f->out_copies[i]++;
     if (c->g->budget >= 0) {
         lu_ev_guard(c, OP_COUNT_OUT, LU_NOV, i);        /* the unit counts the calls made here */
     }
@@ -595,6 +599,7 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, int ndef, lu_v *arg
     lu_ev_settle(k, 0);
     /* A bought site's callee has room for its own calls: what its own
        unit takes in line comes with it. */
+    k->bought = c->g->hot_room;
     int room = lu_ev_room_begin(c);
     int built = lu_ev_build(k, 0);
     lu_ev_room_end(c, room);

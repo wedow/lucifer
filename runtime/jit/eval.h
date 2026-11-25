@@ -126,6 +126,7 @@ struct ctx {
                                    only (func then stands for it in all but its closure); else LU_NOV */
     PyObject *globals, *builtins;
     int kernel;                 /* kernel code: its module's globals fold */
+    int bought;                 /* it went in line as a bought site: its own unit's bought sites come with it */
     int ncode, nlocals;
     struct bblk *bb;
     int nbb;
