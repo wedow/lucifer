@@ -373,9 +373,15 @@ log: a start calling a large generic callee at 24 sites buys sites, each
 once (at most 24), every purchase paid at least its price.
 The sitepath lane runs tests/kernel/jit_site_path.py at 16N with the event
 log: a helper in line under two parents calls leaf out of line in both
-copies, hot in one; the start buys leaf, and the build that takes it in
-line adds one copy of it: fewer instructions than leaf's own unit (a copy
-of it is about two thirds of that; two would be more).
+copies, hot in one; leaf goes in line on the hot path (the start buys it,
+or buys the hot path's callee whose own unit bought it), and each build
+that takes bought sites in adds less than their own units and half of
+leaf's again: the cold path's copy stays out.
+The siteshared lane runs tests/kernel/jit_site_shared.py at 8N with the event
+log: a start whose hot call is left out of line while a place of it is still
+learning classes. The call goes in line with a rebuild that happens anyway
+(a learned one): the start is never killed to buy sites, and a build of it
+has the call bought.
 The perf lane records Richards under -X perf with `perf record -g` and
 requires that at least 95% of the samples in compiled code (code perf finds
 in no file: it looks it up in /tmp/perf-PID.map) resolve to py:: symbols.
@@ -693,25 +699,44 @@ def check_entries(args):
 
 
 def check_path(args):
-    """entry buys leaf on its hot path, and the build that takes it adds one copy of leaf, not the cold path's too."""
+    """entry takes leaf in on its hot path, by buying it or the hot path's callee that bought it, and each build that
+    takes bought sites in adds what they bring and less than another copy of leaf: not the cold path's copy too."""
     problems, err = events(args, 'jit_site_path.py', 16 * GROWTH_N)
     leaf = [int(n) for n in re.findall(r'^jit-ev \S+ build leaf@1 ok ins (\d+) ', err, re.M)]
-    took = []
-    lines = err.splitlines()
-    for i, line in enumerate(lines):
-        if re.match(r'jit-ev \S+ buy entry@1 leaf ', line):
-            kill = next((re.search(r' ins (\d+) paid', l) for l in lines[i:] if re.match(r'jit-ev \S+ kill entry@1 ', l)),
-                        None)
-            built = next((re.search(r' ok ins (\d+) ', l) for l in lines[i:] if re.match(r'jit-ev \S+ build entry@1 ', l)),
-                         None)
-            if kill and built:
-                took.append(int(built[1]) - int(kill[1]))
-    if not took or not leaf:
-        problems.append('entry never bought leaf')
-    problems += [f'the build that took leaf in added {d} IR, more than one copy of its {leaf[-1]}' for d in took
-                 if d >= leaf[-1]]
+    path_leaf = taken = False
+    pending, killed, added = 0, None, []
+    for line in err.splitlines():
+        buy = re.match(r'jit-ev \S+ buy (\S+)@\d+ (\S+) ins (\d+) ', line)
+        if buy and buy[1] == 'hot_path' and buy[2] == 'leaf':
+            path_leaf = True
+        elif buy and buy[1] == 'entry':
+            pending += int(buy[3])
+            taken = taken or buy[2] == 'leaf' or (buy[2] == 'hot_path' and path_leaf)
+        elif re.match(r'jit-ev \S+ kill entry@1 ', line) and pending:
+            killed = int(re.search(r' ins (\d+)', line)[1])
+        elif re.match(r'jit-ev \S+ build entry@1 ok ', line) and killed is not None:
+            added.append((int(re.search(r' ok ins (\d+)', line)[1]) - killed, pending))
+            pending, killed = 0, None
+    if not taken or not leaf:
+        problems.append('leaf never went in line on the hot path')
+    problems += [f'a build that took {m} IR of bought callees in added {d}, another copy of leaf ({leaf[-1]}) or more'
+                 for d, m in added if leaf and d >= m + leaf[-1] / 2]
     print(f"{'FAIL' if problems else 'PASS'} sitepath" + (': ' + '; '.join(problems[:5]) if problems else
-          f" (leaf {leaf[-1]} IR; the build that took it added {', '.join(map(str, took))})"))
+          f" (leaf {leaf[-1]} IR; builds that took bought sites in added {', '.join(f'{d} for {m}' for d, m in added)})"))
+    return 1 if problems else 0
+
+
+def check_shared(args):
+    """entry's hot call rides with a rebuild the learning place makes anyway: no rebuild for sites alone."""
+    problems, err = events(args, 'jit_site_shared.py', 8 * GROWTH_N)
+    alone = re.findall(r'^jit-ev \S+ kill entry@1 .*: sites ', err, re.M)
+    bought = [int(n) for n in re.findall(r'^jit-ev \S+ build entry@1 ok .* bought (\d+) ', err, re.M)]
+    if alone:
+        problems.append(f'{len(alone)} rebuilds of entry for its sites alone')
+    if not any(bought):
+        problems.append('no build of entry has the call bought')
+    print(f"{'FAIL' if problems else 'PASS'} siteshared" + (': ' + '; '.join(problems) if problems else
+          f' ({len(bought)} builds of entry)'))
     return 1 if problems else 0
 
 
@@ -742,7 +767,7 @@ def main():
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'sitechain', 'siteentry', 'sitepath', 'perf']))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'sitechain', 'siteentry', 'sitepath', 'siteshared', 'perf']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
@@ -779,6 +804,8 @@ def main():
         failed += check_entries(args)
     if 'sitepath' in args.modes.split(','):
         failed += check_path(args)
+    if 'siteshared' in args.modes.split(','):
+        failed += check_shared(args)
     if 'perf' in args.modes.split(','):
         failed += check_perf(args)
     print(f'{failed} failing')
