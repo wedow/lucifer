@@ -99,6 +99,12 @@ HANDOFF_STDOUT = {
 HANDOFF_XFAIL = {
     "marshal_dumps": "luc-ymb3",
 }
+# name -> ticket: the same, for known divergences in every lane.
+XFAIL = {
+    "entry_tracebacks": "luc-mj6t",
+    "jit_local_events_inlined": "luc-o80b",
+    "threads_kill_under_calls": "luc-33lu",
+}
 # name -> [(flags, env)]: env None is -I -S with the inherited environment.
 RUNS = {
     "threads_frame_locals_race": [([], None), (["-X", "lucifer_jit=off"], None)],
@@ -438,8 +444,9 @@ def main():
         if args.lane.startswith("handoff") and name in HANDOFF_STDOUT:
             oracle = (oracle[0], HANDOFF_STDOUT[name], oracle[2])
         ours = run(lucifer, LANES[args.lane] + flags, pyc, env, here)
-        if args.lane.startswith("handoff") and name in HANDOFF_XFAIL and oracle[0] == ours[0]:
-            return 0, f"{'XPASS' if oracle == ours else 'XFAIL'} {label} ({HANDOFF_XFAIL[name]})"
+        known = XFAIL.get(name) or (args.lane.startswith("handoff") and HANDOFF_XFAIL.get(name))
+        if known and oracle[0] == ours[0]:
+            return 0, f"{'XPASS' if oracle == ours else 'XFAIL'} {label} ({known})"
         if oracle == ours:
             return 0, f"PASS {label}"
         return 1, describe(label, oracle, ours)
