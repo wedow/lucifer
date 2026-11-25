@@ -1337,20 +1337,35 @@ lu_ns_delete(PyObject *dict, PyObject *key)
 int
 lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
 {
-    int r;
+    PyDictObject *mp = (PyDictObject *)dict;
+    int r = 0;
+    *old = NULL;
+    Py_INCREF(dict);            /* held: a caller's may be borrowed, and the lock may wait */
     Py_BEGIN_CRITICAL_SECTION(dict);
-    Py_ssize_t ix = ns_find(dict, key);
-    *old = ix >= 0 ? Py_NewRef(lu_dk_value(((PyDictObject *)dict)->ma_keys, ix)) : NULL;
-    if (value != NULL) {
-        r = lu_ns_insert(dict, key, value) < 0 ? -1 : 1;
+    if (!lu_dk_is_unicode(mp->ma_keys)) {
+        r = -2;                 /* a key that is not an exact str: equal to key only Python says */
     }
     else {
-        r = ix >= 0;
-        if (r) {
-            Py_DECREF(lu_dict_remove((PyDictObject *)dict, ix));
+        Py_ssize_t ix = ns_find(dict, key);
+        if (ix >= 0) {
+            *old = Py_NewRef(lu_dk_value(mp->ma_keys, ix));
+            if (value != NULL) {
+                lu_dict_replace(mp, ix, value);
+            }
+            else {
+                Py_DECREF(lu_dict_remove(mp, ix));
+            }
+            r = 1;
+        }
+        else if (value != NULL) {
+            r = lu_dict_insert(mp, key, lu_str_hash(key), value) < 0 ? -1 : 1;
         }
     }
     Py_END_CRITICAL_SECTION();
+    if (r == -2) {
+        r = value == NULL ? PyDict_Pop(dict, key, old) : PyDict_SetItem(dict, key, value) < 0 ? -1 : 1;
+    }
+    Py_DECREF(dict);
     return r;
 }
 

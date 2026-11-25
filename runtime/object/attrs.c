@@ -44,6 +44,7 @@
    as for any other value. */
 
 #include "lucifer.h"
+#include "object/dict.h"
 
 #include <string.h>
 
@@ -596,8 +597,7 @@ lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v)
     if (!PyDict_CheckExact(dict) || !PyUnicode_CheckExact(name)) {
         return -1;
     }
-    *v = lu_ns_get(dict, name);
-    return *v != NULL;
+    return lu_dict_find_name(dict, name, v);       /* -1: Python compares a key */
 }
 
 /* The kind of a value word v (an object or a marker) and, for a number,
@@ -882,20 +882,16 @@ lu_attr_store(PyObject *obj, PyObject *name, PyObject *v)
     if (dict == NULL) {
         return PyErr_Occurred() ? -1 : 0;
     }
+    PyObject *old;
+    int r = lu_ns_exchange(dict, name, v, &old);
     if (PyType_Check(obj)) {
         /* The type's attribute cache names the value it replaces without
            owning it: it is released only once every tag it may be cached
            under is taken back (type_lookup, runtime/prim/type.c). */
-        PyObject *old;
-        int r = lu_ns_exchange(dict, name, v, &old);
         lu_type_modified((PyTypeObject *)obj);
-        Py_XDECREF(old);
-        return r;
     }
-    if (v == NULL) {
-        return lu_ns_delete(dict, name);
-    }
-    return lu_ns_store(dict, name, v) < 0 ? -1 : 1;
+    Py_XDECREF(old);
+    return r;
 }
 
 int

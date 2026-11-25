@@ -341,7 +341,7 @@ PyObject *lu_instance_dict(PyObject *obj, int create);
 int lu_instance_set_dict(PyObject *obj, PyObject *dict);
 /* An instance attribute: 1 with a new reference in *v, 0 when absent, -1
    when only the kernel can answer (a dict that is not exact, a name that is
-   not an exact str); never raises. */
+   not an exact str, a key that Python must compare with it); never raises. */
 int lu_attr_lookup(PyObject *obj, PyObject *name, PyObject **v);
 /* Stores v, or deletes the name when v is NULL, on an object lu_dict_ptr
    answers for: 1 done, 0 when the name to delete is absent, -1 on error. */
@@ -1743,7 +1743,10 @@ int lu_ns_delete(PyObject *dict, PyObject *key);
 /* lu_ns_store, or lu_ns_delete when value is NULL, handing the value it
    replaced or removed to the caller (*old, a reference, or NULL) instead of
    releasing it: 1 when stored or removed, 0 when there was nothing to
-   remove, -1 on error. */
+   remove, -1 on error. For an object's dict (`__dict__` may give it keys
+   that are not exact strs, which Python compares) and one the caller may
+   hold borrowed: the old value's finalizer runs in the caller, after the
+   dict is let go. */
 int lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old);
 /* PyDict_Next over the namespace: *pos starts at 0; key and value are
    borrowed. A dict other threads may write is iterated in its critical
@@ -1835,11 +1838,10 @@ PyObject *lu_descr_new_classmethod(PyTypeObject *type, PyMethodDef *ml);
 PyObject *lu_descr_new_wrapper(PyTypeObject *type, PyObject *name, struct lu_kernel_def *k);
 PyObject *lu_descr_new_member(PyTypeObject *type, PyMemberDef *member);
 PyObject *lu_descr_new_getset(PyTypeObject *type, PyGetSetDef *getset);
-/* A member or native getset descriptor read or written by C alone, for an
-   instance of a type that has it: 1 done (*out a new reference when reading;
-   value NULL deletes), 0 when kernel code must decide (another kind of
-   descriptor, an unset member, a getset with no setter), -1 with an exception
-   set. */
+/* A member or native getset descriptor read or written by C alone: 1 done
+   (*out a new reference when reading; value NULL deletes), 0 when kernel
+   code must decide (another kind of descriptor, an object not of its class,
+   an unset member, a getset with no setter), -1 with an exception set. */
 int lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out);
 /* An exact staticmethod's callable, or an exact classmethod's bound to cls, as
    their __get__ answers a lookup through cls or its instance (a new
@@ -1969,6 +1971,16 @@ int lu_truth_exact(PyObject *v);
    for C callers, and the slot table _lucifer.set_slot installs them from. */
 PyObject *lu_slot_tp_getattro(PyObject *self, PyObject *name);
 int lu_slot_tp_setattro(PyObject *self, PyObject *name, PyObject *value);
+/* Whether tp's read (or write) slot is one the word describes: object's
+   function or the kernel's thunk. C may set its own and not say so
+   (PyType_Modified), which only the slot shows. */
+static inline int
+lu_attr_slot_ours(PyTypeObject *tp, int field)
+{
+    return field == LU_ATTR_READ
+        ? tp->tp_getattro == PyObject_GenericGetAttr || tp->tp_getattro == lu_slot_tp_getattro
+        : tp->tp_setattro == PyObject_GenericSetAttr || tp->tp_setattro == lu_slot_tp_setattro;
+}
 PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
 /* Sets slot `index` of tp (_lucifer.slot_index names it): how 0 clears it, 1 installs the thunk, 2 copies
    it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only), 4 installs

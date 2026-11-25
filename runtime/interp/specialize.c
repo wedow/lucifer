@@ -182,11 +182,7 @@ analyze(PyTypeObject *tp, PyObject *name, int field, int *way, PyObject **descr,
 {
     *version = lu_type_assign_version(tp) ? __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) : 0;
     *way = lu_attr_way(tp, field);
-    /* The slot as well: C may have set its own and not said so
-       (PyType_Modified), which only the slot shows. */
-    void *slot = field == LU_ATTR_READ ? (void *)tp->tp_getattro : (void *)tp->tp_setattro;
-    if (slot != (void *)PyObject_GenericGetAttr && slot != (void *)lu_slot_tp_getattro
-        && slot != (void *)PyObject_GenericSetAttr && slot != (void *)lu_slot_tp_setattro) {
+    if (!lu_attr_slot_ours(tp, field)) {
         *way = LU_ATTR_SLOT;
     }
     *descr = _PyType_LookupRef(tp, name);
@@ -283,10 +279,10 @@ specialize_class(PyObject *owner, lu_codeunit *site, PyObject *name)
 /* A __slots__ member that is an object reference: its byte offset in the
    instance fits an index word, and the descriptor type is immutable. */
 static int
-is_slot_member(PyObject *descr)
+is_slot_member(PyObject *descr, PyTypeObject *tp)
 {
-    if (descr == NULL || !Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
-        return 0;
+    if (descr == NULL || !Py_IS_TYPE(descr, &PyMemberDescr_Type) || !PyType_IsSubtype(tp, PyDescr_TYPE(descr))) {
+        return 0;               /* another class's member raises (descr_check) */
     }
     PyMemberDef *m = ((PyMemberDescrObject *)descr)->d_member;
     return m->type == Py_T_OBJECT_EX && m->offset >= 0 && m->offset <= UINT16_MAX;
@@ -322,7 +318,7 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
     if (*version == 0 || !generic_read(way) || (!managed && tp->tp_dictoffset != 0)) {
         op = LOAD_ATTR;
     }
-    else if (is_slot_member(*descr)) {
+    else if (is_slot_member(*descr, tp)) {
         *second = (uint32_t)((PyMemberDescrObject *)*descr)->d_member->offset;
         Py_CLEAR(*descr);
         op = LOAD_ATTR_SLOT;
@@ -378,7 +374,8 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
     else if (kind == DESCR_NON_DESCRIPTOR) {
         op = managed ? LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES : LOAD_ATTR_NONDESCRIPTOR_NO_DICT;
     }
-    else if (!method && (Py_IS_TYPE(*descr, &PyProperty_Type) || Py_IS_TYPE(*descr, &PyGetSetDescr_Type))
+    else if (!method && (Py_IS_TYPE(*descr, &PyProperty_Type)
+                         || (Py_IS_TYPE(*descr, &PyGetSetDescr_Type) && PyType_IsSubtype(tp, PyDescr_TYPE(*descr))))
              && lu_property_fget(*descr) != NULL && PyFunction_Check(lu_property_fget(*descr))
              && way == LU_ATTR_GENERIC) {
         /* A property whose getter is a function, or a kernel getset (whose
@@ -528,7 +525,7 @@ lu_specialize_store_fresh(PyTypeObject *tp, PyObject *name, uint32_t *version, u
     PyObject *descr;
     int way;
     enum descr_kind kind = analyze(tp, name, LU_ATTR_STORE, &way, &descr, version);
-    Py_ssize_t offset = *version != 0 && way == LU_ATTR_GENERIC && !is_slot_member(descr)
+    Py_ssize_t offset = *version != 0 && way == LU_ATTR_GENERIC && !is_slot_member(descr, tp)
         ? store_inline_offset(tp, name, kind) : -1;
     Py_XDECREF(descr);
     *index = (uint16_t)(offset >= 0 ? offset : 0);
@@ -551,7 +548,7 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
     if (version == 0 || way != LU_ATTR_GENERIC) {
         fail(site);
     }
-    else if (is_slot_member(descr) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {
+    else if (is_slot_member(descr, tp) && !(((PyMemberDescrObject *)descr)->d_member->flags & Py_READONLY)) {
         if (begin(site)) {
             lu_cache_store(c + LA_INDEX, (uint16_t)((PyMemberDescrObject *)descr)->d_member->offset);
             lu_cache_store32(c + LA_VERSION, version);

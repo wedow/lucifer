@@ -198,12 +198,13 @@ held_at(struct ctx *c, const struct lu_vobj *o, PyObject *name)
     return -1;
 }
 
-/* A __slots__ member holding an object, which name finds on the class. */
+/* A __slots__ member holding an object, which name finds on the class tp
+   (of tp or a base: another class's member raises, descr_check). */
 static int
-slot_member(PyObject *d)
+slot_member(PyObject *d, PyTypeObject *tp)
 {
     return d != NULL && Py_IS_TYPE(d, &PyMemberDescr_Type)
-        && ((PyMemberDescrObject *)d)->d_member->type == Py_T_OBJECT_EX;
+        && ((PyMemberDescrObject *)d)->d_member->type == Py_T_OBJECT_EX && PyType_IsSubtype(tp, PyDescr_TYPE(d));
 }
 
 /* The class's attribute `name` as of a version the unit then relies on
@@ -312,7 +313,7 @@ lu_ev_instance_real(struct ctx *c, const struct lu_vobj *o, int id)
         PyObject *name = lu_ev_const(c, o->f[i]), *d = _PyType_Lookup(tp, name);
         uint32_t version;
         uint16_t index;
-        if (slot_member(d)) {
+        if (slot_member(d, tp)) {
             lu_v args[3] = { obj, lu_ev_const_i(c, ((PyMemberDescrObject *)d)->d_member->offset),
                              lu_ev_val(c, o->f[i + 1]) };
             lu_ev_helper(c, H_slot_store, 3, args, 0);
@@ -352,7 +353,7 @@ instance_load(struct ctx *c, lu_v owner, struct lu_vobj *o, PyObject *name)
     int at = held_at(c, o, name);
     descrgetfunc get = d != NULL ? Py_TYPE(d)->tp_descr_get : NULL;
     if (get != NULL && Py_TYPE(d)->tp_descr_set != NULL) {
-        if (!slot_member(d)) {
+        if (!slot_member(d, o->type)) {
             return 0;           /* a property, or another data descriptor */
         }
         if (at < 0) {
@@ -394,7 +395,7 @@ instance_store(struct ctx *c, lu_v owner, struct lu_vobj *o, PyObject *name)
         return 0;
     }
     int data = d != NULL && Py_TYPE(d)->tp_descr_set != NULL;
-    if (data ? !slot_member(d) || (((PyMemberDescrObject *)d)->d_member->flags & Py_READONLY)
+    if (data ? !slot_member(d, o->type) || (((PyMemberDescrObject *)d)->d_member->flags & Py_READONLY)
              : !(o->type->tp_flags & Py_TPFLAGS_INLINE_VALUES)) {
         return 0;
     }

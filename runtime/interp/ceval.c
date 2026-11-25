@@ -830,16 +830,16 @@ lu_getattr_native(PyObject *owner, PyObject *name, PyObject *call[2])
     if (PyModule_CheckExact(owner)) {
         return lu_ns_get(((PyModuleObject *)owner)->md_dict, name);        /* its dict first, as LOAD_ATTR_MODULE */
     }
+    if (!lu_attr_slot_ours(tp, LU_ATTR_READ)) {
+        return NULL;
+    }
     int way = lu_attr_way(tp, LU_ATTR_READ);
     switch (way) {
     case LU_ATTR_TYPE:
         return class_attr_native(owner, name);
     case LU_ATTR_GENERIC:
     case LU_ATTR_GENERIC_GETATTR:
-        /* The slot as well: C may have set its own and not said so
-           (PyType_Modified), which only the slot shows. */
-        if ((tp->tp_getattro == PyObject_GenericGetAttr || tp->tp_getattro == lu_slot_tp_getattro)
-            && !PyType_Check(owner)) {  /* a class's dict is type's to read */
+        if (!PyType_Check(owner)) {  /* a class's dict is type's to read */
             return generic_attr_native(owner, name, way == LU_ATTR_GENERIC_GETATTR, call);
         }
         return NULL;
@@ -1015,7 +1015,7 @@ isinstance_native(PyObject *obj, PyObject *cls, int depth)
             return 1;
         }
         return _PyType_Lookup(t, LU_ID(__class__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__class__))
-            && lu_attr_generic_read(t) ? 0 : -1;
+            && lu_attr_slot_ours(t, LU_ATTR_READ) && lu_attr_generic_read(t) ? 0 : -1;
     }
     if (PyTuple_CheckExact(cls) && depth < 16) {
         for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(cls); i++) {
@@ -3264,7 +3264,8 @@ op_LOAD_ATTR_METHOD: {
     }
     if (with_dict) {
         PyObject *dict = LU_MANAGED_DICT(owner);
-        if (dict != NULL && (!PyDict_CheckExact(dict) || lu_ns_lookup(dict, NAME(oparg >> 1)) != NULL)) {
+        if (dict != NULL && (!PyDict_CheckExact(dict) || !lu_dict_str_keys(dict)
+                             || lu_ns_lookup(dict, NAME(oparg >> 1)) != NULL)) {
             goto op_LOAD_ATTR;
         }
     }
@@ -3326,6 +3327,8 @@ op_LOAD_ATTR: {
             }
             DISPATCH();
         }
+        /* A native getter's error, or no memory to bind */
+        ERROR_IF(kargs[0] == NULL && PyErr_Occurred());
         if (kargs[0] != NULL) {
             /* A data descriptor whose __get__ is a Python function decides
                the access: run it in this loop, as generic_getattr would. */
@@ -3404,7 +3407,9 @@ op_STORE_ATTR_FAST: {
     }
     else {
         SAVE_FRAME();
-        err = lu_ns_store(dict, NAME(oparg), v);
+        PyObject *old;
+        err = lu_ns_exchange(dict, NAME(oparg), v, &old);
+        Py_XDECREF(old);
         Py_DECREF(v);
     }
     Py_DECREF(owner);

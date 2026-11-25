@@ -1253,6 +1253,15 @@ tuplegetter_get(PyObject *descr, PyObject *obj)
     return 0 <= i && i < Py_SIZE(obj) ? Py_NewRef(PyTuple_GET_ITEM(obj, i)) : NULL;
 }
 
+/* A member or getset descriptor, of a type obj is an instance of
+   (descr_check): another object's fields are not at its offsets. */
+static int
+native_descr_applies(PyObject *descr, PyObject *obj)
+{
+    return (Py_IS_TYPE(descr, &PyMemberDescr_Type) || Py_IS_TYPE(descr, &PyGetSetDescr_Type))
+        && PyObject_TypeCheck(obj, PyDescr_TYPE(descr));
+}
+
 int
 lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out)
 {
@@ -1260,11 +1269,13 @@ lu_descr_get_native(PyObject *descr, PyObject *obj, PyObject **out)
     if (Py_TYPE(descr) == (PyTypeObject *)PyInterpreterState_Get()->kernel[LU_K_tuplegetter]) {
         return (*out = tuplegetter_get(descr, obj)) != NULL;
     }
+    if (!native_descr_applies(descr, obj)) {
+        return 0;
+    }
     if (Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
         v = PyMember_GetOne((const char *)obj, ((PyMemberDescrObject *)descr)->d_member);
     }
-    else if (Py_IS_TYPE(descr, &PyGetSetDescr_Type)
-             && ((PyGetSetDescrObject *)descr)->d_getset->get != NULL
+    else if (((PyGetSetDescrObject *)descr)->d_getset->get != NULL
              && ((PyGetSetDescrObject *)descr)->d_getset->get != kernel_getset_get) {
         PyGetSetDef *def = ((PyGetSetDescrObject *)descr)->d_getset;
         v = def->get(obj, def->closure);
@@ -1335,14 +1346,15 @@ lu_method_descr_bind(PyObject *descr, PyObject *obj)
 int
 lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value)
 {
+    if (!native_descr_applies(descr, obj)) {
+        return 0;               /* the kernel's, which raises descr_check's error */
+    }
     if (Py_IS_TYPE(descr, &PyMemberDescr_Type)) {
         return PyMember_SetOne((char *)obj, ((PyMemberDescrObject *)descr)->d_member, value) < 0 ? -1 : 1;
     }
-    if (Py_IS_TYPE(descr, &PyGetSetDescr_Type)) {
-        PyGetSetDef *def = ((PyGetSetDescrObject *)descr)->d_getset;
-        if (def->set != NULL && def->set != kernel_getset_set) {
-            return def->set(obj, value, def->closure) < 0 ? -1 : 1;
-        }
+    PyGetSetDef *def = ((PyGetSetDescrObject *)descr)->d_getset;
+    if (def->set != NULL && def->set != kernel_getset_set) {
+        return def->set(obj, value, def->closure) < 0 ? -1 : 1;
     }
     return 0;
 }
@@ -1389,23 +1401,14 @@ generic_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
     if (lu_dict_ptr(obj) == NULL) {
         return 0;               /* no dict: the kernel's error */
     }
-    if (lu_inline_live(obj)) {
-        return lu_attr_store(obj, name, value);
-    }
-    PyObject *dict = lu_instance_dict(obj, value != NULL);
-    if (dict == NULL || !PyDict_CheckExact(dict)) {
-        return PyErr_Occurred() ? -1 : 0;
-    }
-    return value == NULL ? lu_ns_delete(dict, name) : lu_ns_store(dict, name, value) < 0 ? -1 : 1;
+    return lu_attr_store(obj, name, value);
 }
 
 int
 lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value)
 {
     PyTypeObject *tp = Py_TYPE(obj);
-    /* The slot as well: C may have set its own and not said so
-       (PyType_Modified), which only the slot shows. */
-    if (!PyUnicode_CheckExact(name) || (tp->tp_setattro != PyObject_GenericSetAttr && tp->tp_setattro != lu_slot_tp_setattro)) {
+    if (!PyUnicode_CheckExact(name) || !lu_attr_slot_ours(tp, LU_ATTR_STORE)) {
         return 0;
     }
     switch (lu_attr_way(tp, value != NULL ? LU_ATTR_STORE : LU_ATTR_DELETE)) {

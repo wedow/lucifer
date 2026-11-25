@@ -2585,7 +2585,7 @@ prim_instance_load(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         return v != NULL ? v : Py_NewRef(LU_MISSING);
     }
     PyObject *d = lu_instance_dict(args[0], 0);
-    v = d != NULL ? lu_ns_get(d, args[1]) : NULL;
+    v = d != NULL ? lu_dict_get_name(d, args[1]) : NULL;
     return v != NULL ? v : PyErr_Occurred() ? NULL : Py_NewRef(LU_MISSING);
 }
 

@@ -479,7 +479,10 @@ h_attr_store(PyObject *owner, PyObject *v, PyObject *name, int64_t version)
     if (dict == NULL || !PyDict_CheckExact(dict)) {
         return 0;
     }
-    if (lu_ns_store(dict, name, v) < 0) {
+    PyObject *old;
+    int r = lu_ns_exchange(dict, name, v, &old);
+    Py_XDECREF(old);
+    if (r < 0) {
         PyErr_Clear();          /* the interpreter stores again and raises */
         return 0;
     }
@@ -498,7 +501,7 @@ static int
 h_dict_lacks(PyObject *owner, PyObject *name)
 {
     PyObject *dict = LU_MANAGED_DICT(owner);
-    return dict == NULL || (PyDict_CheckExact(dict) && lu_ns_lookup(dict, name) == NULL);
+    return dict == NULL || (PyDict_CheckExact(dict) && lu_dict_str_keys(dict) && lu_ns_lookup(dict, name) == NULL);
 }
 
 static intptr_t
