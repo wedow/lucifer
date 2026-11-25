@@ -28,7 +28,7 @@ _MANAGED_DICT = 1 << 4          # Py_TPFLAGS_MANAGED_DICT
 # attr_way(tp, which): which protocol a type's instances read (0), store (1)
 # and delete (2) attributes with (LU_ATTR_* in runtime/lucifer.h).
 _READ, _STORE, _DELETE = 0, 1, 2
-_GENERIC, _TYPE, _MODULE, _GENERIC_GETATTR = 1, 2, 5, 6
+_GENERIC, _TYPE, _SLOT, _MODULE, _GENERIC_GETATTR = 1, 2, 4, 5, 6
 
 
 def _abstract_error(cls):
@@ -138,8 +138,9 @@ def getattr_hook(obj, name):
 def _hooked_getattr(obj, name, tp, way):
     """slot_tp_getattr_hook for the rest: the type's __getattribute__ (or
     object's lookup, way _GENERIC_GETATTR), then its __getattr__ on
-    AttributeError."""
-    getattr_ = type_lookup(tp, '__getattr__')
+    AttributeError; a C slot of the type's own (way _SLOT, run through its
+    wrapper) is all there is."""
+    getattr_ = MISSING if way == _SLOT else type_lookup(tp, '__getattr__')
     if getattr_ is MISSING:
         return call_special(type_lookup(tp, '__getattribute__'), obj, name)
     try:

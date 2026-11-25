@@ -2043,7 +2043,7 @@ prim_attr_way(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
         lu_err_format(PyExc_TypeError, "attr_way(t, which): which is 0, 1 or 2");
         return NULL;
     }
-    return PyLong_FromLong(lu_attr_way((PyTypeObject *)args[0], LU_ATTR_READ + 3 * (int)which));
+    return PyLong_FromLong(lu_attr_way_ours((PyTypeObject *)args[0], LU_ATTR_READ + 3 * (int)which));
 }
 
 /* type_dict(t): the type's own dict (interpreter state for static types). */

@@ -158,7 +158,7 @@ instance_kind(struct ctx *c, PyTypeObject *tp)
     uint32_t version;
     return (tp->tp_flags & Py_TPFLAGS_HEAPTYPE) && tp->tp_finalize == NULL && tp->tp_del == NULL
         && (slots_only || (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES)) && lu_ev_class_as_of(c, tp, &version)
-        && lu_attr_way(tp, LU_ATTR_READ) == LU_ATTR_GENERIC && lu_attr_way(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC
+        && lu_attr_way_ours(tp, LU_ATTR_READ) == LU_ATTR_GENERIC && lu_attr_way_ours(tp, LU_ATTR_STORE) == LU_ATTR_GENERIC
         && lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)tp), version);
 }
 
@@ -656,7 +656,7 @@ class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
         return 0;
     }
     PyObject *k = _PyType_Lookup(cls, name);
-    if (k == NULL || _PyType_Lookup(meta, name) != NULL || lu_attr_way(meta, LU_ATTR_READ) != LU_ATTR_TYPE) {
+    if (k == NULL || _PyType_Lookup(meta, name) != NULL || lu_attr_way_ours(meta, LU_ATTR_READ) != LU_ATTR_TYPE) {
         return 0;
     }
     int wrapped = Py_IS_TYPE(k, &PyStaticMethod_Type) || Py_IS_TYPE(k, &PyClassMethod_Type);

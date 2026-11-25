@@ -358,7 +358,7 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
             return LU_EV_NONE;
         }
         PyObject *r = lookup ? _PyType_LookupRef((PyTypeObject *)t, k1)
-            : PyLong_FromLong(lu_attr_way((PyTypeObject *)t, LU_ATTR_READ + 3 * (int)which));
+            : PyLong_FromLong(lu_attr_way_ours((PyTypeObject *)t, LU_ATTR_READ + 3 * (int)which));
         lu_v k = lu_ev_konst(c, r != NULL ? r : LU_MISSING);
         Py_XDECREF(r);
         return lu_ev_class_relied(c, cls, version) ? k : LU_EV_NONE;

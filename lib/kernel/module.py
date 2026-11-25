@@ -3,7 +3,7 @@ attribute lookup that falls back to the module's __getattr__ (PEP 562)."""
 
 from _lucifer import (
     error, attribute_error, str_join, kind, static_type, alloc, instance_dict, ns_get, module_init, import_state,
-    kernel_get, MISSING, type_dict,
+    kernel_get, MISSING,
 )
 from _lucifer import _boot, object as _object
 

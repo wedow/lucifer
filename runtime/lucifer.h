@@ -1979,6 +1979,14 @@ lu_attr_slot_ours(PyTypeObject *tp, int field)
         ? tp->tp_getattro == PyObject_GenericGetAttr || tp->tp_getattro == lu_slot_tp_getattro
         : tp->tp_setattro == PyObject_GenericSetAttr || tp->tp_setattro == lu_slot_tp_setattro;
 }
+/* The field for a reader that trusts it without calling the slot: SLOT
+   where C set a slot of its own after the word was taken (an extension
+   may write one after PyType_Ready without PyType_Modified). */
+static inline int
+lu_attr_way_ours(PyTypeObject *tp, int field)
+{
+    return lu_attr_slot_ours(tp, field) ? lu_attr_way(tp, field) : LU_ATTR_SLOT;
+}
 PyObject *lu_slot_tp_call(PyObject *self, PyObject *args, PyObject *kwargs);
 /* Sets slot `index` of tp (_lucifer.slot_index names it): how 0 clears it, 1 installs the thunk, 2 copies
    it from `from`, 3 installs PyObject_HashNotImplemented (tp_hash only), 4 installs
