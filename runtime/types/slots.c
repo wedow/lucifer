@@ -408,9 +408,8 @@ has_gap(PyTypeObject *tp, int gap)
             return 1;
         }
     }
-    return ((gap & LU_ATTR_GAP_THUNK)
-            && (tp->tp_getattro == lu_slot_tp_getattro || tp->tp_setattro == lu_slot_tp_setattro))
-        || ((gap & LU_ATTR_GAP_FALLBACK) && _PyType_Lookup(tp, LU_ID(__getattr__)) != NULL);
+    return (gap & LU_ATTR_GAP_THUNK)
+        && (tp->tp_getattro == lu_slot_tp_getattro || tp->tp_setattro == lu_slot_tp_setattro);
 }
 
 /* A site and the word disagree: unless the kernel is still booting or the

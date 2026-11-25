@@ -450,10 +450,16 @@ enum {
 #define LU_TPFLAGS_SET_DECIDED (1UL << 51)
 /* The field decided from tp's slots and MRO as they are now, not stored. */
 int lu_attr_classify(PyTypeObject *tp, int field);
+/* The field as stored: UNSET while the kernel boots. */
+static inline int
+lu_attr_stored(PyTypeObject *tp, int field)
+{
+    return (int)((__atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED) >> field) & 7);
+}
 static inline int
 lu_attr_way(PyTypeObject *tp, int field)
 {
-    int way = (int)((__atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED) >> field) & 7);
+    int way = lu_attr_stored(tp, field);
     return way != LU_ATTR_UNSET ? way : lu_attr_classify(tp, field);
 }
 /* A site's own predicate, `legacy` (its value is the macro's), checked
@@ -466,7 +472,6 @@ lu_attr_way(PyTypeObject *tp, int field)
 enum {
     LU_ATTR_GAP_WRAPPER = 1,    /* the type finds a C slot wrapper of a generic function: lookups miss it */
     LU_ATTR_GAP_THUNK = 2,      /* the slot is the thunk: slot tests miss what it does */
-    LU_ATTR_GAP_FALLBACK = 4,   /* the type has __getattr__ */
 };
 __attribute__((cold)) uint32_t lu_attr_check_begin(PyTypeObject *tp, int gap);
 __attribute__((cold)) void lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ,
@@ -1856,17 +1861,23 @@ extern const Py_ssize_t lu_classmethod_callable_offset;
 /* The Python or kernel function a class's __new__ entry runs, called with the class first: 1 with *func, else 0. */
 int lu_new_function(PyObject *new_, PyObject **func);
 int lu_descr_set_native(PyObject *descr, PyObject *obj, PyObject *value);
-/* obj.name = value (value NULL deletes) when C alone can do it: object's own
-   __setattr__, then a native data descriptor or, for a name the type lacks,
-   the instance's dict. Same results as lu_descr_set_native. */
+/* obj.name = value (value NULL deletes) when C alone can do it, as the
+   type's word says the store or the delete runs: object's algorithm (a
+   native data descriptor, else the instance's dict) or type's. Same results
+   as lu_descr_set_native. */
 int lu_setattr_native(PyObject *obj, PyObject *name, PyObject *value);
-/* obj.name for an exact str name, answered when no Python code decides: a
-   data member or getset of the type, then the instance's dict, then a plain
-   value or function of the type (bound as a method). NULL, with no error, for
+/* obj.name for an exact str name, answered when no Python code decides, in
+   one pass keyed on the type's read word: an exact module's dict; type's
+   algorithm for a class's plain attributes; object's (a data member or
+   getset of the type, then the instance's dict, then a plain value or
+   function of the type, bound as a method). NULL, with no error, for
    everything else, which is the kernel's: a missing attribute, __getattr__,
-   __getattribute__, properties and other descriptors. A new reference
-   (runtime/interp/ceval.c, which LOAD_ATTR and the optimizing tier share). */
-PyObject *lu_getattr_native(PyObject *owner, PyObject *name);
+   __getattribute__, properties and other descriptors; with call not NULL, a
+   data descriptor whose __get__ is a Python function comes back in call[0]
+   and its __get__ in call[1] (new references) for the caller to run. A new
+   reference (runtime/interp/ceval.c, which LOAD_ATTR and the optimizing
+   tier share). */
+PyObject *lu_getattr_native(PyObject *owner, PyObject *name, PyObject *call[2]);
 PyObject *lu_method_wrapper_new(PyObject *descr, PyObject *self);
 /* The Python function the interpreter runs for a kernel callable, and the
    self it prepends (borrowed, or NULL). NULL when callable is none. Checks

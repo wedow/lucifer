@@ -748,39 +748,15 @@ lu_contains_native(PyObject *container, PyObject *item)
     return found;
 }
 
-/* Whether instances of `tp` use object's attribute hook `id` (__getattribute__
-   or __setattr__), so that a data descriptor of the type decides the access. */
-static int
-object_attr_hook(PyTypeObject *tp, PyObject *id)
-{
-    if (id == LU_ID(__getattribute__)) {
-        return LU_ATTR_CHECK("object_attr_hook", tp, LU_ATTR_READ, lu_attr_generic_read(tp),
-                             tp->tp_getattro == PyObject_GenericGetAttr     /* the slot says so (lu_set_slot) */
-                             || _PyType_Lookup(tp, id) == _PyType_Lookup(&PyBaseObject_Type, id), LU_ATTR_GAP_WRAPPER);
-    }
-    return _PyType_Lookup(tp, id) == _PyType_Lookup(&PyBaseObject_Type, id);
-}
-
-/* LOAD_ATTR answers that need no Python: obj.__class__ for an object whose
-   type keeps object's __class__, and a plain class attribute (no __get__, or
-   a function, which a class returns unbound) of a class whose metaclass keeps
-   type's __getattribute__ and does not have the name; a staticmethod's
-   callable, a classmethod bound to the class. A new reference, or NULL. */
+/* type.__getattribute__ without Python, for a class whose metaclass reads
+   attributes with type's algorithm: a plain class attribute (no __get__, or
+   a function, which a class returns unbound), a staticmethod's callable, a
+   classmethod bound to the class; unless the metaclass has a data
+   descriptor of the name. A new reference, or NULL. */
 static PyObject *
-attr_shortcut(PyObject *owner, PyObject *name)
+class_attr_native(PyObject *owner, PyObject *name)
 {
-    PyTypeObject *tp = Py_TYPE(owner);
-    if (name == LU_ID(__class__)) {
-        return _PyType_Lookup(tp, name) == _PyType_Lookup(&PyBaseObject_Type, name)
-            && object_attr_hook(tp, LU_ID(__getattribute__)) ? Py_NewRef((PyObject *)tp) : NULL;
-    }
-    if (!PyType_Check(owner) || !PyUnicode_CheckExact(name)
-        || !LU_ATTR_CHECK("attr_shortcut", tp, LU_ATTR_READ, lu_attr_way(tp, LU_ATTR_READ) == LU_ATTR_TYPE,
-                          _PyType_Lookup(tp, LU_ID(__getattribute__)) == _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__)),
-                          LU_ATTR_GAP_FALLBACK)) {
-        return NULL;
-    }
-    PyObject *meta_attr = _PyType_LookupRef(tp, name);
+    PyObject *meta_attr = _PyType_LookupRef(Py_TYPE(owner), name);
     int data = meta_attr != NULL && Py_TYPE(meta_attr)->tp_descr_set != NULL;
     Py_XDECREF(meta_attr);
     if (data) {
@@ -793,39 +769,43 @@ attr_shortcut(PyObject *owner, PyObject *name)
     return v;
 }
 
-PyObject *
-lu_getattr_native(PyObject *owner, PyObject *name)
+/* object.__getattribute__ without Python (_PyObject_GenericGetAttrWithDict):
+   obj.__class__ where it is object's; a data descriptor of the type that C
+   answers; the instance's dict; a plain value or function of the type,
+   bound as a method. A data descriptor whose __get__ is a Python function
+   is returned in call[0] (the descriptor) and call[1] (its __get__), new
+   references, when call is not NULL and no __getattr__ must see the
+   AttributeError it may raise. */
+static PyObject *
+generic_attr_native(PyObject *owner, PyObject *name, int fallback, PyObject *call[2])
 {
     PyTypeObject *tp = Py_TYPE(owner);
-    PyObject *v;
-    if (!PyUnicode_CheckExact(name)) {
-        return NULL;
-    }
-    if (PyModule_CheckExact(owner)) {
-        return lu_ns_get(((PyModuleObject *)owner)->md_dict, name);        /* as LOAD_ATTR reads it */
-    }
-    if ((v = attr_shortcut(owner, name)) != NULL) {
-        return v;
-    }
-    if (!object_attr_hook(tp, LU_ID(__getattribute__))) {
-        return NULL;
-    }
-    PyObject *descr = _PyType_LookupRef(tp, name);
-    if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
-        v = lu_descr_get_native(descr, owner, &v) > 0 ? v : NULL;
+    PyObject *v, *descr = _PyType_LookupRef(tp, name);
+    if (name == LU_ID(__class__) && descr != NULL && descr == _PyType_Lookup(&PyBaseObject_Type, name)) {
         Py_DECREF(descr);
-        return v;
+        return Py_NewRef((PyObject *)tp);
     }
-    if (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) {
+    if (descr != NULL && lu_descr_get_native(descr, owner, &v) > 0) {
+        Py_DECREF(descr);
+        return v;               /* a member, a C getset, a tuplegetter */
+    }
+    if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
+        PyObject *get = call != NULL && !fallback ? _PyType_LookupRef(Py_TYPE(descr), LU_ID(__get__)) : NULL;
+        if (get != NULL && Py_IS_TYPE(get, &PyFunction_Type)) {
+            call[0] = descr;
+            call[1] = get;
+            return NULL;
+        }
+        Py_XDECREF(get);
+        Py_DECREF(descr);
+        return NULL;
+    }
+    if ((tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) || tp->tp_dictoffset != 0) {
         int found = lu_attr_lookup(owner, name, &v);
         if (found != 0) {
             Py_XDECREF(descr);
             return v;           /* NULL when only the kernel can answer */
         }
-    }
-    else if (tp->tp_dictoffset != 0) {
-        Py_XDECREF(descr);
-        return NULL;            /* a dict of another layout */
     }
     if (descr == NULL) {
         return NULL;
@@ -838,6 +818,34 @@ lu_getattr_native(PyObject *owner, PyObject *name)
         ? lu_method_descr_bind(descr, owner) : lu_static_or_class_get(descr, (PyObject *)tp);
     Py_DECREF(descr);
     return v;
+}
+
+PyObject *
+lu_getattr_native(PyObject *owner, PyObject *name, PyObject *call[2])
+{
+    PyTypeObject *tp = Py_TYPE(owner);
+    if (!PyUnicode_CheckExact(name)) {
+        return NULL;
+    }
+    if (PyModule_CheckExact(owner)) {
+        return lu_ns_get(((PyModuleObject *)owner)->md_dict, name);        /* its dict first, as LOAD_ATTR_MODULE */
+    }
+    int way = lu_attr_way(tp, LU_ATTR_READ);
+    switch (way) {
+    case LU_ATTR_TYPE:
+        return class_attr_native(owner, name);
+    case LU_ATTR_GENERIC:
+    case LU_ATTR_GENERIC_GETATTR:
+        /* The slot as well: C may have set its own and not said so
+           (PyType_Modified), which only the slot shows. */
+        if ((tp->tp_getattro == PyObject_GenericGetAttr || tp->tp_getattro == lu_slot_tp_getattro)
+            && !PyType_Check(owner)) {  /* a class's dict is type's to read */
+            return generic_attr_native(owner, name, way == LU_ATTR_GENERIC_GETATTR, call);
+        }
+        return NULL;
+    default:
+        return NULL;            /* Python decides, or C */
+    }
 }
 
 static int
@@ -1006,7 +1014,8 @@ isinstance_native(PyObject *obj, PyObject *cls, int depth)
         if (PyType_IsSubtype(t, (PyTypeObject *)cls)) {
             return 1;
         }
-        return object_attr_hook(t, LU_ID(__class__)) && object_attr_hook(t, LU_ID(__getattribute__)) ? 0 : -1;
+        return _PyType_Lookup(t, LU_ID(__class__)) == _PyType_Lookup(&PyBaseObject_Type, LU_ID(__class__))
+            && lu_attr_generic_read(t) ? 0 : -1;
     }
     if (PyTuple_CheckExact(cls) && depth < 16) {
         for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(cls); i++) {
@@ -1052,11 +1061,11 @@ lu_native_call(PyThreadState *ts, PyObject *target, PyObject *const *args, Py_ss
     }
     else if (target == kernel[LU_K_builtin_getattr]) {
         if (npos == 2 || npos == 3) {
-            return lu_getattr_native(args[0], args[1]);
+            return lu_getattr_native(args[0], args[1], NULL);
         }
     }
     else if (target == kernel[LU_K_builtin_hasattr]) {
-        PyObject *v = npos == 2 ? lu_getattr_native(args[0], args[1]) : NULL;
+        PyObject *v = npos == 2 ? lu_getattr_native(args[0], args[1], NULL) : NULL;
         if (v != NULL) {
             Py_DECREF(v);
             return Py_NewRef(Py_True);
@@ -3299,8 +3308,16 @@ op_LOAD_ATTR: {
           });
     SKIP_CACHES();
     kret = (oparg & 1) ? LU_RETURN_METHOD : LU_RETURN_PUSH;
-    if (PyModule_CheckExact(owner)) {
-        PyObject *v = lu_ns_get(((PyModuleObject *)owner)->md_dict, name);
+    getattrofunc get = Py_TYPE(owner)->tp_getattro;
+    /* An exact module's dict first, whatever its type's slot (which the
+       kernel's boot fills in after the first modules). */
+    if (get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr || PyModule_CheckExact(owner)) {
+        if (_PyRuntime.jit.mode != LU_JIT_OFF && !(oparg & 1) && !PyType_Check(owner) && !PyModule_CheckExact(owner)) {
+            lu_jit_pic_note_interpreted(code, (int)(INSTR_START() - lu_code_start(code)), owner, name);
+        }
+        SAVE_FRAME();           /* a getter may read the frame: f_lineno, f_locals */
+        kargs[0] = NULL;        /* the getter to run, if any: kargs[0] and kargs[1] */
+        PyObject *v = lu_getattr_native(owner, name, kargs);
         if (v != NULL) {
             TOP() = v;
             Py_DECREF(owner);
@@ -3309,74 +3326,32 @@ op_LOAD_ATTR: {
             }
             DISPATCH();
         }
-    }
-    getattrofunc get = Py_TYPE(owner)->tp_getattro;
-    if (LU_ATTR_CHECK("LOAD_ATTR", Py_TYPE(owner), LU_ATTR_READ, lu_attr_way(Py_TYPE(owner), LU_ATTR_READ) != LU_ATTR_SLOT,
-                      get == lu_slot_tp_getattro || get == PyObject_GenericGetAttr, 0)) {
-        if (_PyRuntime.jit.mode != LU_JIT_OFF && !(oparg & 1) && !PyType_Check(owner)) {
-            lu_jit_pic_note_interpreted(code, (int)(INSTR_START() - lu_code_start(code)), owner, name);
+        if (kargs[0] != NULL) {
+            /* A data descriptor whose __get__ is a Python function decides
+               the access: run it in this loop, as generic_getattr would. */
+            PyObject *getter = kargs[1];
+            kargs[1] = POP();
+            kargs[2] = Py_NewRef((PyObject *)Py_TYPE(kargs[1]));
+            SAVE_FRAME();
+            callee = lu_frame_call(ts, (PyFunctionObject *)getter, kargs, 3, NULL);
+            Py_DECREF(getter);
+            ERROR_IF(callee == NULL);
+            callee->ret = kret;
+            goto push_callee;
         }
-        PyObject *descr = _PyType_LookupRef(Py_TYPE(owner), name), *v;
-        if ((v = attr_shortcut(owner, name)) != NULL) {
-            Py_XDECREF(descr);
-            TOP() = v;
-            Py_DECREF(owner);
-            if (oparg & 1) {
-                PUSH(NULL);
-            }
-            DISPATCH();
+        if (get != lu_slot_tp_getattro && get != PyObject_GenericGetAttr) {
+            goto load_attr_slot;        /* a module during the kernel's boot */
         }
-        if (descr != NULL) {
-            SAVE_FRAME();       /* a getter may read the frame: f_lineno, f_locals */
-        }
-        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))
-            && lu_descr_get_native(descr, owner, &v) > 0) {
-            Py_DECREF(descr);
-            TOP() = v;
-            Py_DECREF(owner);
-            if (oparg & 1) {
-                PUSH(NULL);
-            }
-            DISPATCH();
-        }
-        if (descr != NULL && object_attr_hook(Py_TYPE(owner), LU_ID(__getattribute__))) {
-            /* A data descriptor whose __get__ is a Python function decides the
-               access: run it in this loop, as generic_getattr would, unless
-               an AttributeError from it must go to __getattr__. */
-            PyTypeObject *dt = Py_TYPE(descr);
-            PyObject *getter = _PyType_LookupRef(dt, LU_ID(__get__));
-            if (getter != NULL && Py_IS_TYPE(getter, &PyFunction_Type)
-                && LU_ATTR_CHECK("LOAD_ATTR getter", Py_TYPE(owner), LU_ATTR_READ,
-                                 lu_attr_way(Py_TYPE(owner), LU_ATTR_READ) == LU_ATTR_GENERIC,
-                                 _PyType_Lookup(Py_TYPE(owner), LU_ID(__getattr__)) == NULL, 0)
-                && (_PyType_Lookup(dt, LU_ID(__set__)) != NULL || _PyType_Lookup(dt, LU_ID(__delete__)) != NULL)) {
-                kargs[0] = descr;
-                kargs[1] = POP();
-                kargs[2] = Py_NewRef((PyObject *)Py_TYPE(kargs[1]));
-                SAVE_FRAME();
-                callee = lu_frame_call(ts, (PyFunctionObject *)getter, kargs, 3, NULL);
-                Py_DECREF(getter);
-                ERROR_IF(callee == NULL);
-                callee->ret = kret;
-                goto push_callee;
-            }
-            Py_XDECREF(getter);
-        }
-        Py_XDECREF(descr);
-        if ((v = lu_getattr_native(owner, name)) != NULL) {
-            TOP() = v;
-            Py_DECREF(owner);
-            if (oparg & 1) {
-                PUSH(NULL);
-            }
-            DISPATCH();
-        }
-        kid = get == lu_slot_tp_getattro ? LU_K_getattr : LU_K_generic_getattr;
+        /* Past the hook where it would run object's algorithm; not while the
+           kernel boots, when the hooks the dicts will have are not there yet. */
+        kid = get == PyObject_GenericGetAttr || lu_attr_stored(Py_TYPE(owner), LU_ATTR_READ) == LU_ATTR_GENERIC
+            ? LU_K_generic_getattr : LU_K_getattr;
         kargs[0] = POP();
         kargs[1] = Py_NewRef(name);
         nk = 2;
         goto kernel_call;
     }
+load_attr_slot:
     SAVE_FRAME();
     struct lu_task *t = (struct lu_task *)ts;
     t->pin++;
@@ -3449,8 +3424,7 @@ op_DELETE_ATTR: {
     }
     SKIP_CACHES();
     setattrofunc set = Py_TYPE(owner)->tp_setattro;
-    if (LU_ATTR_CHECK("STORE_ATTR", Py_TYPE(owner), LU_ATTR_STORE, lu_attr_way(Py_TYPE(owner), LU_ATTR_STORE) != LU_ATTR_SLOT,
-                      set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr, 0)) {
+    if (set == lu_slot_tp_setattro || set == PyObject_GenericSetAttr) {
         if (store && _PyRuntime.jit.mode != LU_JIT_OFF && !PyType_Check(owner)) {
             lu_jit_pic_note_interpreted(code, (int)(INSTR_START() - lu_code_start(code)), owner, name);
         }
@@ -3468,7 +3442,9 @@ op_DELETE_ATTR: {
         kargs[1] = Py_NewRef(name);
         kargs[2] = v;
         nk = store ? 3 : 2;
-        kid = set == PyObject_GenericSetAttr ? LU_K_generic_setattr : store ? LU_K_setattr : LU_K_delattr;
+        kid = set == PyObject_GenericSetAttr
+            || lu_attr_stored(Py_TYPE(owner), store ? LU_ATTR_STORE : LU_ATTR_DELETE) == LU_ATTR_GENERIC
+            ? LU_K_generic_setattr : store ? LU_K_setattr : LU_K_delattr;
         if (kid == LU_K_generic_setattr && !store) {
             kargs[2] = Py_NewRef(LU_MISSING);
             nk = 3;

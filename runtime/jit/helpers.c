@@ -540,7 +540,7 @@ h_kwdefault(PyObject *func, PyObject *name)
 static PyObject *
 h_load_attr(PyObject *owner, PyObject *name)
 {
-    PyObject *native = lu_getattr_native(owner, name);
+    PyObject *native = lu_getattr_native(owner, name, NULL);
     if (native != NULL || PyErr_Occurred()) {
         return native;
     }

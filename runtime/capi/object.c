@@ -283,7 +283,7 @@ PyObject_SetAttrString(PyObject *v, const char *name, PyObject *value)
 PyObject *
 PyObject_GenericGetAttr(PyObject *obj, PyObject *name)
 {
-    PyObject *v = lu_getattr_native(obj, name);
+    PyObject *v = lu_getattr_native(obj, name, NULL);
     if (v != NULL || PyErr_Occurred()) {
         return v;
     }
