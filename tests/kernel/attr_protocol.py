@@ -664,4 +664,40 @@ Node.__getattribute__ = lambda self, name: Order if name == '__class__' else obj
 print('isinstance node by hook', hot(negative, node(Node)))
 del Node.__getattribute__
 print('isinstance node after', hot(negative, node(Node)))
+
+
+# A property's setter at a hot store, on a class that stores with object's
+# algorithm but deletes with its own hook, and on an ast class; then
+# __setattr__ gained and lost.
+def prop_get(self):
+    return self._p
+
+
+def prop_set(self, value):
+    object.__setattr__(self, '_p', ('prop', value))
+
+
+class PropDel:
+    p = property(prop_get, prop_set)
+
+    def __delattr__(self, name):
+        calls.append(('del', name))
+
+
+class PropNode(ast.AST):
+    p = property(prop_get, prop_set)
+
+
+def store_prop(o):
+    o.p = 3
+    return o.p
+
+
+for cls in (PropDel, PropNode):
+    o = cls()
+    print('property store', cls.__name__, hot(store_prop, o))
+    cls.__setattr__ = hook_setattr
+    print('property store hooked', cls.__name__, hot(store_prop, o))
+    del cls.__setattr__
+    print('property store unhooked', cls.__name__, hot(store_prop, o))
 sys.stdout.flush()
