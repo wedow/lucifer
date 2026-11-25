@@ -860,22 +860,35 @@ lu_dict_stamp_holds(PyDictObject *mp, uint64_t stamp, Py_hash_t *absent_hash)
     return 1;
 }
 
+static PyObject *swap_value(PyDictObject *mp, Py_ssize_t ix, PyObject *value, int *watched);
+
 void
 lu_dict_replace(PyDictObject *mp, Py_ssize_t ix, PyObject *value)
+{
+    int watched;
+    Py_XDECREF(swap_value(mp, ix, value, &watched));
+    if (watched) {
+        lu_jit_release();
+    }
+}
+
+/* Entry ix's value replaced by value; the old one (a reference) goes to the
+   caller. *watched: changed's. */
+static PyObject *
+swap_value(PyDictObject *mp, Py_ssize_t ix, PyObject *value, int *watched)
 {
     PyDictKeysObject *dk = mp->ma_keys;
     PyObject **slot = lu_dk_is_unicode(dk) ? &((PyDictUnicodeEntry *)lu_dk_entries(dk))[ix].me_value
                                            : &((PyDictKeyEntry *)lu_dk_entries(dk))[ix].me_value;
     PyObject *old = *slot;
-    if (old != value) {
-        lu_dict_notify(mp, PyDict_EVENT_MODIFIED, lu_dk_key(dk, ix), value);
-        __atomic_store_n(slot, Py_NewRef(value), __ATOMIC_RELEASE);
-        int watched = changed(mp, ix);
-        Py_XDECREF(old);
-        if (watched) {
-            lu_jit_release();
-        }
+    *watched = 0;
+    if (old == value) {
+        return NULL;            /* the entry keeps its reference */
     }
+    lu_dict_notify(mp, PyDict_EVENT_MODIFIED, lu_dk_key(dk, ix), value);
+    __atomic_store_n(slot, Py_NewRef(value), __ATOMIC_RELEASE);
+    *watched = changed(mp, ix);
+    return old;
 }
 
 /* Takes entry ix out; its value goes to the caller. *watched: changed's. */
@@ -1334,11 +1347,11 @@ lu_ns_delete(PyObject *dict, PyObject *key)
     return found;
 }
 
-int
-lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
+static inline int
+ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
 {
     PyDictObject *mp = (PyDictObject *)dict;
-    int r = 0;
+    int r = 0, watched = 0;
     *old = NULL;
     Py_INCREF(dict);            /* held: a caller's may be borrowed, and the lock may wait */
     Py_BEGIN_CRITICAL_SECTION(dict);
@@ -1348,13 +1361,7 @@ lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
     else {
         Py_ssize_t ix = ns_find(dict, key);
         if (ix >= 0) {
-            *old = Py_NewRef(lu_dk_value(mp->ma_keys, ix));
-            if (value != NULL) {
-                lu_dict_replace(mp, ix, value);
-            }
-            else {
-                Py_DECREF(lu_dict_remove(mp, ix));
-            }
+            *old = value != NULL ? swap_value(mp, ix, value, &watched) : remove_entry(mp, ix, &watched);
             r = 1;
         }
         else if (value != NULL) {
@@ -1362,6 +1369,9 @@ lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
         }
     }
     Py_END_CRITICAL_SECTION();
+    if (watched) {
+        lu_jit_release();
+    }
     if (r == -2) {
         r = value == NULL ? PyDict_Pop(dict, key, old) : PyDict_SetItem(dict, key, value) < 0 ? -1 : 1;
     }
@@ -1370,10 +1380,16 @@ lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
 }
 
 int
+lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
+{
+    return ns_exchange(dict, key, value, old);
+}
+
+int
 lu_ns_assign(PyObject *dict, PyObject *key, PyObject *value)
 {
     PyObject *old;
-    int r = lu_ns_exchange(dict, key, value, &old);
+    int r = ns_exchange(dict, key, value, &old);
     Py_XDECREF(old);
     return r < 0 ? -1 : 0;
 }
@@ -1381,7 +1397,12 @@ lu_ns_assign(PyObject *dict, PyObject *key, PyObject *value)
 int
 lu_ns_lacks(PyObject *dict, PyObject *key)
 {
-    return lu_dict_str_keys(dict) && lu_ns_lookup(dict, key) == NULL;
+    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)dict)->ma_keys, __ATOMIC_ACQUIRE);
+    if (!lu_dk_is_unicode(dk)) {
+        return 0;
+    }
+    Py_ssize_t ix = probe_unicode(dk, key, name_hash(key));
+    return (ix != LU_PROBE_CHANGED ? ix : ns_find(dict, key)) < 0;
 }
 
 int

@@ -788,11 +788,11 @@ generic_attr_native(PyObject *owner, PyObject *name, int fallback, PyObject *cal
         Py_DECREF(descr);
         return Py_NewRef((PyObject *)tp);
     }
-    if (descr != NULL && lu_descr_get_native(descr, owner, &v) > 0) {
-        Py_DECREF(descr);
-        return v;               /* a member, a C getset, a tuplegetter */
-    }
     if (descr != NULL && Py_TYPE(descr)->tp_descr_set != NULL) {
+        if (lu_descr_get_native(descr, owner, &v) > 0) {
+            Py_DECREF(descr);
+            return v;           /* a member, a C getset, a tuplegetter */
+        }
         PyObject *get = call != NULL && !fallback ? _PyType_LookupRef(Py_TYPE(descr), LU_ID(__get__)) : NULL;
         if (get != NULL && Py_IS_TYPE(get, &PyFunction_Type)) {
             call[0] = descr;
