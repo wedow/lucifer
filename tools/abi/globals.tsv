@@ -240,3 +240,8 @@ prims.*	runtime/jit/eval_prims.c	const table of word-operand primitives; relocat
 kinds.*	runtime/jit/x86_64/emit.c	const table of the release fast-path types; relocated by ld.so, then read-only (RELRO)
 known.*	runtime/jit/x86_64/emit.c	lazy CPUID answer for the JCC erratum; any thread may store it with a relaxed atomic, every store writes the same value
 switching	runtime/thread/task.c	process-wide lock of the serial-to-parallel switch, ordered before stop-the-world and fork; the forking thread holds it across fork and the child reinitializes it
+whys.*	runtime/jit/jit.c	const table of the kill reasons a mark gives, for LUCIFER_JIT_DEBUG's log; relocated by ld.so, then read-only (RELRO)
+whys.*	runtime/jit/deps.c	const table of the dependency kinds' names, for LUCIFER_JIT_DEBUG's log; relocated by ld.so, then read-only (RELRO)
+tallies	runtime/jit/jit.c	LUCIFER_JIT_DEBUG's counts of exits and kept entries by site, printed at exit; process-wide like the units, under its lock
+clocks.*	runtime/jit/jit.c	whether LUCIFER_JIT_DEBUG's event log has printed its realtime and monotonic pair; set once per process, a race only prints the pair twice
+plain_lock	runtime/prim/type.c	serializes refreshes of a type's plain-allocation bit, so the last refresh reads every slot write before it; one lock for all types
