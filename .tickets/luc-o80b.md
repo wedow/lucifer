@@ -630,3 +630,42 @@ C and emitted side, from the load to the call of `fn` or the entry:
 - On a decline (r is `LU_JIT_NONE`) `enter()` reads `u->version` and may `kill` u (`tools_moved`); `kill` takes the dying and bucket mutexes, which never detach, and allocates only under `-X lucifer_jit_events` (`PyUnicode_AsUTF8`, not a GC object). Nothing touches u after it.
 
 Epilogue. Every path that ran past the link (RETURN, RAISED, YIELD, an exit's `lu_jit_deopt`, the stub's prologue error) jumps to the epilogue: `jit_act = act.outer`, a serial unit's unlocked word back, `u->stale` tested; then `lea rsp`, the pops, `ret` into the caller. A stale unit takes a cold copy: the same pops, then `mov rdi, u; mov esi, eax`, and a jump (not a call) to `lu_jit_left`, which runs `left(u)` and returns r to the unit's caller. The tail is a jump because `left` may free the unit: the last `left` of a stale unit runs `lu_jit_release`, which stops the world and reclaims it; a call from the epilogue would leave a return address into freed code. It comes after the unlink so that this stop does not see the activation and keep the unit. Between the unlink and the `ret` or `jmp` the unit's code runs with no activation, inside window (b): no instruction there polls or calls. The first point at which a collection can run is, for a fresh unit, the caller's next poll (a C wrapper, or the emitted site of a unit whose own activation is linked); for a stale one, `lu_jit_release`'s stop inside `lu_jit_left`, executing in C with only the caller's return address on the stack.
+
+## Stage 3 (2026-11-25, branch luc-entry3, not landed)
+
+Built (12fdcd04, test 493b7b65, invariant a7a2e283):
+- The activation record (`struct lu_jit_act`) sits in the unit's machine frame. `link_activation` is emitted at both entries after everything that can decline: in the frame entry right after the gate, in the stub after the globals, depth and datastack checks and before the push, the INCREFs and `lu_jit_prologue`. The gate keeps the serial word in the record. The entry count (`entries`, and `entered` when `-X lucifer_jit_stats` was on at the build) follows at `entered`, shared by both entries: one place.
+- Epilogue: unlink, a serial unit's word back, `u->stale` tested; a stale unit pops its frame and jumps to `lu_jit_left(u, r)`, which runs `left` and returns r to the unit's caller. Declines (gate or stub) go to one cold block that restores the serial word and returns without the unlink.
+- Deleted: `struct lu_jit_call`, `CALL_SLOT`, `serial_exit`, `bump_entries`, the activation code in `enter()` (`lu_jit_enter`, `lu_jit_run`) and `lu_jit_direct`, the site's unlink, serial restore and stale call. The debug prints between the find and the entry moved after it. `serial_entry_dead` was already gone (stage 1 folded it into the gate).
+- Departure: the site still needs the callee's frame on RETURN until stage 4 moves the frame end into the unit, so the entry's sixth argument is now `struct lu_frame **` (one word, `FRAME_SLOT`, written by the stub) in place of the record. The frame size is unchanged (40 bytes for result word, record and frame word).
+
+Questions 5 and 6:
+- 5: nothing between the find and the link polls, detaches, parks, runs Python or allocates; the windows are listed above. The cells and the fresh generator's DECREF already ran before `lu_jit_run`'s second find (stage 2 L1); the only allocating statements left in the windows were the two debug prints, now after the entry. Tests: `threads_kill_in_chains` and `jit_reclaim_threads` in handoff, handoff:3 and gc:1.
+- 6 (by reading, no perf run: a stale tail runs once per stale unit's activations, too rare to sample): `perf.c` names a unit by its whole range in the map and gives the jitdump one frame-pointer CFI rule for it (CFA = rbp + 16 after `mov rbp, rsp`). The tail's pops and jump are inside the range, so a sample there is named after the unit, and its CFI is wrong in the same way as today's `ret` epilogue after `pop rbp`. Once the jump runs, the PC is in `lu_jit_left`, symbolized from the binary, and unwinding goes from it to the unit's caller with no unit frame, as for any tail call. Nothing new.
+
+B9 (`-X lucifer_jit_stats`, `jit_compiled_calls.py 20000`): `unit fib@1 entries` 10 -> 964 under `always` (poll 958), 5 -> 489 under `on` (poll 484).
+
+Code bytes per unit (same report, stats on, which adds `entered`'s 14-byte `lock inc` to every head unit): `on` 212,421 / 24 = 8,851 -> 213,826 / 24 = 8,909 (+0.7%); `always` 7,093,102 / 268 = 26,467 -> 7,047,232 / 268 = 26,296 (-0.6%). Each unit gains the link, count and unlink (about 35 bytes hot, 40 cold); each direct call site loses its unlink, serial and stale code (about 50 bytes, twice where self may be a bound method's).
+
+Gate (head 12fdcd04): the 88 named programs (entry_*, tools_*, trace_*, threads_*, signals_*, jit_namespace_collect*, jit_reclaim*, jit_tools_toggle, jit_local_events_inlined, jit_direct_calls, jit_rebound_frames, jit_calls, jit_class_callables, jit_gen_turns, jit_delegation, jit_shared_code_collect, jit_release_frames) pass in plain, jit and jit-deopt (entry_tracebacks and threads_kill_under_calls XFAIL as on master; entry_tracebacks XPASS in jit-deopt) and in jit-off but threads_kill_under_calls (`oracle varies`, as at stage 1); the 54 threads_ programs in handoff and handoff:3; the 8 reclaim, collect and new programs in gc:1. jitcheck: 0 failing, the same ten GAP lines as master's binary. check-capi-ext PASS. Floor units test_monitoring, test_sys_settrace, test_sys_setprofile, test_cprofile: 566 pass, 26 fail, 1 error with both binaries in jit and in deopt, 0 lost. `threads_kill_in_chains` passes on master in every lane above and, in a fresh worktree built with plain `make -j4`, in plain, jit-off, jit, jit-deopt, handoff:3 and gc:1. It fires: under `on` 30,933 compiled calls, 13 units invalidated, 81 freed; under `always` 36,749, 145, 270.
+
+Numbers, instructions:u, pinned on core leases, master 4f56066d vs head, two runs per arm alternating (identical to 0.1% between runs), DeltaBlue the minimum of three:
+
+| row | mode | master | head | change |
+|---|---|---|---|---|
+| -c pass | on | 130.13M | 130.01M | -0.09% |
+| -c pass | always | 851.66M | 850.99M | -0.08% |
+| pyflakes | on | 7.806G | 7.775G | -0.40% |
+| pyflakes | always | 14.160G | 14.122G | -0.27% |
+| Richards | on | 11.211G | 11.266G | **+0.49%** |
+| Richards | always | 12.324G | 12.370G | **+0.38%** |
+| DeltaBlue | on | 5.4452G | 5.4510G | +0.11% |
+| DeltaBlue | always | 6.3591G | 6.3524G | -0.11% |
+
+Ladder slope (instructions per direct call, both runs equal): op.call_positional 167 -> 169 (on and always), op.call_method 209 -> 213, op.call_keyword 167 -> 169. Cycles per iteration went down in every rec and meth row under `on` (rec12 612/631 -> 587/594, meth12 674/668 -> 652/645). tools/jitcost row call: 389 -> 370 against CALL_COST 420 (ratio 1.08 -> 1.14), PASS; every row passes on both.
+
+Why the slope and Richards rose: the measurements ran on cores with the JCC erratum, where `window_branch` pads every hot branch that would cross a 32-byte window with NOPs, which `instructions:u` counts. The change shifts every unit's layout. Builds of both arms with `jcc_erratum()` returning 0 (analysis only, not committed): slope rec 154 -> 154 (rec12 - rec2 1,540 -> 1,535: -0.5 a call), meth 193 -> 193 (-0.6); Richards -0.07% (on), -0.07% (always); DeltaBlue -0.32%, -0.25%. The logic's own saving is about one instruction a call, not the design's four: the design's count took the stub's frame-word store as gone (it goes with stage 4's frame end) and counted the stub's record stores as seven where there were six; the link costs one more (`lea`, the record no longer at hand in R9).
+
+Acceptance: not met as written (Richards over 0.3% in both modes, slope up 2 and 4) with the padded code; met with padding out of the picture. Left to the coordinator.
+
+State: stage 3 committed on luc-entry3 (a7a2e283, 493b7b65, 12fdcd04), not pushed; waiting for the adversarial review. Stage 4 not started.
