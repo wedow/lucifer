@@ -290,6 +290,11 @@ lu_depth_leave(PyThreadState *ts, PyCodeObject *code)
 /* Pushes a frame for `func` on the current task's datastack, with every
    local unbound. Returns NULL with RecursionError or MemoryError set. */
 struct lu_frame *lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals);
+/* The same for func running `code`, whose reference the frame takes (also
+   on failure): a call that read func's code already, or a frame rebuilt
+   for code func may no longer have (__code__ replaced while it ran). */
+struct lu_frame *lu_frame_push_code(PyThreadState *ts, PyFunctionObject *func, PyCodeObject *code,
+                                    PyObject *locals);
 
 /* A reference to func's code. Another thread may replace __code__ at any
    time, so a frame reads it once, here, and keeps what it read: the size,

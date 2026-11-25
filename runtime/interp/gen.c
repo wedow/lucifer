@@ -80,9 +80,8 @@ lu_gen_new(PyThreadState *ts, struct lu_frame *f)
 static void clear_frame(struct lu_gen *gen);
 
 PyObject *
-lu_gen_blank(PyFunctionObject *func)
+lu_gen_blank(PyFunctionObject *func, PyCodeObject *code)
 {
-    PyCodeObject *code = (PyCodeObject *)func->func_code;
     struct lu_gen *gen = (struct lu_gen *)lu_object_new(
         &PyGen_Type, offsetof(struct lu_gen, frame) + (size_t)code->co_framesize * sizeof(PyObject *));
     if (gen == NULL) {

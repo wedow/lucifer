@@ -284,14 +284,15 @@ static PyObject *
 h_gen_new(PyObject **argv, intptr_t n)
 {
     PyFunctionObject *fn = (PyFunctionObject *)argv[0];
-    intptr_t pc = (intptr_t)argv[1], held = ((PyCodeObject *)fn->func_code)->co_nlocalsplus + (intptr_t)argv[2];
-    PyObject *gen = lu_gen_blank(fn);
+    PyCodeObject *code = (PyCodeObject *)argv[1];
+    intptr_t pc = (intptr_t)argv[2], held = code->co_nlocalsplus + (intptr_t)argv[3];
+    PyObject *gen = lu_gen_blank(fn, code);
     if (gen == NULL) {
         return NULL;
     }
     struct lu_frame *f = &((struct lu_gen *)gen)->frame;
     for (intptr_t i = 0; pc >= 0 && i < held; i++) {
-        f->localsplus[i] = Py_XNewRef(argv[3 + i]);
+        f->localsplus[i] = Py_XNewRef(argv[4 + i]);
     }
     if (pc >= 0) {
         f->stackpointer = f->localsplus + held;
@@ -933,13 +934,14 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
     if (kwnames == NULL && lu_jit_direct(&t->ts, func, args, nargs, takes, &r)) {
         return r;
     }
-    PyCodeObject *co = (PyCodeObject *)func->func_code;
+    /* Read once: the frame runs the code whose arity was checked. */
+    PyCodeObject *co = lu_func_code_ref(func);
     struct lu_frame *f;
     Py_ssize_t total = nargs + (kwnames != NULL ? PyTuple_GET_SIZE(kwnames) : 0);
     takes &= total < 64 ? ((uint64_t)1 << total) - 1 : ~(uint64_t)0;
     if (bound || (co->co_argcount == nargs && co->co_kwonlyargcount == 0 && kwnames == NULL
                   && !(co->co_flags & (CO_VARARGS | CO_VARKEYWORDS)))) {
-        if ((f = lu_frame_push(&t->ts, func, NULL)) == NULL) {
+        if ((f = lu_frame_push_code(&t->ts, func, co, NULL)) == NULL) {
             return NULL;
         }
         for (Py_ssize_t i = 0; i < nargs; i++) {
@@ -952,11 +954,12 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
                 Py_INCREF(args[i]);
             }
         }
+        Py_DECREF(co);
         f = lu_frame_call(&t->ts, func, (PyObject **)args, nargs, kwnames);
     }
     r = NULL;
     if (f != NULL) {
-        r = !lu_code_watched(co) && !t->ts.tracing ? lu_jit_new_gen(&t->ts, f) : LU_JIT_DECLINED;
+        r = !lu_code_watched(f->code) && !t->ts.tracing ? lu_jit_new_gen(&t->ts, f) : LU_JIT_DECLINED;
         if (r == LU_JIT_DECLINED) {
             t->pin++;
             r = lu_eval(&t->ts, f);

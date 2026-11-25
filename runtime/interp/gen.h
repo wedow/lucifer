@@ -44,8 +44,8 @@ int lu_gen_throws(PyObject *callable);
 
 /* For the tier, which makes a generator its code kept virtual
    (runtime/jit/exit.c): lu_gen_blank gives a generator for a call of func
-   with an empty frame, for the caller to fill; lu_gen_stand says where
-   the filled frame stands (the code unit it resumes at, as a yield or
+   running code (which func may no longer have) with an empty frame, for
+   the caller to fill; lu_gen_stand says where the filled frame stands (the code unit it resumes at, as a yield or
    RETURN_GENERATOR left it; below 0: finished, whatever it held released);
    lu_gen_enter starts it running above `previous`, as a resumption does
    before it pushes the value sent, and gives its frame; the frame is not
@@ -53,7 +53,7 @@ int lu_gen_throws(PyObject *callable);
    yet the task's. lu_gen_enter_exc makes it so, once: only where the
    task's current one is that of the code that resumed it (an exit; a
    walker runs with its own callers' states above). */
-PyObject *lu_gen_blank(PyFunctionObject *func);
+PyObject *lu_gen_blank(PyFunctionObject *func, PyCodeObject *code);
 void lu_gen_stand(PyObject *gen, int pc);
 struct lu_frame *lu_gen_enter(PyThreadState *ts, PyObject *gen, struct lu_frame *previous);
 void lu_gen_enter_exc(PyThreadState *ts, PyObject *gen);

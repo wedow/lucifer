@@ -58,6 +58,7 @@ lu_ev_gen_make(struct ctx *c)
     lu_v r = lu_ev_virt_new(c, VK_GEN, &PyGen_Type, GEN_SLOTS + co->co_nlocalsplus + co->co_stacksize, &o);
     o->f[GEN_FUNCV] = c->funcv;
     o->f[GEN_FN] = lu_ev_konst(c, (PyObject *)c->func);
+    o->f[GEN_CODE] = lu_ev_konst(c, (PyObject *)co);
     o->f[GEN_PC] = lu_ev_const_i(c, c->next);
     o->f[GEN_DEPTH] = lu_ev_const_i(c, 0);
     memcpy(o->f + GEN_SLOTS, slots(c), sizeof(lu_v) * (size_t)c->nlocals);
@@ -175,7 +176,7 @@ void
 lu_ev_gen_header(struct ctx *c, const struct lu_vobj *o, lu_v phi, int pc, uint64_t place)
 {
     struct gctx *g = c->g;
-    PyCodeObject *gen = (PyCodeObject *)((PyFunctionObject *)lu_ev_const(c, o->f[GEN_FN]))->func_code;
+    PyCodeObject *gen = (PyCodeObject *)lu_ev_const(c, o->f[GEN_CODE]);
     if (g->nresume_phis == g->capresume_phis) {
         int cap = g->capresume_phis ? 2 * g->capresume_phis : 4;
         struct resume_phi *p = lu_ir_alloc(g->f, sizeof(struct resume_phi) * (size_t)cap);
@@ -278,7 +279,7 @@ resume_at(struct ctx *c, lu_v it, int pc, int exit_pc, int nops)
         return 0;
     }
     PyFunctionObject *fn = (PyFunctionObject *)lu_ev_const(c, o->f[GEN_FN]);
-    PyCodeObject *co = (PyCodeObject *)fn->func_code;
+    PyCodeObject *co = (PyCodeObject *)lu_ev_const(c, o->f[GEN_CODE]);
     struct resume *known = resume_find(g, co, 0, 0, pc);
     int depth = known != NULL ? known->depth : 0;
     struct ctx *k = lu_ir_alloc(g->f, sizeof(struct ctx));
@@ -303,6 +304,7 @@ resume_at(struct ctx *c, lu_v it, int pc, int exit_pc, int nops)
     struct lu_vobj *running = lu_ir_vobj(g->f, VK_GEN, o->type, o->n);
     running->f[GEN_FUNCV] = o->f[GEN_FUNCV];
     running->f[GEN_FN] = o->f[GEN_FN];
+    running->f[GEN_CODE] = o->f[GEN_CODE];
     running->f[GEN_PC] = lu_ev_const_i(c, GEN_RUNNING);
     running->f[GEN_DEPTH] = lu_ev_const_i(c, 0);
     for (int i = k->nlocals + depth; i < o->n - GEN_SLOTS; i++) {
@@ -352,7 +354,7 @@ int
 lu_ev_gen_step(struct ctx *c, lu_v it, int exit_pc, int nops)
 {
     struct lu_vobj *o = record_of(c, it);
-    PyCodeObject *co = (PyCodeObject *)((PyFunctionObject *)lu_ev_const(c, o->f[GEN_FN]))->func_code;
+    PyCodeObject *co = (PyCodeObject *)lu_ev_const(c, o->f[GEN_CODE]);
     int *pcs, n = lu_ev_gen_resumes(c, o->f[GEN_PC], &pcs);
     if (c->g->f->fail != NULL) {
         return -1;
@@ -386,6 +388,7 @@ lu_ev_gen_yield(struct ctx *c)
     struct lu_vobj *o = record_of(c, c->gen), *stands = lu_ir_vobj(g->f, VK_GEN, o->type, o->n);
     stands->f[GEN_FUNCV] = o->f[GEN_FUNCV];
     stands->f[GEN_FN] = o->f[GEN_FN];
+    stands->f[GEN_CODE] = o->f[GEN_CODE];
     stands->f[GEN_PC] = lu_ev_const_i(c, c->next);
     stands->f[GEN_DEPTH] = lu_ev_const_i(c, depth);
     memcpy(stands->f + GEN_SLOTS, slots(c), sizeof(lu_v) * (size_t)(c->nlocals + depth));
@@ -407,6 +410,7 @@ lu_ev_gen_finish(struct ctx *c)
     struct lu_vobj *o = record_of(c, c->gen), *done = lu_ir_vobj(g->f, VK_GEN, o->type, o->n);
     done->f[GEN_FUNCV] = o->f[GEN_FUNCV];
     done->f[GEN_FN] = o->f[GEN_FN];
+    done->f[GEN_CODE] = o->f[GEN_CODE];
     done->f[GEN_PC] = lu_ev_const_i(c, GEN_FINISHED);
     done->f[GEN_DEPTH] = lu_ev_const_i(c, 0);
     lu_ev_bind(g, &g->st, LU_VIRT_ID(c->gen), LU_NOV, done);
@@ -422,9 +426,10 @@ lu_ev_gen_real(struct ctx *c, struct lu_vobj *o)
     }
     lu_v *args = lu_ir_alloc(g->f, sizeof(lu_v) * (size_t)o->n);
     args[0] = o->f[GEN_FUNCV] != LU_NOV ? o->f[GEN_FUNCV] : o->f[GEN_FN];
-    args[1] = o->f[GEN_PC];
-    args[2] = o->f[GEN_DEPTH];
-    memcpy(args + 3, o->f + GEN_SLOTS, sizeof(lu_v) * (size_t)(o->n - GEN_SLOTS));
+    args[1] = o->f[GEN_CODE];
+    args[2] = o->f[GEN_PC];
+    args[3] = o->f[GEN_DEPTH];
+    memcpy(args + 4, o->f + GEN_SLOTS, sizeof(lu_v) * (size_t)(o->n - GEN_SLOTS));
     lu_v v = lu_ev_helper(c, H_gen_new, o->n - 1, args, 0);
     lu_ev_def_type(c, v, &PyGen_Type);
     return v;

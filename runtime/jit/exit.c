@@ -237,7 +237,9 @@ object(struct maker *m, int k)
         PyObject *fn = take(m, fields[GEN_FUNCV]);
         fn = fn != NULL ? fn : take(m, fields[GEN_FN]);
         int64_t pc = (int64_t)raw(m, fields[GEN_PC]);
-        o = fn != NULL ? lu_gen_blank((PyFunctionObject *)fn) : NULL;
+        PyObject *code = take(m, fields[GEN_CODE]);
+        o = fn != NULL && code != NULL ? lu_gen_blank((PyFunctionObject *)fn, (PyCodeObject *)code) : NULL;
+        Py_XDECREF(code);
         if (o != NULL && pc != GEN_RUNNING) {
             struct lu_frame *f = &((struct lu_gen *)o)->frame;
             int held = pc < 0 ? 0 : f->code->co_nlocalsplus + (int)raw(m, fields[GEN_DEPTH]);
@@ -626,7 +628,8 @@ push_inlined(PyThreadState *ts, struct maker *m, int k, struct lu_frame *top)
         }
         return g;
     }
-    struct lu_frame *f = lu_frame_push(ts, (PyFunctionObject *)frame_func(m, fr), NULL);
+    struct lu_frame *f = lu_frame_push_code(ts, (PyFunctionObject *)frame_func(m, fr),
+                                            (PyCodeObject *)Py_NewRef(fr->code), NULL);
     if (f == NULL) {
         return NULL;
     }

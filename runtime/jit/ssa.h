@@ -217,7 +217,8 @@ enum lu_vkind {
     VK_EXC,                     /* an exception the unit raised and its handler dropped: type its class, no fields */
     VK_GEN,                     /* a generator: f[GEN_FUNCV] its function where the unit knows it by its code only
                                    (else nothing), f[GEN_FN] the function, or the one that stands for it, a
-                                   constant; f[GEN_PC] the code unit its frame resumes at, an i64 (GEN_FINISHED;
+                                   constant; f[GEN_CODE] the code it runs, a constant (its function's
+                                   __code__ may be replaced meanwhile); f[GEN_PC] the code unit its frame resumes at, an i64 (GEN_FINISHED;
                                    GEN_RUNNING while a frame of the state is its frame, and holds what it
                                    holds); f[GEN_DEPTH] its stack's depth there, an i64; then its frame's
                                    locals and its stack's room, nothing where a slot holds nothing */
@@ -226,7 +227,7 @@ enum lu_vkind {
     VK_KINDS
 };
 
-enum { GEN_FUNCV, GEN_FN, GEN_PC, GEN_DEPTH, GEN_SLOTS };
+enum { GEN_FUNCV, GEN_FN, GEN_CODE, GEN_PC, GEN_DEPTH, GEN_SLOTS };
 #define GEN_FINISHED (-1)
 #define GEN_RUNNING (-2)
 

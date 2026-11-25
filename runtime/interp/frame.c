@@ -114,7 +114,12 @@ lu_depth_error(PyThreadState *ts, PyCodeObject *code)
 struct lu_frame *
 lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
 {
-    PyCodeObject *code = lu_func_code_ref(func);
+    return lu_frame_push_code(ts, func, lu_func_code_ref(func), locals);
+}
+
+struct lu_frame *
+lu_frame_push_code(PyThreadState *ts, PyFunctionObject *func, PyCodeObject *code, PyObject *locals)
+{
     if (lu_depth_enter(ts, code) < 0) {
         Py_DECREF(code);
         return NULL;
