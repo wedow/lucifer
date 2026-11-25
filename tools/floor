@@ -616,7 +616,8 @@ def quick(args):
                 continue
             floor, now = read_tsv(FLOOR / path.name), read_tsv(path)
             if name not in SLICED:  # a whole corpus passes whole, as its gate does, tests newer than the floor too
-                floor = dict.fromkeys(floor.keys() | now.keys(), "PASS")
+                # (a divergence its own harness lists under a ticket, XFAIL or XPASS, is not a lost pass)
+                floor = {i: "PASS" for i in floor.keys() | now.keys() if now.get(i) not in ("XFAIL", "XPASS")}
             missed = lost(floor, now, now if name in SLICED else floor)
             if name == "kernel" and missed:
                 missed = retry_kernel(mode, missed, ROOT / "build/floor/quick-work" / mode / "kernel-retry.log")
