@@ -14,9 +14,9 @@ parent: luc-ia92
 Item 4 of luc-ia92. The question "which attribute protocol does this type use" is answered separately in about twenty places (the specializer, the generic interpreter paths, the native C lookups, the kernel's Python hooks, the tier's folds), and the copies disagree: classes over an inherited C generic slot get no specialized attribute forms; the kernel hooks grew until a hot unit hit its inline budget (tomli_loads +10.6%); the design below also names probable bugs D2, D4, D6 and D7 found by reading, each needing its failing test before the stage that fixes it. One per-type word, decided with the slot in one function, read by every site. Stages 1 to 5 below land separately; stage 1 introduces the word, switches the specializer and makes every other site check its own answer against the word, so disagreements surface in the test lanes before any other site is switched. Each stage gets a read-only review; stages touching slots, versions or threads an adversarial one.
 
 
-## State (2026-11-25, later)
+## State (2026-11-25, stage C)
 
-Branch luc-attrword, rebased on origin/master (7260c37d), not pushed. Stages 1 and 2 are built and gated together (the coordinator's ruling: stage 1 lands only with stage 2), with the adversarial review's fixes 1-4 and 6 folded in after stage 1; 5 is recorded below. Next: stage C of the brief, a specialized form for instance dicts at `tp_dictoffset` (measured below at about 2% of pyflakes JIT off, above its 0.5% bar), not started; then stages 3-5.
+Stages 1 and 2 and their review fixes landed. Stage C (dict hint forms for a dict at `tp_dictoffset`) is built and gated on branch luc-attrword, not pushed: 28e8561b tests, 75110ccb runtime, then the ticket note. Next: stages 3-5; luc-deth (C getters run twice) belongs with stage 5.
 
 ## Design (2026-11-25)
 
@@ -451,3 +451,22 @@ Each reproducer run against the oracle on master (7260c37d) and on stage 2 befor
 - L-2: `PyType_FromSpec` clears the decided bits under `attr_lock` (`lu_attr_undecide`) before it writes any slot, so no walk can decide a spec type's attribute slots after that.
 - L-3: luc-deth.
 - Brief gate: the kernel programs (64) in four lanes, threads in handoff, ready_run. DeltaBlue JIT on 24.75G, Richards off 399.98G, pyflakes off 8.87G, tomli off 613.0G: no row moved against the numbers above.
+
+### 2026-11-25 stage C: dict hint forms for a dict at tp_dictoffset
+
+- Built: LOAD_ATTR_WITH_HINT and STORE_ATTR_WITH_HINT serve any type whose dict is managed or at a positive `tp_dictoffset` and that is not a class (`LU_DICT_HINTED`): C types declaring a dict offset and Python subclasses of them, nothing keyed to ast. The interpreter and the tier's store helper read the dict with `lu_hinted_dict`; a compiled load reads it at the offset the version's class has, carried in the instruction (`imm2`'s high half; a version no class has now takes the generic load). The specializer gives such types slot members their form and the hint for names the dict holds (absent from the class, or shadowing a non-descriptor); method forms stay managed-only. `lu_jit_attr_load` had no caller and is gone. Runtime +56/-42 lines.
+- Free threading: the dict pointer at the offset is replaced only by `lu_instance_set_dict` (an atomic exchange whose old dict is released after a quiescent period, as for managed dicts) or made by a CAS on first store; a load that read the old pointer still reads a live dict and rechecks its keys table after taking the value, so it answers as of before the assignment; a store holds the dict across its lock (`lu_ns_exchange`). The same guards as the managed forms, nothing new.
+- Firing check (pyflakes, counting build, generic accesses on owners with a dict at `tp_dictoffset`): loads 696,113 before, 432,944 after JIT off (those the hint answers: 487,273 to 224,104); 502,723 to 226,751 JIT on. Stores barely move (652,530 to 627,992): most are ast constructors in C, through `PyObject_SetAttr`. The loads left are C callers and sites that met several shapes.
+- Tests: `jit_dictoffset_attrs` (ast.AST subclass, ast.Name, a subclass with `__slots__`; dicts replaced, emptied, shared, a str-subclass key, hooks gained after the loop) and the jitcheck lane `dictoffset`: 134,506 and 274,506 generic passes at 20,000 and 40,000 iterations before (7 per iteration), 1,504 and 1,504 after. `threads_dictoffset_attrs`, `ready_run`'s Dicted cases and `attr_native_guards` (str-subclass keys on ast nodes) cover the rest and pass.
+- Gate: the kernel programs (64) in jit-off, plain, jit, jit-deopt; 14 thread programs in handoff, three runs; check-capi-ext, all 17; full tools/jitcheck: pass. After rebasing on master with stage 2's fixes landed: the kernel lanes, threads once, the lane and ready_run again: pass.
+
+| row | JIT off, master | JIT off, stage C | JIT on, master | JIT on, stage C |
+|---|---|---|---|---|
+| -c pass | 113.8M | 113.8M | 130.4M | 130.4M |
+| stdlib imports | 1137.9M | 1137.7M | 1345.5M | 1345.3M |
+| pyflakes | 8.86G | 8.78G (-0.9%) | 8.37G | 8.20G (-2.0%) |
+| tomli_loads | 612.83G | 612.85G | 103.51G | 103.51G |
+| Richards | 399.98G | 399.98G | 55.49G | 55.49G |
+| DeltaBlue | 70.40G | 70.40G | 24.80G | 24.80G |
+
+  Instructions, pinned, two runs per arm, minimum; master 7c15a251 (stage 2's fixes landed). The estimate was about 2% JIT off; half of the hint-able loads come from C, which the forms do not reach.
