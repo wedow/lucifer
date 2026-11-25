@@ -5241,19 +5241,43 @@ edge_moves(struct asm_ *a, int b, int succ)
 
 /* Whether the object in r may lose a reference here without being freed
    (immortal, or this thread's with a local count above one, the count
-   left in `count`): else `end`. Clobbers the flags. */
+   left in `count`; RAX the thread's id): else `end`, or `other` for
+   another thread's object. Clobbers the flags. */
 static void
-spare_ref(struct asm_ *a, int r, int count, int end)
+spare_ref(struct asm_ *a, int r, int count, int end, int other)
 {
     int ok = new_label(a);
     load32(a, count, r, offsetof(PyObject, ob_ref_local));
     cmp32_ri8(a, count, -1);
     jcc(a, CC_E, ok);                           /* immortal */
+    cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
+    jcc(a, CC_NE, other);
     cmp32_ri8(a, count, 1);
     jcc(a, CC_BE, end);
-    cmp_rm(a, RAX, r, offsetof(PyObject, ob_tid));
-    jcc(a, CC_NE, end);
     bind(a, ok);
+}
+
+/* As spare_ref, and another thread's object with deferred reference
+   counting (code objects, top-level functions and methods): its shared
+   count carries LU_REF_DEFERRED, so dropping one reference from it can
+   reach neither zero nor the merge, and only a collection, with the world
+   stopped, takes the bias off. `count` is 0 for such an object. */
+static void
+spare_shared(struct asm_ *a, int r, int count, int end)
+{
+    int ok = new_label(a), other = new_label(a);
+    spare_ref(a, r, count, end, other);
+    int past = new_label(a);
+    jmp(a, past);
+    bind(a, other);
+    rex(a, 0, 0, 0, r);
+    b1(a, 0xF6);
+    modrm_mem(a, 0, r, offsetof(PyObject, ob_gc_bits));
+    b1(a, LU_GC_DEFERRED);                      /* test byte [r+ob_gc_bits], LU_GC_DEFERRED */
+    jcc(a, CC_E, end);
+    mov_ri(a, count, 0);
+    bind(a, ok);
+    bind(a, past);
 }
 
 /* The reference spare_ref found, given back. */
@@ -5267,16 +5291,36 @@ drop_spare(struct asm_ *a, int r, int count)
     bind(a, immortal);
 }
 
+/* The reference spare_shared found, given back: from the shared count
+   with a locked subtraction when it is another thread's. */
+static void
+drop_shared(struct asm_ *a, int r, int count)
+{
+    int done = new_label(a), mine = new_label(a);
+    test_rr(a, count, count);
+    jcc(a, CC_NE, mine);
+    b1(a, 0xF0);
+    rex(a, 1, 0, 0, r);
+    b1(a, 0x83);
+    modrm_mem(a, 5, r, offsetof(PyObject, ob_ref_shared));
+    b1(a, 1 << _Py_REF_SHARED_SHIFT);           /* lock sub qword [r+ob_ref_shared], one reference */
+    jmp(a, done);
+    bind(a, mine);
+    drop_spare(a, r, count);
+    bind(a, done);
+}
+
 /* A root's return ends its frame (lu_frame_end) when nothing it gives
    back can be freed: no frame object, the frame not its datastack
-   chunk's first, the function's and code's references spare. Everything
-   is tested before anything moves; else `end`, where C ends the frame
-   once the unit has left (epilogue). RAX is the result r after.
-   Clobbers RCX, RDX, R8, R11 and the flags. */
+   chunk's first, the function's and code's references spare (another
+   thread's deferred ones on a cold path). Everything is tested before
+   anything moves; else `end`, where C ends the frame once the unit has
+   left (epilogue). RAX is the result r after. Clobbers RCX, RDX, R8,
+   R11 and the flags. */
 static void
 frame_end(struct asm_ *a, int r)
 {
-    int slow = new_label(a);
+    int slow = new_label(a), other = new_label(a), ended = new_label(a);
     cmp_mi(a, 1, R15, offsetof(struct lu_frame, frame_obj), 0);
     jcc(a, CC_NE, slow);
     load(a, R11, R14, offsetof(PyThreadState, datastack_chunk));
@@ -5285,14 +5329,23 @@ frame_end(struct asm_ *a, int r)
     jcc(a, CC_E, slow);
     thread_id(a, RAX);
     load(a, RDX, R15, offsetof(struct lu_frame, func));
-    spare_ref(a, RDX, RCX, slow);
+    spare_ref(a, RDX, RCX, slow, other);
     load(a, R11, R15, offsetof(struct lu_frame, code));
-    spare_ref(a, R11, R8, slow);
+    spare_ref(a, R11, R8, slow, other);
     drop_spare(a, RDX, RCX);
     drop_spare(a, R11, R8);
+    bind(a, ended);
     store(a, R14, offsetof(PyThreadState, datastack_top), R15);
     mov_ri(a, RAX, r);
     cold_begin(a);
+    bind(a, other);
+    load(a, RDX, R15, offsetof(struct lu_frame, func));
+    spare_shared(a, RDX, RCX, slow);
+    load(a, R11, R15, offsetof(struct lu_frame, code));
+    spare_shared(a, R11, R8, slow);
+    drop_shared(a, RDX, RCX);
+    drop_shared(a, R11, R8);
+    jmp(a, ended);
     bind(a, slow);
     mov_ri(a, RAX, r);
     jmp(a, a->end);
