@@ -142,6 +142,19 @@ monitors_are_empty(lu_local_monitors m)
     return 1;
 }
 
+/* Any event of any tool, local or not (RAISE and the others only the
+   interpreter fires). */
+static inline int
+any_global_event(lu_global_monitors *m)
+{
+    for (int i = 0; i < LU_MON_UNGROUPED_EVENTS; i++) {
+        if (m->tools[i]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static inline int
 multiple_tools(lu_local_monitors *m)
 {
@@ -1183,6 +1196,12 @@ force_instrument(PyCodeObject *code, PyInterpreterState *interp)
         new_events = monitors_sub(active_events, code->_co_monitoring->active_monitors);
     }
     code->_co_monitoring->active_monitors = active_events;
+    /* lu_code_watched's byte: set before any opcode is instrumented, cleared
+       only after the last one is restored (at `done`). */
+    uint8_t watched = !monitors_are_empty(active_events) || any_global_event(&interp->monitors);
+    if (watched) {
+        __atomic_store_n(&code->_co_monitoring->watched, 1, __ATOMIC_RELEASE);
+    }
     if (monitors_are_empty(new_events) && monitors_are_empty(removed_events)) {
         goto done;
     }
@@ -1243,6 +1262,7 @@ force_instrument(PyCodeObject *code, PyInterpreterState *interp)
         }
     }
 done:
+    __atomic_store_n(&code->_co_monitoring->watched, watched, __ATOMIC_RELEASE);
     __atomic_store_n(&code->_co_instrumentation_version, global_version(interp), __ATOMIC_RELEASE);
     return 0;
 }

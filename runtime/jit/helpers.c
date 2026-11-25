@@ -9,6 +9,7 @@
 #include "jit/jit.h"
 #include "interp/exceptions.h"
 #include "interp/gen.h"
+#include "interp/instrument.h"
 #include "prim/prim.h"
 #include "interp/specialize.h"
 
@@ -228,7 +229,7 @@ raised_arm_ok(int leaving)
     struct lu_frame *f = (struct lu_frame *)t->ts.current_frame;
     struct lu_unit *u = t->jit_act != NULL ? t->jit_act->unit : NULL;
     return f != NULL && f->owner == LU_FRAME_JIT && u != NULL && !__atomic_load_n(&u->dead, __ATOMIC_RELAXED)
-        && (!leaving || f->frame_obj == NULL) && f->code->_co_monitoring == NULL && !t->ts.tracing
+        && (!leaving || f->frame_obj == NULL) && !lu_code_watched(f->code) && !t->ts.tracing
         && t->ts.c_tracefunc == NULL && t->ts.c_profilefunc == NULL
         && f->code->_co_instrumentation_version
            == (__atomic_load_n(&t->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK);
@@ -955,7 +956,7 @@ call_function(struct lu_task *t, PyFunctionObject *func, PyObject *const *args, 
     }
     r = NULL;
     if (f != NULL) {
-        r = co->_co_monitoring == NULL && !t->ts.tracing ? lu_jit_new_gen(&t->ts, f) : LU_JIT_DECLINED;
+        r = !lu_code_watched(co) && !t->ts.tracing ? lu_jit_new_gen(&t->ts, f) : LU_JIT_DECLINED;
         if (r == LU_JIT_DECLINED) {
             t->pin++;
             r = lu_eval(&t->ts, f);

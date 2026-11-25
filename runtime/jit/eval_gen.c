@@ -12,6 +12,7 @@
    running above its consumer's (exit.c). */
 #include "jit/eval.h"
 #include "interp/gen.h"
+#include "interp/instrument.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -659,7 +660,7 @@ lu_ev_gen_adopt(struct ctx *c, lu_v it, int exit_pc, int nops)
     PyFunctionObject *fn = (PyFunctionObject *)func;
     PyCodeObject *co = (PyCodeObject *)fn->func_code;
     const char *why = (co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) != CO_GENERATOR ? "not a plain generator"
-        : co->_co_monitoring != NULL ? "a tool watches its code" : no_room(c, co);
+        : lu_code_watched(co) ? "a tool watches its code" : no_room(c, co);
     if (why != NULL) {
         if (_PyRuntime.jit.debug && g->budget >= 0) {
             fprintf(stderr, "jit: generator %s stepped through C at %s@%d: %s\n",

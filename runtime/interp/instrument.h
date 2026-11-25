@@ -40,6 +40,7 @@ typedef struct {
 typedef struct _PyCoMonitoringData {
     lu_local_monitors local_monitors;   /* sys.monitoring.set_local_events */
     lu_local_monitors active_monitors;  /* global or local: what the bytecode shows */
+    uint8_t watched;                    /* a tool watches the code run: lu_code_watched */
     uint8_t *tools;                     /* per unit, once two tools share an event */
     uintptr_t tool_versions[LU_MON_TOOL_IDS];
     lu_line_data *lines;
@@ -76,6 +77,23 @@ int lu_frame_set_lineno(struct lu_frame *f, PyObject *value);
 
 /* Brings `code` to the interpreter's monitoring version (RESUME). */
 int lu_instrument(PyCodeObject *code, PyInterpreterState *interp);
+/* Whether a tool may watch `code` run, so that it runs only in the
+   interpreter: at its last instrumentation (force_instrument) it had local
+   events or a tool had a global event on, or tools changed since. A code
+   whose tools have all gone has no instrumented opcode left and runs
+   compiled again. Its version is read first: force_instrument writes the
+   byte before it publishes the version. */
+static inline int
+lu_code_watched(PyCodeObject *code)
+{
+    lu_monitoring *data = __atomic_load_n(&code->_co_monitoring, __ATOMIC_ACQUIRE);
+    if (data == NULL) {
+        return 0;
+    }
+    uintptr_t version = __atomic_load_n(&code->_co_instrumentation_version, __ATOMIC_ACQUIRE);
+    return version != (uint32_t)__atomic_load_n(&lu_interp()->monitoring_version, __ATOMIC_RELAXED)
+        || __atomic_load_n(&data->watched, __ATOMIC_RELAXED);
+}
 /* Frees a code object's monitoring data. */
 void lu_monitoring_free(PyCodeObject *code);
 

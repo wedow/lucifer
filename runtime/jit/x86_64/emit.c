@@ -16,6 +16,7 @@
 #include "jit/jit.h"
 #include "interp/perf.h"
 #include "interp/gen.h"
+#include "interp/instrument.h"
 
 #include <cpuid.h>
 #include <stdlib.h>
@@ -5358,7 +5359,7 @@ direct_entry(struct asm_ *a)
 {
     struct lu_func *f = a->f;
     PyCodeObject *code = f->code;
-    int at = a->n, decline = new_label(a), hooked = new_label(a), counted = new_label(a);
+    int at = a->n, decline = new_label(a), hooked = new_label(a), counted = new_label(a), unwatched = new_label(a);
     saves(a);
     mov_rr(a, R14, RDI);
     if (a->serial) {
@@ -5384,9 +5385,14 @@ direct_entry(struct asm_ *a)
     mov_ri(a, R11, (int64_t)code->_co_instrumentation_version);
     alu_rr(a, ALU_CMP, RAX, R11);
     jcc(a, CC_NE, decline);
+    /* No tool watches it (lu_code_watched; the version is the compare above). */
     mov_ri(a, R11, (int64_t)(intptr_t)&code->_co_monitoring);
-    cmp_mi(a, 1, R11, 0, 0);
+    load(a, R11, R11, 0);
+    test_rr(a, R11, R11);
+    jcc(a, CC_E, unwatched);
+    cmp8_mi(a, R11, offsetof(lu_monitoring, watched), 0);
     jcc(a, CC_NE, decline);
+    bind(a, unwatched);
     cmp_mi(a, 0, R14, offsetof(PyThreadState, tracing), 0);
     jcc(a, CC_NE, decline);
     /* No PEP 523 hook but perf's, which compiled code needs no frames from. */

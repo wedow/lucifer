@@ -9,6 +9,7 @@
    (eval_prims.c). Any other call is the interpreter's, made by a helper. */
 #include "jit/eval.h"
 #include "interp/gen.h"
+#include "interp/instrument.h"
 
 #include <string.h>
 
@@ -245,7 +246,7 @@ not_inlinable(struct ctx *c, PyFunctionObject *fn, lu_v funcv)
         || ((co->co_flags & (LU_CO_GENERATORS | CO_ITERABLE_COROUTINE)) && !lu_ev_gen_takes(co))) {
         return "not plain code";
     }
-    if (co->_co_monitoring != NULL || (!kernel && funcv == LU_NOV && fn->func_version < 2)) {
+    if (lu_code_watched(co) || (!kernel && funcv == LU_NOV && fn->func_version < 2)) {
         return "watched, or unversioned";
     }
     if (lu_jit_noinline(co)) {
