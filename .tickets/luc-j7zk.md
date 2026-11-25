@@ -23,3 +23,10 @@ luc-ci4f: kernel code compiles a bare raise and RERAISE, so _asend_send's cleanu
 **2026-11-09T04:45:21Z**
 
 luc-vxsk: a coroutine run to completion with send() and caught as StopIteration costs 1.2 us against CPython's 0.28 (luc-msp6); the kernel no longer interns builtins.issubclass's name in every PyErr_SetObject.
+
+## 2026-11-25, after yield from and await compile
+
+From the item 2 work (01a9cae0), measured on async_generators after yield from, await and async for compile:
+- the kernel's Python asend step is the cost: lu_field_offset 6.1%, h_prim_call 4.5%, prim_gen_flag 2.2% of cycles;
+- every async for ends with StopAsyncIteration raised in _asend_step@362 (699K per run), which leaves the unit for the interpreter's END_ASYNC_FOR handler; the jitcheck lane asyncfor is listed as not built for this reason.
+Both belong to this ticket: handlers in generator frames taken in the unit (the end of async for stays compiled), and the asend step's generator-flag and field reads lowered or the step given a native form. Also not built: the END_SEND entry after a real suspension, so code after an await that truly suspended runs interpreted until the next plain-yield resume or a hot loop.
