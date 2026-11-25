@@ -257,3 +257,49 @@ What would make me abandon this:
 
 ### Files
 runtime/jit/jit.c, runtime/jit/eval_call.c, runtime/jit/eval_flow.c, tools/jitcost, tools/jitcheck.
+
+## Stage 0 results
+
+Branch luc-site0 from origin/master 270f8f0b (not to land: wip counters and scripts). Arms: pre = f626ea38 (the ledger's parent), master = 270f8f0b. Method of luc-1kz0 (2026-11-25): one pyperf worker per core lease, pinned, `perf record -e instructions:u --call-graph fp -k CLOCK_MONOTONIC` with each value's window stamped, compile = samples with compile() in the chain; reference loops (django_template and richards -l 2, genshi -l 1); two runs per arm alternated, each figure the min of the two (spread between the runs 0.0-0.3%, genshi best value 1.6%).
+
+### Check 5: whole-process instructions, pre against master (2026-11-25)
+
+M instructions (compile in brackets). "All values" is the warmup and the timed values together: the benchmark's own work. "Whole process" adds start-up, imports and the harness.
+
+| program | -n | figure | pre | master | master vs pre |
+|---|---|---|---|---|---|
+| django_template | 3 | best value | 855.8 (24.0) | 909.2 (13.0) | +6.2% |
+| | 3 | mean value | 918.7 (83.1) | 952.9 (61.5) | +3.7% |
+| | 3 | all values | 4,944.8 (1,316.0) | 4,651.0 (651.4) | -5.9% |
+| | 3 | whole process | 10,357.2 (2,845.2) | 9,707.3 (1,941.0) | -6.3% |
+| | 20 | best value | 850.4 (13.0) | 851.4 (0.0) | +0.1% |
+| | 20 | mean value | 902.7 (27.1) | 886.7 (20.4) | -1.8% |
+| | 20 | all values | 20,242.2 (1,609.4) | 19,526.6 (875.6) | -3.5% |
+| | 20 | whole process | 25,709.0 (3,142.0) | 24,588.6 (2,166.0) | -4.4% |
+| genshi (text + xml) | 3 | best value | 1,791.8 (120.6) | 1,918.4 (44.6) | +7.1% |
+| | 3 | mean value | 2,099.4 (342.1) | 2,157.5 (263.9) | +2.8% |
+| | 3 | all values | 9,042.4 (1,651.8) | 9,225.0 (1,301.2) | +2.0% |
+| | 3 | whole process | 12,910.4 (2,774.0) | 12,851.8 (2,301.8) | -0.5% |
+| | 20 | best value | 1,601.2 (0.0) | 1,815.4 (0.2) | +13.4% |
+| | 20 | mean value | 1,708.3 (71.2) | 1,965.1 (102.9) | +15.0% |
+| | 20 | all values | 36,915.6 (2,051.0) | 41,979.2 (2,522.4) | +13.7% |
+| | 20 | whole process | 40,807.6 (3,187.0) | 45,656.9 (3,520.5) | +11.9% |
+| richards | 3 | best value | 242.6 (0.0) | 246.6 (0.0) | +1.6% |
+| | 3 | mean value | 244.3 (1.6) | 251.1 (3.3) | +2.8% |
+| | 3 | all values | 1,285.0 (229.0) | 1,458.0 (304.6) | +13.5% |
+| | 3 | whole process | 4,755.7 (1,232.8) | 4,698.5 (1,174.0) | -1.2% |
+| | 20 | best value | 242.6 (0.0) | 240.4 (0.0) | -0.9% |
+| | 20 | mean value | 246.1 (1.3) | 244.1 (1.0) | -0.8% |
+| | 20 | all values | 5,474.2 (250.0) | 5,585.6 (314.2) | +2.0% |
+| | 20 | whole process | 8,929.7 (1,258.2) | 8,840.9 (1,189.6) | -1.0% |
+
+Outside the values (whole less all values, -n 3) master spends less in all three: django 356M (239M of it compile), genshi 241M (121M), richards 231M (135M). That is the ledger's start-up saving on import and harness code, not the benchmark's growth, so the whole-process column mixes the two; "all values" isolates the benchmark.
+
+Master moved since luc-1kz0's table (django best value 949.4 -> 909.2, genshi 1,927.6 -> 1,918.4, richards 249.2 -> 246.6).
+
+Reading. Pre wins the best of three on all three rows and loses the whole process on all three, but the cause differs, so the design's finding holds for one row of three:
+- **django_template: confirmed.** Pre's growth does not pay inside the measured process. On the benchmark's own values pre spends 294M more. Its extra compile is 665M (1,316M against 651M) against a run lead of 56M a value (mean run 835.6M against 891.4M), so it needs about 12 values to pay back, and by then master has bought its own growth. At -n 20 the best values tie (850 against 851) and master leads every other figure. Pre's best-value lead is unpaid growth bought early.
+- **richards: refuted.** Pre's lead is paid inside the benchmark. Its values cost 173M less at -n 3 (+13.5% for master: master compiles 305M against 229M and runs the slow units longer before its single purchase at 65,536 entries). Pre loses the whole process only through the 231M outside the values. By -n 20 master's best value is 0.9% better, so the steady units are equal or better on master; the gap is time to the best build.
+- **genshi: refuted.** Pre's lead is not growth awaiting payback. It is a steady-state gap: +13.4% best value and +11.9% whole process at -n 20, and +2.0% over all values at -n 3. Master's -0.5% whole-process edge at -n 3 is again only the outside-the-values saving (241M against a 183M deficit in the values).
+
+Abandon condition ("the premise": pre's lead is paid inside the process while the replay with true savings still buys later). For richards and genshi the first half is met: their leads are paid inside the benchmark's values. Whether the premise fails therefore rests on check 4 (the replay), which has not been run. For django the condition is not met. Ruling 2 (the acceptance metric) is needed for django_template alone. Best of three rewards growth that 20 values do not pay back, and no payback rule can recover that row on that metric.
