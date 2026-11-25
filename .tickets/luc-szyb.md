@@ -481,3 +481,48 @@ Reading:
 - The hot sites out of line are small callees. Most own units are 54-480 IR (tomli's seven at 316k calls a value, genshi's `_get` 137, regex's `_new_match` 271). Under the design's price they are bought at first build, where today the budget is gone by bytecode order. The large exceptions are callees whose own units are big kernel regex paths (Pattern.match 1,723) and django's render_value_in_context (1,711). There, in-context IR is the open question that check 2 and stage 2's records must answer.
 - Calls per site at nested depth are not identifiable under today's key wherever kernel helpers are inlined repeatedly. The design's calls `N_i` for nested sites (stage 2's weights, stage 3's admission) must either key by the full inline path or accept merged counts.
 - Abandon conditions: none. Check 1 is input to checks 2 and 4 and has no condition of its own. The shared-key finding is a design gap to fix in stage 1 (the key gains the callee) and stage 2 (records per path).
+
+### Check 2: the fold against the machine (2026-11-25)
+
+Method:
+- The ten hottest root-level sites from check 1, spread over five programs.
+- Each unit is built with the site forced in line and forced out of line, through the check 3 plan mechanism. Every other site of the root's last count-run build is pinned to its decision there, at every budget level. A forced-in callee's own call sites are new names, so they take today's test, and at a full unit that usually sends them out of line.
+- One run per arm (check 5's runs repeat within 0.0-0.3%). Best value, run part only (value less its compile), M instructions. Saved per call = (out - in) / calls a value.
+- P is jitcost's call-shape row (luc-1kz0 stage B, window harness): plain 435, method 503, kernel 216.
+- The design's fold estimate was **not computed**. It needs block weights and an expected-priced-IR pass, well over 150 wip lines. Measured saving is compared with P alone.
+
+| # | unit | site, callee | today | calls/value | run, out | run, in | saved per call | P (shape) | saved / P |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | tomli key_value_rule@3 | @59 len | out | 316,413 | 24,935.1 | 24,817.1 | 373 | 216 (kernel) | 1.7 |
+| 2 | | @224 Flags.is_ | out | 316,408 | 24,886.1 | 24,747.1 | 439 | 503 (method) | 0.9 |
+| 3 | | @273 NestedDict.get_or_create_nest | out | 316,407 | 24,886.1 | 24,576.1 | 980 | 503 (method) | 1.9 |
+| 4 | django getattr | @39 lookup_attr | in | 40,000 | 860.4 | 891.2 | -770 | 216 (kernel) | -3.6 |
+| 5 | django render_value_in_context | @111 conditional_escape | in | 20,000 | 933.8 | 887.4 | 2,320 | 435 (plain) | 5.3 |
+| 6 | django VariableNode.render | @35 render_value_in_context | out | 15,354 | 895.2 | 953.0 | -3,764 | 435 (plain) | -8.7 |
+| 7 | richards HandlerTask.fn | @275 Task.qpkt | in | 18,600 | 250.2 | 242.4 | 419 | 503 (method) | 0.8 |
+| 8 | richards DeviceTask.fn | @82 Task.qpkt | in | 18,588 | 256.2 | 246.8 | 506 | 503 (method) | 1.0 |
+| 9 | genshi XMLSerializer.__call__@97 | @104 _get | out | 11,996 | 1,869.8 | 1,892.4 | -1,884 | 435 (plain, shape unverified) | -4.3 |
+| 10 | regex_v8 block0@12 | @38 Pattern.search | in | 6,510 | 909.8 | 902.0 | 1,198 | 503 (method, shape unverified) | 2.4 |
+
+Reading:
+- **Protocol alone is within 0.5-2 of the measured saving on 5 of 10 sites** (1, 2, 3, 7, 8): plain and method calls to small callees.
+- **Specialization adds 2.4-5.3 times P on two sites** (5, 10). conditional_escape and Pattern.search take constant or typed arguments in context. This is the fold the design means to value.
+- **On three sites taking the call in line loses** (4, 6, 9: -770, -3,764 and -1,884 per call).
+  - In two of them (6 and 9, both out of line today) the forced copy enters a unit already at its allowance, so the callee's own calls go out of line. Its own unit, built as a root, has them in line. In-line here means in line with its subtree cut.
+  - For 4 (lookup_attr in getattr, in line today) the out-of-line arm calls lookup_attr's own unit (482 IR, built for its own feedback), which runs better than the 141-IR copy.
+  - The design values a site as `P + F` with `F >= 0`, so it predicts a positive saving at all three, and no fold estimate can match them.
+  - The design's own-frame fold also leaves out exactly what decides 6 and 9: whether the callee's nested sites come with it. "Anything behind a nested site (valued at that site)" does not hold when taking the parent in pushes the children out.
+- **Abandon condition for stage 2** (the fold outside 0.5-2 of the measured saving on more than a third of hot sites):
+  - Not decidable as written, because the fold was not computed.
+  - Any `P + F` with `F >= 0` is outside the band on at least 3 of 10 sites (the three losses). That is one site short of the condition. With P alone, 5 of 10 are outside.
+  - I read this as stage 2 not yet falsified but at risk. Before stage 2 is built, its value term must price a site with its subtree's fate (callee's sites in or out at the marginal price), not own-frame only, and check 2 must be repeated with the estimate computed.
+- **Stage 1 is unaffected**: it buys sites by counted calls at P, and sites 1-3, 7 and 8 show P is the right order for small callees.
+
+### Check 8, partial: the build model above 8k IR
+
+Only one build of the table programs reaches 8k IR: tomli's key_value_rule@3 at 15,733 IR. The count run's first timed value holds it and five small builds: predicted 1,659M (it alone 1,340M); measured compile in that value 1,190M (wip arm). So `n(6500 + 5n)` overestimates the 15.7k build by between 11% and 28% (0.72-0.89). Whole runs (all builds, predicted against measured compile): tomli 1.04, django 1.18, genshi 1.19, richards 1.20. One build is not a model check; the 8k-32k jitcost rows are still needed.
+
+### Not done in this pass
+
+- Checks 4 (replay), 6 (weights: needs the branch-word predictor, which is stage 2 code), 7 (evaluator share by unit size: needs per-build profiles), 9 (loops peeled and refused: needs evaluator counters).
+- Check 8 beyond the single build above.
