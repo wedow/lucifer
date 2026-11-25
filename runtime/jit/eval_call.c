@@ -189,22 +189,26 @@ lu_ev_room(struct ctx *c, int again, PyCodeObject *callee)
 {
     struct lu_func *f = c->g->f;
     c->g->hot_room = 0;
+    /* The call's path: the callee and each frame's call from the root's,
+       mixed as a profile place's. A site bought by the root's entry, or
+       by the own unit of a frame it is in line in (its path from that
+       frame), goes in line with the allowance a unit begins with. Copies
+       on one path (the arms of a call over learned classes, a loop's
+       peeled turn) are one site. */
+    uint64_t key = (uint64_t)(uintptr_t)callee;
+    int bought = 0;
+    for (struct ctx *k = c; k != NULL; k = k->parent) {
+        key = lu_jit_ctx_mix(key, k->code, k->pc);
+        bought = bought || (again == 0 && c->g->budget >= 0
+                            && lu_jit_bought(k->code, k->parent != NULL ? -1 : f->entry_pc, key));
+    }
+    if (bought) {
+        c->g->hot_room = 1;
+        return 1;
+    }
     if (spent(c->g) <= c->g->budget) {
         return 1;
     }
-    uint64_t key = lu_jit_site_key(c->code, c->pc, c->parent != NULL ? c->parent->code : NULL,
-                                   c->parent != NULL ? c->parent->next : 0);
-    /* A hot site goes in line past the budget once: the build's other
-       paths to it, and copies of the code around it, keep to the budget. */
-    int taken = 0;
-    for (int i = 0; i < f->nhots && !taken; i++) {
-        taken = f->hots[i] == key;
-    }
-    if (!taken && again == 0 && c->g->budget >= 0 && lu_jit_hot_site(f->code, key)) {
-        c->g->hot_room = key;
-        return 1;
-    }
-    f->refused++;
     int i = 0;
     while (i < f->nouts && f->outs[i] != key) {
         i++;
@@ -225,12 +229,10 @@ int
 lu_ev_room_begin(struct ctx *c)
 {
     struct gctx *g = c->g;
-    uint64_t key = g->hot_room;
-    g->hot_room = 0;
-    if (key == 0) {
+    if (!g->hot_room) {
         return 0;
     }
-    note_key(&g->f->hots, &g->f->nhots, &g->f->caphots, key);
+    g->hot_room = 0;
     int room = spent(g) + g->f->budget - g->budget;
     g->budget += room;
     return room;
@@ -591,8 +593,8 @@ inline_call(struct ctx *c, PyFunctionObject *fn, lu_v funcv, int ndef, lu_v *arg
        the callee's first instruction, where its frame is whole. */
     k->pc = 0;
     lu_ev_settle(k, 0);
-    /* A hot site's callee has room for its own calls: what its own unit
-       would take in line comes with it. */
+    /* A bought site's callee has room for its own calls: what its own
+       unit takes in line comes with it. */
     int room = lu_ev_room_begin(c);
     int built = lu_ev_build(k, 0);
     lu_ev_room_end(c, room);

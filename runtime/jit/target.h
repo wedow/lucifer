@@ -201,7 +201,6 @@ struct lu_unit {
     unsigned long entered;      /* every entry, under -X lucifer_jit_stats */
     unsigned long leaves;       /* exits no recompile can remove: side exits of the root frame, errors */
     int loops;                  /* the code has a back edge: an entry may do unbounded work */
-    int refused;                /* calls it left out of line for want of budget (jit.c grows it) */
     struct lu_out {             /* their sites (jit.c) */
         uint64_t key;
         int64_t left;           /* calls there until the next look (an exit): from -armed up; COUNT_OUT counts it */

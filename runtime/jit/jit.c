@@ -86,14 +86,11 @@
 #define MAX_LEVEL 25
 /* seen bits. */
 #define WARMED 1                /* the entry's compile was put off for feedback once */
-/* Instructions a unit may have and still take a call in line at first
-   (what the evaluator folds away costs it nothing). A unit that left calls
-   out is built again with twice that once the calls it made out of line
-   have cost what that larger build will (hot_exit). */
+/* Instructions a unit may have and still take a call in line (what the
+   evaluator folds away costs it nothing). A call its units left out of line
+   for want of it goes in line once its calls have paid the build that takes
+   it (hot_exit), with this allowance for its callee's own calls. */
 #define INLINE_BUDGET 1000
-#define MAX_GROWN 4                 /* doublings of the inlining budget: at most 16,000 */
-/* The calls per entry of a unit that show a site in a loop it runs. */
-#define LOOP_CALLS 64
 
 struct lu_jit_code {
     struct lu_jit_direct direct;        /* first: compiled callers read it (target.h) */
@@ -111,8 +108,6 @@ struct lu_jit_code {
     unsigned long marked;       /* marks when a site of it (or noinline) was last marked */
     int call_pc;                /* where a call enters (call_entry), or -1 */
     struct lu_pic **pics;       /* per code unit: an attribute site's polymorphic cache */
-    uint8_t *grown;             /* per code unit: doublings of the inlining budget of the unit entered there, which
-                                   its own calls left out bought (hot_exit); another entry starts at the base */
     struct lu_callees **callees;        /* per code unit: a call site's callees */
     int *keyed, nkeyed;                 /* the sites whose tables hold globals (LU_CALLEE_CODE entries) */
     struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
@@ -124,8 +119,11 @@ struct lu_jit_code {
     PyCodeObject *code;                 /* LUCIFER_JIT_DEBUG: whose (a name only) */
     char *cause;                        /* LUCIFER_JIT_DEBUG: why its last unit died, for its next build */
     uint64_t print;                     /* LUCIFER_JIT_DEBUG: its last build's fingerprint */
-    uint64_t *hot;                      /* a root's: call sites its units called out of line at often */
-    int nhot;
+    struct lu_bought {                  /* a root's: call sites its units' calls out of line bought in line (hot_exit), */
+        int entry;                      /* for the unit entered at this code unit; */
+        uint64_t key;                   /* the call's path from that entry (eval_call.c lu_ev_room) */
+    } *bought;
+    int nbought;
     struct lu_jit_code *next, **pprev;  /* the codes with JIT state (below) */
 };
 
@@ -434,7 +432,6 @@ state_for(PyCodeObject *code)
     jc->fails = calloc((size_t)jc->ncode + 1, sizeof(uint64_t));
     jc->wait = calloc((size_t)jc->ncode + 1, sizeof(uint32_t));
     jc->seen = calloc((size_t)jc->ncode + 1, 1);
-    jc->grown = calloc((size_t)jc->ncode + 1, 1);
     jc->call_pc = lu_jit_call_entry(code);
     jc->direct.nargs = lu_jit_direct_nargs(code);
     uintptr_t seen = (uintptr_t)__atomic_load_n(&code->co_executors, __ATOMIC_RELAXED);
@@ -448,7 +445,6 @@ state_for(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->seen);
-    free(jc->grown);
     free(jc);
     return (struct lu_jit_code *)seen;
 }
@@ -1254,32 +1250,38 @@ left(struct lu_unit *u)
     }
 }
 
-uint64_t
-lu_jit_site_key(PyCodeObject *code, int pc, PyCodeObject *outer, int outer_pc)
-{
-    uint64_t k = ((uint64_t)(uintptr_t)code + (uint64_t)pc) * 0x9e3779b97f4a7c15u;
-    k = (k ^ ((uint64_t)(uintptr_t)outer + (uint64_t)outer_pc)) * 0xff51afd7ed558ccdu;
-    return k | 1;               /* 0 is an empty entry */
-}
-
 int
-lu_jit_hot_site(PyCodeObject *root, uint64_t key)
+lu_jit_bought(PyCodeObject *code, int entry, uint64_t key)
 {
-    struct lu_jit_code *jc = state_of(root);
-    int hot = 0;
-    if (jc != NULL && __atomic_load_n(&jc->nhot, __ATOMIC_RELAXED) > 0) {
+    struct lu_jit_code *jc = state_of(code);
+    int bought = 0;
+    if (jc != NULL && __atomic_load_n(&jc->nbought, __ATOMIC_RELAXED) > 0) {
+        entry = entry < 0 ? jc->call_pc : entry;
         PyMutex_Lock(&jc->prof_lock);
-        for (int i = 0; i < jc->nhot && !hot; i++) {
-            hot = jc->hot[i] == key;
+        for (int i = 0; i < jc->nbought && !bought; i++) {
+            bought = jc->bought[i].entry == entry && jc->bought[i].key == key;
         }
         PyMutex_Unlock(&jc->prof_lock);
     }
-    return hot;
+    return bought;
+}
+
+/* The sites entry's units bought: a count for LUCIFER_JIT_DEBUG. */
+static int
+bought_at(struct lu_jit_code *jc, int entry)
+{
+    int n = 0;
+    PyMutex_Lock(&jc->prof_lock);
+    for (int i = 0; i < jc->nbought; i++) {
+        n += jc->bought[i].entry == entry;
+    }
+    PyMutex_Unlock(&jc->prof_lock);
+    return n;
 }
 
 /* The sites the build left calls out of line at, for the unit to count:
    each leaves first after as many calls as the build made instructions,
-   then after as many again as it made before (hot_exit). */
+   then when its share of the calls that would buy it is made (hot_exit). */
 static void
 keep_outs(struct lu_unit *u, const struct lu_func *f)
 {
@@ -1307,10 +1309,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     f.code = frame->code;
     f.unit = u;
     f.entry_pc = (int)(frame->instr - lu_code_start(frame->code));
-    /* What the evaluator may inline, in code units: a unit that stayed hot
-       with calls left out is built again with twice as much. */
-    /* The ceiling is master's (MAX_GROWN), kept until the owner decides whether growth may be unbounded. */
-    f.budget = INLINE_BUDGET << jc->grown[f.entry_pc];
+    f.budget = INLINE_BUDGET;
     f.stress = _PyRuntime.stress.deopt != 0;
     if (f.stress) {
         u->stress_counter = malloc(sizeof(long));
@@ -1393,8 +1392,8 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
                 print = (print ^ w[k]) * 0x100000001b3u;
             }
         }
-        event("build %s@%d %s ins %d bytes %zu ms %.3f grown %d level %d%s: %s", qualname(frame->code), pc,
-              ok ? "ok" : "failed", f.nins, u->code_bytes, dt * 1e3, jc->grown[f.entry_pc], jc->level,
+        event("build %s@%d %s ins %d bytes %zu ms %.3f bought %d level %d%s: %s", qualname(frame->code), pc,
+              ok ? "ok" : "failed", f.nins, u->code_bytes, dt * 1e3, bought_at(jc, f.entry_pc), jc->level,
               ok && print == jc->print ? " same" : "", jc->cause != NULL ? jc->cause : "first");
         jc->print = ok ? print : jc->print;
     }
@@ -1421,7 +1420,6 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     }
     u->entry_pc = pc;
     u->loops = f.loops > 0;
-    u->refused = f.refused;
     u->consts = f.consts;
     u->nconsts = f.nconsts;
     for (int i = 0; i < u->nconsts; i++) {
@@ -2088,18 +2086,18 @@ out_cost(const struct lu_out *o)
 }
 
 /* A site the unit left out of line for want of budget was called as often
-   as it was armed for, and the unit left there: a look at its sites, each
-   valued at its calls times out_cost. When one site's calls have cost what
-   the unit's next build will, the sites that cost a quarter of that, and
-   are called LOOP_CALLS times per entry of the unit (calls in a loop it
-   runs), are hot for that build, and it dies. One made a few times per
-   entry is a caller's to make: taken in line, its code is copied into each
-   unit that calls it, as a recursive descent's would be into every other.
-   Else, when its calls out of line, all sites together, have cost what a
-   build with twice the budget will, the unit is built again with it. Else
-   each site that left is armed for as many calls again as it made: looks
-   are few next to the calls. A site is taken in line by how often it is
-   called, not by where the build came to it. */
+   as it was armed for, and the unit left there: a look at its sites. Each
+   is valued at its calls times out_cost and, once its callee has a unit,
+   takes the IR of that unit's last build, which is what it takes in line
+   (the callee goes in with the allowance and the bought sites its own unit
+   has). The densest sites are admitted while their value per instruction
+   covers the marginal price of the build at the size reached; when the
+   calls of those admitted have paid the whole new build, they are bought
+   for the unit's entry, once each, and the unit is built again at once.
+   Else each site is armed for its share, at the proportions of the calls
+   made so far, of the calls that would pay the shortfall, and for no fewer
+   calls than a look costs. A site goes in line by how often it is called,
+   not by where the build came to it. */
 static void
 hot_exit(struct lu_deopt *d)
 {
@@ -2107,61 +2105,79 @@ hot_exit(struct lu_deopt *d)
     if (__atomic_load_n(&u->dead, __ATOMIC_RELAXED)) {
         return;
     }
-    /* A unit entered where a generator resumes after a yield runs one turn
-       of the generator's loop per entry: a call made on most turns is in it. */
-    lu_codeunit *resume = lu_code_start(u->code) + u->entry_pc - 1 - lu_opcode_caches[RESUME];
-    int turns = u->entry_pc > 1 + lu_opcode_caches[RESUME] && resume->op.code == RESUME
-        && (resume->op.arg & RESUME_OPARG_LOCATION_MASK) == RESUME_AFTER_YIELD;
-    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
-    unsigned long loop = turns ? entries / 2 : LOOP_CALLS * entries;
     struct lu_jit_code *jc = state_of(u->code);
-    double worth = (double)u->enough, grow = build_cost(2 * u->nins);     /* the builds they cause: u's */
+    int n = u->nouts, priced = 0, admitted = 0;
+    double *value = malloc(sizeof(double) * 2 * (size_t)n), *each = value + n, *size = malloc(sizeof(double) * (size_t)n);
+    int *order = malloc(sizeof(int) * (size_t)n);
     PyMutex_Lock(&jc->prof_lock);
-    double most = 0, total = 0, *cost = malloc(sizeof(double) * (size_t)u->nouts);
-    for (int i = 0; i < u->nouts; i++) {
-        cost[i] = (double)out_calls(&u->outs[i]) * out_cost(&u->outs[i]);
-        total += cost[i];
-        most = cost[i] > most ? cost[i] : most;
-    }
-    int was = jc->nhot;
-    for (int i = 0; i < u->nouts && most >= worth; i++) {
-        int64_t calls = out_calls(&u->outs[i]);
-        int known = 0;
-        for (int k = 0; k < jc->nhot && !known; k++) {
-            known = jc->hot[k] == u->outs[i].key;
-        }
-        if (!known && cost[i] >= worth / 4 && (unsigned long)calls >= loop) {
-            jc->hot = realloc(jc->hot, sizeof(uint64_t) * (size_t)(jc->nhot + 1));
-            jc->hot[jc->nhot] = u->outs[i].key;
-            __atomic_store_n(&jc->nhot, jc->nhot + 1, __ATOMIC_RELAXED);
+    double total = 0;
+    for (int i = 0; i < n; i++) {
+        struct lu_jit_code *cc = state_of(u->outs[i].callee);
+        each[i] = out_cost(&u->outs[i]);
+        value[i] = (double)out_calls(&u->outs[i]) * each[i];
+        size[i] = cc != NULL ? (double)__atomic_load_n(&cc->built_ins, __ATOMIC_RELAXED) : 0;
+        total += value[i];
+        if (size[i] > 0) {      /* priced: by value per instruction, densest first */
+            int j = priced++;
+            for (; j > 0 && value[order[j - 1]] * size[i] < value[i] * size[order[j - 1]]; j--) {
+                order[j] = order[j - 1];
+            }
+            order[j] = i;
         }
     }
-    const char *why = jc->nhot > was ? "hot-site"
-        : u->refused && jc->grown[u->entry_pc] < MAX_GROWN && total >= grow ? "grown" : NULL;
-    free(cost);
-    for (int i = 0; why == NULL && i < u->nouts; i++) {
-        struct lu_out *o = &u->outs[i];
-        if (__atomic_load_n(&o->left, __ATOMIC_RELAXED) >= 0) {
-            o->before = out_calls(o);
-            o->armed = o->before;
+    double ins = u->nins, paid = 0;
+    for (; admitted < priced; admitted++) {
+        int i = order[admitted];
+        if (value[i] < size[i] * (BUILD_INS + BUILD_INS2 * (2 * ins + size[i]))) {
+            break;
+        }
+        ins += size[i];
+        paid += value[i];
+    }
+    double price = build_cost((int)ins);
+    int buy = admitted > 0 && paid >= price;
+    if (buy) {
+        jc->bought = realloc(jc->bought, sizeof(struct lu_bought) * (size_t)(jc->nbought + admitted));
+        for (int k = 0; k < admitted; k++) {
+            jc->bought[jc->nbought + k] = (struct lu_bought){ u->entry_pc, u->outs[order[k]].key };
+        }
+        __atomic_store_n(&jc->nbought, jc->nbought + admitted, __ATOMIC_RELAXED);
+    }
+    else {
+        /* The shortfall of the admitted sites, or of the densest one alone;
+           none priced yet, as many calls again as were made. */
+        double due = admitted > 0 ? price - paid
+            : priced > 0 ? build_cost(u->nins + (int)size[order[0]]) - value[order[0]] : -1;
+        for (int i = 0; i < n; i++) {
+            struct lu_out *o = &u->outs[i];
+            int64_t made = out_calls(o), arm = made;
+            if (due >= 0 && total > 0) {
+                double share = due * (double)made / total, least = DEOPT_INS / each[i];
+                arm = (int64_t)(share > least ? share : least) + 1;
+            }
+            o->before = made;
+            o->armed = arm > 0 ? arm : 1;
             __atomic_store_n(&o->left, -o->armed, __ATOMIC_RELAXED);
         }
     }
     PyMutex_Unlock(&jc->prof_lock);
-    if (why == NULL) {
+    free(value);
+    if (!buy) {
+        free(size);
+        free(order);
         return;
     }
     const struct lu_deopt_frame *in = lu_deopt_frame(d, d->nframes - 1);
-    if (_PyRuntime.jit.debug) {
-        fprintf(stderr, "jit: %s@%d: %s at %s@%d, %d hot now\n", PyUnicode_AsUTF8(u->code->co_qualname),
-                u->entry_pc, why, PyUnicode_AsUTF8(in->code->co_qualname), in->pc, jc->nhot);
+    if (_PyRuntime.jit.events) {
+        for (int k = 0; k < admitted; k++) {
+            int i = order[k];
+            event("buy %s@%d %s ins %.0f calls %lld", qualname(u->code), u->entry_pc, qualname(u->outs[i].callee),
+                  size[i], (long long)out_calls(&u->outs[i]));
+        }
     }
-    /* Only the exit that kills the unit grows its entry, and never past MAX_GROWN. */
-    uint8_t grown = __atomic_load_n(&jc->grown[u->entry_pc], __ATOMIC_RELAXED);
-    if (kill(jc, u, why, in->code, in->pc, why[0] == 'g' ? total : most, why[0] == 'g' ? grow : worth)
-        && why[0] == 'g' && grown < MAX_GROWN) {
-        __atomic_store_n(&jc->grown[u->entry_pc], grown + 1, __ATOMIC_RELAXED);
-    }
+    free(size);
+    free(order);
+    kill(jc, u, "sites", in->code, in->pc, paid, price);
     __atomic_store_n(&jc->wait[u->entry_pc], 0, __ATOMIC_RELAXED);    /* not for its faults: built again at once */
 }
 
@@ -2743,7 +2759,7 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->keyed);
     free(jc->held);
     free(jc->scan);
-    free(jc->hot);
+    free(jc->bought);
     for (struct lu_prof *p = jc->profs, *next; p != NULL; p = next) {
         next = p->next;
         for (int i = 0; i < p->n; i++) {
@@ -2755,7 +2771,6 @@ lu_jit_code_free(PyCodeObject *code)
     free(jc->fails);
     free(jc->wait);
     free(jc->seen);
-    free(jc->grown);
     free(jc->cause);
     free(jc);
     code->co_executors = NULL;

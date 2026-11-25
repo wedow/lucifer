@@ -1884,7 +1884,6 @@ close_loop(struct ctx *c, struct bblk *bb)
     int n = bb->nback, pc = bb->pc;
     int want = kept_misfit(c, bb, bb->gen ? MISFIT : MISFIT_KIND | MISFIT_FRESH);
     int peel = want && peel_room(g, bb);
-    g->f->refused += want && !peel;
     bb->nback = 0;
     bb->closed = 1;
     if (!peel) {

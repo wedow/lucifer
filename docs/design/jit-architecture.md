@@ -937,8 +937,10 @@ What decides how code is specialized:
   in 64 is not built, and a guard leaves for it.
 - **Budget in instructions.** A unit takes calls in line while it has
   fewer instructions than its budget; code the evaluator folds away costs
-  nothing. A hot unit that left calls out doubles the budget of its code,
-  a bounded number of times.
+  nothing. A call left out counts its calls; once the densest such sites
+  have paid the build that takes them (each at its callee's own unit),
+  the unit's entry buys them and is built again, each bought callee going
+  in with the budget and bought sites its own unit has.
 - **Numbers round a loop.** A local or stack entry that is an int or a
   float on a back-edge is a raw phi with the object it came in as beside
   it; one unbound where the loop starts carries `lu_jit_unbound` there,
