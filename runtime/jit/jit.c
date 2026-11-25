@@ -1937,7 +1937,7 @@ int
 lu_jit_left(struct lu_unit *u, int r, PyThreadState *ts, struct lu_frame *f)
 {
     count(&stats.left_stale, __atomic_load_n(&u->stale, __ATOMIC_RELAXED) != 0);
-    left(u);                    /* first: ending the frame may free the unit with its code */
+    left(u);                    /* first: ending the frame may run Python (finalizers), which may poll */
     count(&stats.ended_in_c, f != NULL);
     if (f != NULL && f->owner == LU_FRAME_GENERATOR) {
         lu_gen_finish(ts, f);

@@ -1,8 +1,8 @@
 # How a frame ends after a compiled return: a frame object kept past the
 # return with its locals; finalizers that run at the return and walk the
 # frames, rebind a global the callee folded, replace the callee's
-# __code__, or raise; a function and code whose last references are the
-# returning frame's own; generators that return into for, next, list and
+# __code__, or raise; a frame object made and dropped in the call (its
+# count 1 at the return); generators that return into for, next, list and
 # sum; frames that begin a datastack chunk; and recursion that returns
 # near the limit, whose depth must come back whole every time.
 import sys
@@ -19,10 +19,15 @@ def keeps(x):
     return y + 1
 
 
+def peeks(x):
+    sys._getframe().f_lineno
+    return x - 1
+
+
 def frame_objects():
     t = 0
     for i in range(N):
-        t += keeps(i)
+        t += keeps(i) + peeks(i)
     print('frame objects', t, [sorted(f.f_locals.items()) for f in kept])
 
 
@@ -97,25 +102,6 @@ def finalizers():
     print('finalizers', a, b, c, d, sorted(set(seen)), len(unraised), set(unraised))
 
 
-LONE = 'def lone(x):\n    lone.__code__ = plain.__code__\n    return x + 1\n'
-
-
-def plain(x):
-    return x + 1
-
-
-def last_reference():
-    # Each lone runs a code of its own and replaces it while it runs: the
-    # returning frame holds the code's last reference.
-    t = 0
-    for i in range(N // 3):
-        ns = {'plain': plain}
-        exec(compile(LONE, 'lone', 'exec'), ns)
-        f = ns['lone']
-        t += f(i) + f(i)
-    print('last reference', t)
-
-
 def gen(n):
     for i in range(n):
         yield i
@@ -181,7 +167,6 @@ def recursion():
 
 frame_objects()
 finalizers()
-last_reference()
 generators()
 chunks()
 recursion()

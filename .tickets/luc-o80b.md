@@ -747,3 +747,9 @@ tools/jitcost row call: 372 against CALL_COST 420 (ratio 1.13), PASS, so the con
 Acceptance: every row is better or equal with padding on, in both modes. The slope fell about 5.5 a call without padding (the design's 3 + 5 = 8 was optimistic), and 0 to 1 with it.
 
 State: stages 3 and 4 committed on luc-entry3, not pushed; waiting for the adversarial review of stage 4. Stage 5 not started.
+
+## Follow-ups after the stage 4 review (2026-11-25, branch luc-entry4f)
+
+Latent bugs of the old `direct_done` that stage 4 removed (found by the review): it decremented the function a second time after `lu_frame_retire` had moved the frame's references into a frame object that observers held; and it stored `datastack_top = frame` for a frame that began its datastack chunk, where `lu_frame_drop` frees the chunk instead.
+
+Correction to the stage 4 lifetime argument: every code object has deferred reference counting (`code.c`, `lu_set_deferred` at creation), and a deferred object is freed only by a collection, so the frame's code reference never frees the code or its units at a return. A function the frame holds may be freed by its decrement (a nested, non-deferred function), and its release, like a frame object's retirement, may run finalizers, so Python, which may poll. The tail jump is needed for `left` (a stale unit's last activation stops the world and frees it) and because the C end runs with the activation already unlinked; ending the frame in C before the unlink would not need it. The `last_reference` case of `entry_frame_end` could not test what it said (the code stays alive while deferred) and is replaced by a frame object made and dropped in the call (count 1 at the return, the slow end).

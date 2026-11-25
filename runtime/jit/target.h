@@ -342,9 +342,11 @@ int lu_jit_direct_nargs(PyCodeObject *code);
 
 /* A unit's epilogue jumps here, its machine frame popped, with r its
    result, when it is stale or did not end its frame f itself (else f is
-   NULL): the activation it ended is counted (jit.c left), which may free
-   the unit; then f is ended (lu_frame_end, or lu_gen_finish), which may
-   free it too; then r to the unit's caller. */
+   NULL): the activation it ended is counted (jit.c left), which may stop
+   the world and free the unit; then f is ended (lu_frame_end, or
+   lu_gen_finish), whose releases may run Python, and so poll, with the
+   activation already unlinked; then r to the unit's caller. (Its code
+   is deferred: the frame's reference never frees it.) */
 int lu_jit_left(struct lu_unit *u, int r, PyThreadState *ts, struct lu_frame *f);
 int lu_jit_prologue(struct lu_frame *frame);
 /* The end of a unit a C caller or a direct call entered (r not
