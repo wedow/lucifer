@@ -800,3 +800,45 @@ adopted_yield(struct ctx *c)
     }
     return lu_ev_returned(c, v);
 }
+
+/* --- delegation in the root frame --- */
+
+/* GET_AWAITABLE, GET_YIELD_FROM_ITER: what the delegation's SEND resumes. */
+int
+lu_ev_delegate_iter(struct ctx *c)
+{
+    if (c->parent != NULL) {
+        lu_ev_side_exit(c, EXIT_SIDE);
+        return 0;
+    }
+    int awaitable = c->base == GET_AWAITABLE;
+    lu_v args[2] = { lu_ev_peek(c, 1), lu_ev_const_i(c, awaitable ? c->oparg
+                                                    : (c->code->co_flags & (CO_COROUTINE | CO_ITERABLE_COROUTINE)) != 0) };
+    lu_v w = lu_ev_helper(c, awaitable ? H_get_awaitable : H_get_yield_from_iter, 2, args, 1);
+    lu_ev_pop(c);
+    lu_ev_push(c, w);
+    return 0;
+}
+
+/* SEND (receiver, v -- receiver, value): the receiver runs nested under
+   the unit, which has published its frames for the call, to its next
+   yield or its return; a return leaves the delegation's loop. Every
+   suspension of the delegating frame is its YIELD_VALUE's, which writes
+   its frame as the interpreter's (yield_value), and the interpreter
+   resumes it inside the loop (RESUME after a delegation is not an
+   entry). Declined (the C stack is deep), the interpreter sends. */
+int
+lu_ev_send(struct ctx *c)
+{
+    if (c->parent != NULL) {
+        lu_ev_side_exit(c, EXIT_SIDE);
+        return 0;
+    }
+    lu_v recv = lu_ev_peek(c, 2), args[2] = { recv, lu_ev_peek(c, 1) };
+    lu_v w = lu_ev_helper(c, H_send, 2, args, 1);
+    lu_ev_pop(c);
+    lu_ev_push(c, w);
+    lu_v returned = lu_ev_helper(c, H_gen_done, 1, &recv, 0);
+    lu_ev_fork(c, returned, lu_ev_jump_target(SEND, c->oparg, c->next));
+    return 0;
+}

@@ -171,6 +171,11 @@ require that a count of the tier's does not grow with the iterations:
          consuming a generator expression, the first run of `yield from`
          and await: the resumes the interpreter runs (each resume enters
          compiled code).
+  delegation tests/kernel/jit_delegation_hot.py, whose hot code runs
+         `yield from` over a generator and a list, awaits coroutines that
+         return at once, and resumes an await chain that suspended once:
+         side exits and entries left to the interpreter. The delegating
+         frames' SEND runs in compiled code.
   consumers tests/kernel/jit_gen_consumers.py, whose hot code hands
          generators to the builtins that consume them and steps generators
          it did not make with next() and send(): side exits, entries left
@@ -411,6 +416,7 @@ GROWTH = {
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
     'gens': ('jit_gen_resumes.py', r'jit: generator resumes interpreted (\d+)', 0),
+    'delegation': ('jit_delegation_hot.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'consumers': ('jit_gen_consumers.py', r'jit: entries .* side (\d+)'
                   r'|jit: entries waited (\d+), units retired (\d+)', 0),
     'callees': ('jit_callee_calls.py', r'call_unknown (\d+) call_poly (\d+)', 0),

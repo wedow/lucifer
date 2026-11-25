@@ -88,7 +88,8 @@ struct lu_ev_scan {
 };
 
 /* Whether every instruction a call of the code reaches from its first
-   without an exception is compiled. */
+   without an exception is compiled in a frame taken in line (a
+   delegation is compiled in a unit's root frame only). */
 static int
 reach_supported(struct ctx *c, int n)
 {
@@ -101,7 +102,7 @@ reach_supported(struct ctx *c, int n)
             seen[pc] = 1;
             int base, oparg, op;
             int next = lu_ev_decode(c, pc, &base, &oparg, &op);
-            if (!lu_ev_op_supported(base)) {
+            if (!lu_ev_op_supported(base) || lu_ev_op_root_only(base)) {
                 ok = 0;
                 break;
             }

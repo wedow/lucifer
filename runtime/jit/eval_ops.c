@@ -123,10 +123,19 @@ lu_ev_op_supported(int base)
     case RETURN_GENERATOR: case YIELD_VALUE:    /* a generator made in line (eval_gen.c) */
     case RAISE_VARARGS: case RERAISE:   /* the interpreter raises: an exit, on a path that is leaving anyway */
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH:  /* a handler the unit's raise reached (eval_exc.c) */
+    case GET_AWAITABLE: case GET_YIELD_FROM_ITER: case SEND: case END_SEND:     /* in the root frame (eval_gen.c) */
         return 1;
     default:
         return 0;
     }
+}
+
+/* Whether the instruction is compiled only in the unit's root frame: a
+   delegation, whose receiver runs nested under the root's unit. */
+int
+lu_ev_op_root_only(int base)
+{
+    return base == GET_AWAITABLE || base == GET_YIELD_FROM_ITER || base == SEND || base == END_SEND;
 }
 
 /* The record of r when it is a virtual object of the kind that nothing
@@ -591,6 +600,16 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     case GET_ITER:
         return lu_ev_get_iter(c);
+    case GET_AWAITABLE: case GET_YIELD_FROM_ITER:
+        return lu_ev_delegate_iter(c);
+    case SEND:
+        return lu_ev_send(c);
+    case END_SEND:
+        v = lu_ev_peek(c, 1);
+        lu_ev_pop(c);
+        lu_ev_pop(c);
+        lu_ev_push(c, v);
+        return 0;
     case FOR_ITER:
         return lu_ev_for_iter(c);
     case CALL:

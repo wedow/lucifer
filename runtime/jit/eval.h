@@ -484,6 +484,7 @@ int lu_ev_jump_target(int op, int oparg, int next);
    reach without an exception; and one opcode (eval_ops.c). */
 int lu_ev_supported(struct gctx *g, PyCodeObject *code);
 int lu_ev_op_supported(int base);
+int lu_ev_op_root_only(int base);
 void lu_ev_hint(struct gctx *g, PyCodeObject *code, int pc, uint64_t place, int kind);
 int lu_ev_hinted(struct gctx *g, PyCodeObject *code, int pc, uint64_t place);
 
@@ -565,6 +566,12 @@ int lu_ev_gen_call(struct ctx *c, lu_v it, int nops);
 int lu_ev_gen_yield(struct ctx *c);
 void lu_ev_gen_finish(struct ctx *c);
 lu_v lu_ev_gen_real(struct ctx *c, struct lu_vobj *o);
+/* Delegation in the root frame: GET_AWAITABLE and GET_YIELD_FROM_ITER
+   make the receiver; SEND resumes it under the unit (a generator or
+   coroutine as the interpreter resumes one, anything else through the
+   kernel's send) and leaves the delegation's loop when it returns. */
+int lu_ev_delegate_iter(struct ctx *c);
+int lu_ev_send(struct ctx *c);
 /* The code units a resume point (a generator's GEN_PC) may be: n of
    them in *pcs. A loop header's phi of one (generator o's) is registered
    with its place;
