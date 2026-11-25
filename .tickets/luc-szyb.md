@@ -526,3 +526,15 @@ Only one build of the table programs reaches 8k IR: tomli's key_value_rule@3 at 
 
 - Checks 4 (replay), 6 (weights: needs the branch-word predictor, which is stage 2 code), 7 (evaluator share by unit size: needs per-build profiles), 9 (loops peeled and refused: needs evaluator counters).
 - Check 8 beyond the single build above.
+
+### Stage 0 state (2026-11-25)
+
+Done: checks 5, 3, 1 and 2; 8 in part. Not done: 4, 6, 7, 9. The wip instrumentation is a separate commit on luc-site0 that does not land. The scripts stay local.
+- **Stage 1 (sites, not levels) survives.**
+  - Check 2 shows P is the right order for small plain and method callees.
+  - Check 3 shows that spending the same allowance by counted density gains on every row but pyflakes (+0.1%).
+  - Check 1 shows that 46-89% of in-line IR in the named units runs no calls.
+  - The site key must change, beyond gaining the callee: 4-43% of sites share a key within one build.
+- **Stage 2 (the fold) is at risk and must be redesigned before it is built.** On three of ten hot sites, taking the call in line loses, and own-frame `P + F` with `F >= 0` cannot predict that. The value of a site must carry its subtree's fate. Repeat check 2 with the estimate computed.
+- **Stage 3 cannot be judged yet.** It needs checks 4 and 6. Its fallback (check 3's arm) is shown to work with oracle counts.
+- **Ruling 2 (acceptance metric) is needed for django_template only.** Pre's lead there is growth unpaid by -n 3: its extra compile is 665M against a run lead of 56M a value. Richards' and genshi's leads are paid inside the benchmark's values (check 5).
