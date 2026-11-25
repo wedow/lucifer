@@ -14,9 +14,9 @@ parent: luc-ia92
 Item 4 of luc-ia92. The question "which attribute protocol does this type use" is answered separately in about twenty places (the specializer, the generic interpreter paths, the native C lookups, the kernel's Python hooks, the tier's folds), and the copies disagree: classes over an inherited C generic slot get no specialized attribute forms; the kernel hooks grew until a hot unit hit its inline budget (tomli_loads +10.6%); the design below also names probable bugs D2, D4, D6 and D7 found by reading, each needing its failing test before the stage that fixes it. One per-type word, decided with the slot in one function, read by every site. Stages 1 to 5 below land separately; stage 1 introduces the word, switches the specializer and makes every other site check its own answer against the word, so disagreements surface in the test lanes before any other site is switched. Each stage gets a read-only review; stages touching slots, versions or threads an adversarial one.
 
 
-## State (2026-11-25, stage C)
+## State (2026-11-25, stages 3 and 4)
 
-Stages 1 and 2 and their review fixes landed. Stage C (dict hint forms for a dict at `tp_dictoffset`) is built and gated on branch luc-attrword, not pushed: 28e8561b tests, 75110ccb runtime, then the ticket note. Next: stages 3-5; luc-deth (C getters run twice) belongs with stage 5.
+Stages 1, 2 and C landed. Stages 3 and 4 are built and gated on branch luc-attr3, not pushed: e2ca034d tests, 71ec3645 kernel hooks on the word (stage 3); f8ae4d74 tests, fa8a9d63 tier sites on the word (stage 4); then this note. No LU_ATTR_CHECK site remains, so the check is deleted. Next: stage 5 (thunks run the native pass; generic C-API functions call the generic body, D4) with luc-deth.
 
 ## Design (2026-11-25)
 
@@ -470,3 +470,25 @@ Each reproducer run against the oracle on master (7260c37d) and on stage 2 befor
 | DeltaBlue | 70.40G | 70.40G | 24.80G | 24.80G |
 
   Instructions, pinned, two runs per arm, minimum; master 7c15a251 (stage 2's fixes landed). The estimate was about 2% JIT off; half of the hint-able loads come from C, which the forms do not reach.
+
+### 2026-11-25 stages 3 and 4
+
+- Stage 3: `attr_way(tp, which)` (`prim/type.c`, pure; which 0/1/2 for read/store/delete) returns the word's field; compiled code folds it beside `type_lookup` in `eval_prims.c`, read between `lu_ev_class_as_of` and `lu_ev_class_relied`. `getattr_hook` switches on it (GENERIC, TYPE, MODULE; the rest go to `_hooked_getattr`, the `__getattribute__`/`__getattr__` tail with call_special); `lookup_attr` keeps its three suppressed branches and delegates only that tail (it inlined the whole hook again before, so with an unlearned type each lookup body was copied twice); `setattr_hook` and `delattr_hook` are one test each; isinstance's negative takes read GENERIC or GENERIC_GETATTR beside the `__class__` lookup. `generic_wrapper` (primitive and check), the ladder and the identity slots `type_getattribute`, `module_getattribute`, `_object_getattribute`, `_object_setattr`, `_object_delattr` are gone; `type_getattr` and `module_getattr` are bound before type's and module's classes exist, since the word can say TYPE or MODULE as soon as their `__getattribute__` is in place.
+- D6 is real and fixed: `ready.Bare` (a static type with no instance dict naming object's attribute functions as its slots) and a class over it got "has no attribute 'nope'" where CPython says "... and no __dict__ for setting new attributes" (`ready_run`, fails on master: 3 lines). `generic_setattr` now asks store and delete GENERIC, which is what CPython's `tp_setattro == PyObject_GenericSetAttr` means here.
+- Question 5: CPython specializes a class attribute load with `LOAD_ATTR_CLASS_WITH_METACLASS_CHECK` whenever the metaclass is mutable, and `__class__` assignment on a class needs both metaclasses mutable, so the guard on the current metaclass's version always catches the change; Lucifer's interpreter does the same (`ceval.c` op_LOAD_ATTR_CLASS), and a folded class attribute relies on the metaclass's version, which `set_class` takes back. New cases (pass on master and after): a metaclass with a data descriptor of the name, and one with only `__getattr__`, assigned under hot loads and back; isinstance negatives on GENERIC_GETATTR, MODULE, a class, copied wrappers and a metaclass `__getattr__`; copied `__setattr__`/`__delattr__` with `__getattr__`, and `__getattr__` gained and lost under a copied `__getattribute__`.
+- Inlined size: the getattr probe (getattr on a class, a module and an instance, hasattr and getattr with a default; 10^6 iterations): steady unit 297 -> 290 live IR (`getattr_hook` 22 -> 15); its first build, before the classes are learned, 1,058 -> 1,134 built IR: master folded the type branch away from the object's kind (`kind(obj, 'type')`), the word cannot fold before the class is learned. tomli_loads (`-l 1 -w 1 -n 3`, event log): `key_value_rule@3` at grown 4 is 15,078 built IR against 15,821 on master, 10,578 live against 11,191, so it is still near the 16,000 budget (10,389 at ad1eb461): the kernel attribute path in it (reached from isinstance's fallback, `_instancecheck` -> `lookup_attr`) is 996 live IR on master, and the rest of the growth since ad1eb461 is not the hooks. pyflakes JIT on: 187,908 -> 178,996 IR built, 4,179 -> 4,038 calls inlined, code 23.38 -> 22.29 MB.
+- Stage 4: `instance_kind` (read and store GENERIC, bracketed by the class's version), `class_attribute` (metaclass read TYPE), `known_subclass` (slot ours and read GENERIC or GENERIC_GETATTR, beside the `__class__` lookup) and the pic's property store (slot ours and store GENERIC; it now also takes classes whose delete alone is their own, and classes over a C generic slot) read the word. They were the last checked sites: `LU_ATTR_CHECK`, `lu_attr_check_begin`/`_end`, `attr_current` and `has_gap` are deleted. Test: property stores at a hot site on such classes, `__setattr__` gained and lost (passes before and after).
+- Gate (each stage, in its own worktree built with plain `make -j4`): attr_protocol and 72 attribute, descriptor, type, class, super, property, module and call neighbours (incl. jit_direct_calls, jit_class_callables, jit_calls) in jit-off, plain, jit, jit-deopt; 14 thread programs in handoff, three runs; check-capi-ext, all; full tools/jitcheck: pass (capi_generic_getattr XFAIL, D4).
+
+| row | JIT off, master | stage 3 | stage 4 | JIT on, master | stage 3 | stage 4 |
+|---|---|---|---|---|---|---|
+| getattr probe, per iteration | 15,473 | 14,831 (-4.1%) | 14,831 | 2,828 | 2,691 (-4.8%) | 2,691 |
+| -c pass | 113.9M | 113.2M (-0.7%) | 113.1M | 130.5M | 129.7M (-0.6%) | 129.7M |
+| stdlib imports | 1139.4M | 1122.7M (-1.5%) | 1131.7M (-0.7%) | 1346.2M | 1331.8M (-1.1%) | 1331.6M |
+| pyflakes | 8.70G | 8.61G (-1.1%) | 8.61G | 8.05G | 7.81G (-3.0%) | 7.81G (-3.1%) |
+| tomli_loads | 614.85G | 612.91G (-0.3%) | 612.88G | 103.47G | 103.51G (+0.0%) | 103.51G |
+| Richards | 400.02G | 400.02G | 400.02G | 55.53G | 55.53G | 55.53G |
+| DeltaBlue | 70.51G | 70.44G (-0.1%) | 70.42G | 24.69G | 24.74G (+0.2%) | 24.67G (-0.1%) |
+
+  Instructions, pinned, minimum of two runs per arm (DeltaBlue JIT on six), master 93c28599. DeltaBlue JIT on takes a few discrete values per arm (the tier's decisions vary run to run): medians 24.745G, 24.808G (+0.25%), 24.673G. tomli_loads is flat: its hot unit shrank by 5% but stays near the budget.
+
