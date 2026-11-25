@@ -418,6 +418,39 @@ static PyTypeObject Bare_Type = {
     .tp_members = bare_members,
 };
 
+/* ready.OwnGet: a static type with its own tp_getattro, which answers
+   "known" and otherwise does generic access, and a __getattr__ method that
+   the slot never calls. */
+static PyObject *
+ownget_getattro(PyObject *self, PyObject *name)
+{
+    if (PyUnicode_Check(name) && PyUnicode_EqualToUTF8(name, "known")) {
+        return PyLong_FromLong(1);
+    }
+    return PyObject_GenericGetAttr(self, name);
+}
+
+static PyObject *
+ownget_getattr(PyObject *self, PyObject *name)
+{
+    return PyUnicode_FromString("fallback");
+}
+
+static PyMethodDef ownget_methods[] = {
+    { "__getattr__", ownget_getattr, METH_O, NULL },
+    { NULL }
+};
+
+static PyTypeObject OwnGet_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.OwnGet",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_new = PyType_GenericNew,
+    .tp_getattro = ownget_getattro,
+    .tp_methods = ownget_methods,
+};
+
 /* ready.Vec3 inherits from Vec and adds a field and nothing else. */
 typedef struct {
     Vec base;
@@ -1490,7 +1523,8 @@ PyInit_ready(void)
         || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
         || PyType_Ready(&Unhashable_Type) < 0
         || PyType_Ready(&CmpOnly_Type) < 0 || PyType_Ready(&OldAttr_Type) < 0 || PyType_Ready(&DocSig_Type) < 0
-        || PyType_Ready(&OldAttrSub_Type) < 0 || PyType_Ready(&Dicted_Type) < 0 || PyType_Ready(&Bare_Type) < 0) {
+        || PyType_Ready(&OldAttrSub_Type) < 0 || PyType_Ready(&Dicted_Type) < 0 || PyType_Ready(&Bare_Type) < 0
+        || PyType_Ready(&OwnGet_Type) < 0) {
         return NULL;
     }
     BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
@@ -1513,6 +1547,7 @@ PyInit_ready(void)
         || PyModule_AddObjectRef(m, "Vec3", (PyObject *)&Vec3_Type) < 0
         || PyModule_AddObjectRef(m, "Dicted", (PyObject *)&Dicted_Type) < 0
         || PyModule_AddObjectRef(m, "Bare", (PyObject *)&Bare_Type) < 0
+        || PyModule_AddObjectRef(m, "OwnGet", (PyObject *)&OwnGet_Type) < 0
         || PyModule_AddObjectRef(m, "Locked", (PyObject *)&Locked_Type) < 0
         || PyModule_AddObjectRef(m, "Counter", (PyObject *)&Counter_Type) < 0
         || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0

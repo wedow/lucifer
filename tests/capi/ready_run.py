@@ -533,3 +533,29 @@ BareSub.__delattr__ = BareDel.__delattr__
 print('no dict hook gained', hot(bare_store, BareSub()))
 del BareSub.__delattr__
 print('no dict hook lost', hot(bare_store, BareSub()))
+
+# A static type with its own getattro and a __getattr__ method: getattr,
+# getattr with a default and hasattr call the slot alone, which never asks
+# __getattr__; a Python class over it has the hook slot, which does.
+from ready import OwnGet
+
+
+class OwnGetSub(OwnGet):
+    pass
+
+
+def own_get(o):
+    return getattr(o, 'x')
+
+
+def own_default(o):
+    return getattr(o, 'x', 0), hasattr(o, 'x'), getattr(o, 'known', 0)
+
+
+def own_load(o):
+    return o.x
+
+
+for cls in (OwnGet, OwnGetSub):
+    o = cls()
+    print('own getattro', cls.__name__, hot(own_get, o), hot(own_default, o), hot(own_load, o))
