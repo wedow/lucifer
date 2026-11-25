@@ -107,18 +107,17 @@ code_dealloc(PyObject *op)
     lu_object_free(op);
 }
 
-/* What a code object holds that can be in a cycle: co_consts, and what its
-   compiled units hold (a function's globals hold the function, which holds
-   the code). */
+/* What a code object holds that can be in a cycle: co_consts. What its
+   compiled units hold the collector counts apart (lu_jit_traverse). */
 static int
 code_traverse(PyObject *op, visitproc visit, void *arg)
 {
     Py_VISIT(((PyCodeObject *)op)->co_consts);
-    return lu_jit_code_traverse((PyCodeObject *)op, visit, arg);
+    return 0;
 }
 
-/* A code in a cycle the collector breaks lets its units go (their
-   constants hold the cycle); its JIT state stays until dealloc. */
+/* A code in a cycle the collector breaks lets its units go; its JIT state
+   stays until dealloc. */
 static int
 code_clear(PyObject *op)
 {

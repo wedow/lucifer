@@ -38,7 +38,12 @@
       code object's caches forget the garbage before the world restarts
       (lu_specialize_forget), so a cache never names freed memory. A
       shutdown collection ends deferral for all, so the caches forget
-      everything they name. */
+      everything they name.
+   8. Compiled units and profiles hold what they learned weakly: their
+      references count as references between tracked objects, but nothing
+      is reachable through them. A unit no activation is in dies with the
+      first object it holds that is garbage, and is freed before the
+      finalizers run (lu_jit_collect). */
 
 #include "interp/exceptions.h"
 #include "interp/image.h"
@@ -73,6 +78,7 @@ struct collection_state {
     struct worklist legacy_finalizers;  /* garbage with tp_del: uncollectable */
     struct worklist wrcb_to_call;       /* weakrefs whose callbacks run */
     struct worklist objs_to_decref;     /* dead objects to release once restarted */
+    struct lu_unit *dead_units;         /* compiled units to free once restarted (invariant 8) */
 };
 
 #define WORKSTACK_FOR_EACH(stack, op) \
@@ -372,6 +378,16 @@ mark_reachable(PyObject *op)
     free(stack.items);
 }
 
+/* A compiled unit that cannot die now keeps what it holds (invariant 8). */
+static void
+keep_reachable(PyObject *op)
+{
+    if (gc_is_unreachable(op)) {
+        op->ob_gc_bits &= ~LU_GC_UNREACHABLE;
+        mark_reachable(op);
+    }
+}
+
 /* Objects held from outside, and what they reach, are reachable. */
 static bool
 mark_heap_visitor(const mi_heap_t *heap, const mi_heap_area_t *area, void *block, size_t block_size,
@@ -527,7 +543,9 @@ deduce_unreachable_heap(struct collection_state *state)
     struct _is *interp = state->interp;
     mark_alive_from_roots(interp);
     visit_heaps(interp, update_refs, &state->base);
+    lu_jit_traverse(visit_decref, NULL);
     visit_heaps(interp, mark_heap_visitor, &state->base);
+    state->dead_units = lu_jit_collect(interp, gc_is_unreachable, keep_reachable);
     visit_heaps(interp, scan_heap_visitor, &state->base);
     if (state->legacy_finalizers.head) {
         move_legacy_finalizer_reachable(state);
@@ -760,7 +778,6 @@ collect_internal(struct collection_state *state, int generation)
         }
     }
     clear_weakrefs(state, 1);
-    struct lu_unit *dead_units = lu_jit_reclaim(interp);
     start_the_world(interp);
 
     /* Callbacks and finalizers run with the world going, so that a lock one
@@ -768,7 +785,7 @@ collect_internal(struct collection_state *state, int generation)
     while ((op = worklist_pop(&state->objs_to_decref)) != NULL) {
         Py_DECREF(op);
     }
-    lu_jit_reclaim_free(dead_units);
+    lu_jit_reclaim_free(state->dead_units);
     call_weakref_callbacks(state);
     finalize_garbage(state);
 

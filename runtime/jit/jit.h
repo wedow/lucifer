@@ -398,13 +398,20 @@ void lu_jit_code_free(PyCodeObject *code);
    this one is in the dependency buckets until its own clear, and an
    invalidation may still mark this code's sites. */
 void lu_jit_code_clear(PyCodeObject *code);
-/* Visits what the code's units hold (their constants, among them the
-   globals and builtins they were built for), for the collector. */
-int lu_jit_code_traverse(PyCodeObject *code, visitproc visit, void *arg);
+/* Visits what every code's units and profiles hold (the units' constants,
+   the types and classes the profiles met), with the world stopped: the
+   collector counts these references but reaches nothing through them. */
+void lu_jit_traverse(visitproc visit, void *arg);
 
 /* A collection frees dead units (runtime/jit/jit.c): with the world
    stopped, it takes those no activation is in off every list a thread
-   reads, and frees them once the world runs again. */
+   reads, and frees them once the world runs again. lu_jit_collect first
+   lets go of what the program dropped: a unit that holds an object
+   `unreachable` names dies, and a profile forgets it; a unit an activation
+   is in, and the units and profiles of a code being compiled, `keep` what
+   they hold instead. lu_jit_reclaim does the rest alone. */
+struct lu_unit *lu_jit_collect(PyInterpreterState *interp, int (*unreachable)(PyObject *),
+                               void (*keep)(PyObject *));
 struct lu_unit *lu_jit_reclaim(PyInterpreterState *interp);
 void lu_jit_reclaim_free(struct lu_unit *units);
 

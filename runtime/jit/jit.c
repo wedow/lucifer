@@ -123,7 +123,13 @@ struct lu_jit_code {
     uint64_t print;                     /* LUCIFER_JIT_DEBUG: its last build's fingerprint */
     uint64_t *hot;                      /* a root's: call sites its units called out of line at often */
     int nhot;
+    struct lu_jit_code *next, **pprev;  /* the codes with JIT state (below) */
 };
+
+/* Every code's JIT state, for the collector (lu_jit_traverse, lu_jit_collect).
+   The lock is a pthread mutex no holder detaches under, so a stopped world
+   finds it free. A code leaves the list before its dealloc frees anything. */
+static struct { pthread_mutex_t lock; struct lu_jit_code *head; } states = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
 
 struct lu_prof {
@@ -419,6 +425,14 @@ state_for(PyCodeObject *code)
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,
                                         __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {
+            pthread_mutex_lock(&states.lock);
+            jc->next = states.head;
+            jc->pprev = &states.head;
+            if (states.head != NULL) {
+                states.head->pprev = &jc->next;
+            }
+            states.head = jc;
+            pthread_mutex_unlock(&states.lock);
             return jc;
         }
     }
@@ -885,9 +899,15 @@ note_failure(const char *why)
 /* Whether a dict change killed a unit since the last release (lu_jit_release). */
 static int release_due;
 
-/* The dead units not yet freed, the count of them, and of those freed. */
-static struct { pthread_mutex_t lock; struct lu_unit *head; unsigned long n, freed; } dying = {
-    .lock = PTHREAD_MUTEX_INITIALIZER };
+/* The dead units not yet freed, the count of them, and of those freed;
+   and what profiles forgot in a collection, released with its units. */
+static struct {
+    pthread_mutex_t lock;
+    struct lu_unit *head;
+    unsigned long n, freed;
+    PyObject **forgot;
+    int nforgot, capforgot;
+} dying = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
 static void
 dying_unlink(struct lu_unit *u)
@@ -1003,17 +1023,79 @@ free_unit(struct lu_unit *u)
    The dying lock is a pthread mutex: a holder never detaches, so none is
    stopped while it holds the lock. */
 
-struct lu_unit *
-lu_jit_reclaim(PyInterpreterState *interp)
+/* Marks (on) or unmarks the units some task's activation is in. */
+static void
+hold(PyInterpreterState *interp, int on)
 {
-    if (__atomic_load_n(&dying.head, __ATOMIC_RELAXED) == NULL) {
+    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
+        for (struct lu_jit_act *a = ((struct lu_task *)ts)->jit_act; a != NULL; a = a->outer) {
+            a->unit->held = on ? a->unit->held + 1 : 0;
+        }
+    }
+}
+
+/* What a collection does to the code's units and profiles (jit.h): with
+   keeping, those that cannot let go keep what they hold; then the others
+   let go of the garbage. Keeping first, so that nothing another keeps
+   alive kills a unit. */
+static void
+weaken(struct lu_jit_code *jc, int keeping, int (*unreachable)(PyObject *), void (*keep)(PyObject *))
+{
+    int compiling = __atomic_load_n(&jc->compiling, __ATOMIC_RELAXED);
+    if (keeping == compiling) {
+        for (struct lu_prof *p = jc->profs; p != NULL; p = p->next) {
+            int k = 0;
+            for (int i = 0; i < p->n; i++) {
+                if (keeping || !unreachable(p->met[i])) {
+                    keep(p->met[i]);
+                    p->met[k++] = p->met[i];
+                }
+                else {
+                    pthread_mutex_lock(&dying.lock);
+                    if (dying.nforgot == dying.capforgot) {
+                        dying.capforgot = dying.capforgot ? 2 * dying.capforgot : 16;
+                        dying.forgot = realloc(dying.forgot, sizeof(PyObject *) * (size_t)dying.capforgot);
+                    }
+                    dying.forgot[dying.nforgot++] = p->met[i];
+                    pthread_mutex_unlock(&dying.lock);
+                }
+            }
+            __atomic_store_n(&p->n, k, __ATOMIC_RELEASE);
+        }
+    }
+    for (struct lu_unit *u = jc->units; u != NULL; u = u->next) {
+        int keeps = compiling || u->held;
+        for (int i = 0; i < u->nconsts && keeping == keeps; i++) {
+            PyObject *o = u->consts[i];
+            if (o != NULL && unreachable(o)) {
+                if (keeps) {
+                    keep(o);
+                }
+                else {
+                    kill(jc, u, "collected", u->code, u->entry_pc, 0, 0);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+struct lu_unit *
+lu_jit_collect(PyInterpreterState *interp, int (*unreachable)(PyObject *), void (*keep)(PyObject *))
+{
+    if (unreachable == NULL && __atomic_load_n(&dying.head, __ATOMIC_RELAXED) == NULL) {
         return NULL;
     }
     pthread_mutex_lock(&interp->tasks_lock.mutex);
-    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
-        for (struct lu_jit_act *a = ((struct lu_task *)ts)->jit_act; a != NULL; a = a->outer) {
-            a->unit->held++;
+    hold(interp, 1);
+    if (unreachable != NULL) {
+        pthread_mutex_lock(&states.lock);
+        for (int keeping = 1; keeping >= 0; keeping--) {
+            for (struct lu_jit_code *jc = states.head; jc != NULL; jc = jc->next) {
+                weaken(jc, keeping, unreachable, keep);
+            }
         }
+        pthread_mutex_unlock(&states.lock);
     }
     pthread_mutex_lock(&dying.lock);
     struct lu_unit *freed = NULL;
@@ -1037,18 +1119,30 @@ lu_jit_reclaim(PyInterpreterState *interp)
         freed = u;
     }
     pthread_mutex_unlock(&dying.lock);
-    for (PyThreadState *ts = interp->tasks; ts != NULL; ts = ts->next) {
-        for (struct lu_jit_act *a = ((struct lu_task *)ts)->jit_act; a != NULL; a = a->outer) {
-            a->unit->held = 0;
-        }
-    }
+    hold(interp, 0);
     pthread_mutex_unlock(&interp->tasks_lock.mutex);
     return freed;
+}
+
+struct lu_unit *
+lu_jit_reclaim(PyInterpreterState *interp)
+{
+    return lu_jit_collect(interp, NULL, NULL);
 }
 
 void
 lu_jit_reclaim_free(struct lu_unit *units)
 {
+    pthread_mutex_lock(&dying.lock);
+    PyObject **forgot = dying.forgot;
+    int n = dying.nforgot;
+    dying.forgot = NULL;
+    dying.nforgot = dying.capforgot = 0;
+    pthread_mutex_unlock(&dying.lock);
+    for (int i = 0; i < n; i++) {
+        Py_DECREF(forgot[i]);
+    }
+    free(forgot);
     for (struct lu_unit *u = units, *next; u != NULL; u = next) {
         next = u->next;
         free_unit(u);
@@ -2491,20 +2585,25 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
     }
 }
 
-/* Run with the world stopped (or by a thread that keeps the units from
-   being freed: it polls nowhere while it walks): a unit leaves its code's
-   list only in a collection's stop (lu_jit_reclaim) or in code_dealloc. */
-int
-lu_jit_code_traverse(PyCodeObject *code, visitproc visit, void *arg)
+void
+lu_jit_traverse(visitproc visit, void *arg)
 {
-    struct lu_jit_code *jc = state_of(code);
-    for (struct lu_unit *u = jc != NULL ? __atomic_load_n(&jc->units, __ATOMIC_ACQUIRE) : NULL; u != NULL;
-         u = u->next) {
-        for (int i = 0; i < u->nconsts; i++) {
-            Py_VISIT(u->consts[i]);
+    pthread_mutex_lock(&states.lock);
+    for (struct lu_jit_code *jc = states.head; jc != NULL; jc = jc->next) {
+        for (struct lu_unit *u = jc->units; u != NULL; u = u->next) {
+            for (int i = 0; i < u->nconsts; i++) {
+                if (u->consts[i] != NULL) {
+                    visit(u->consts[i], arg);
+                }
+            }
+        }
+        for (struct lu_prof *p = jc->profs; p != NULL; p = p->next) {
+            for (int i = 0; i < p->n; i++) {
+                visit(p->met[i], arg);
+            }
         }
     }
-    return 0;
+    pthread_mutex_unlock(&states.lock);
 }
 
 /* Takes the code's units off its list and the dying list under the dying
@@ -2545,6 +2644,12 @@ lu_jit_code_free(PyCodeObject *code)
     if (jc == NULL) {
         return;
     }
+    pthread_mutex_lock(&states.lock);
+    *jc->pprev = jc->next;
+    if (jc->next != NULL) {
+        jc->next->pprev = jc->pprev;
+    }
+    pthread_mutex_unlock(&states.lock);
     free_units(jc);
     for (int i = 0; jc->pics != NULL && i < jc->ncode; i++) {
         free(jc->pics[i]);
