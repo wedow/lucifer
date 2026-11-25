@@ -753,3 +753,44 @@ State: stages 3 and 4 committed on luc-entry3, not pushed; waiting for the adver
 Latent bugs of the old `direct_done` that stage 4 removed (found by the review): it decremented the function a second time after `lu_frame_retire` had moved the frame's references into a frame object that observers held; and it stored `datastack_top = frame` for a frame that began its datastack chunk, where `lu_frame_drop` frees the chunk instead.
 
 Correction to the stage 4 lifetime argument: every code object has deferred reference counting (`code.c`, `lu_set_deferred` at creation), and a deferred object is freed only by a collection, so the frame's code reference never frees the code or its units at a return. A function the frame holds may be freed by its decrement (a nested, non-deferred function), and its release, like a frame object's retirement, may run finalizers, so Python, which may poll. The tail jump is needed for `left` (a stale unit's last activation stops the world and frees it) and because the C end runs with the activation already unlinked; ending the frame in C before the unlink would not need it. The `last_reference` case of `entry_frame_end` could not test what it said (the code stays alive while deferred) and is replaced by a frame object made and dropped in the call (count 1 at the return, the slow end).
+
+Low 1 (the eval loop storing the caller as current after a compiled return): built, gated, and dropped. With that one store in `jit_enter`'s RETURN case, `-c pass` read +1.81% (on) and +0.26% (always), and pyflakes +0.60% (on): the eval loop's machine code moved, not the store's own cost. Without it the same rows are flat (below). OP_UNLINK's store from `frame->previous` agrees with `caller` for every interpreter entry: an interpreted caller has no inlined frames for a walker to replace.
+
+Cross-thread frame end. Firing check (`frames ended in C` against compiled returns, master with the pair):
+- Single-thread runs barely use the C end: Richards 0 (on) and 45 (always) of 6.7M returns; DeltaBlue 4 and 71.
+- Workers use it on nearly every return. Richards loaded on the main thread and run on a worker: 6.69M of about 6.69M under on, 6.95M under always. DeltaBlue the same way: 1.10M and 1.42M C ends. threads_kill_in_chains: every return.
+- The cause: `spare_ref` accepted only this thread's objects, and functions and codes the main thread made are owned by it.
+- The web rows' in-process routes were not run.
+
+Built (`frame_end`, emit.c): another thread's function or code with deferred reference counting gives its reference back with `lock sub` on the shared count, on a cold path that re-checks both objects before either moves.
+- Which objects qualify: codes (every code is deferred at creation) and functions deferred at creation (top-level functions and methods, `function.c`).
+- Why it is safe: the shared count carries LU_REF_DEFERRED, so one reference less can reach neither zero (the queue) nor the merge. Only a collection, with the world stopped, takes the bias off.
+- Excluded: immortals (image objects have the deferred bit and a zero shared count) are tested first and left alone. A non-deferred function of another thread (a closure made there) still goes to C.
+- This thread's objects keep the plain path, whose instructions are unchanged: the owner test now comes before the count test.
+
+Tests: jitcheck lane `xreturns` (jit_worker_returns.py: recursion and methods on a worker, defined on the main thread). It fails before (39,990 C ends at 20,000 iterations, 79,990 at 40,000) and passes after (41, 41). threads_worker_returns: four workers return from main-thread functions while one thread rebinds the global they read and another drops and replaces a closure they call, collecting each time. The reviewer's cheap gaps: `entry_frame_end` gains a frame object made and dropped in the call (count 1 at the return, the slow end); `threads_serial_decline` gains a serial unit's return whose frame C ends.
+
+Gate (the change with Low 1 still in; dropping it removes one store): 96 programs in plain, jit-off, jit and jit-deopt (master's XFAILs); 56 threads_ programs in handoff and handoff:3; 16 in gc:1; jitcheck 0 failing, `xreturns` PASS.
+
+Numbers, instructions:u, pinned, two runs per arm (DeltaBlue the minimum), master (with the pair) against this branch without Low 1. Rows ending -t load the AWFY benchmark on the main thread and run it on a worker:
+
+| row | mode | master | branch | change |
+|---|---|---|---|---|
+| -c pass | on | 130.13M | 130.20M | +0.06% |
+| -c pass | always | 846.57M | 847.84M | +0.15% |
+| pyflakes | on | 7.748G | 7.749G | +0.00% |
+| pyflakes | always | 14.024G | 14.034G | +0.07% |
+| DeltaBlue | on | 5.4109G | 5.4100G | -0.02% |
+| DeltaBlue | always | 6.3187G | 6.3180G | -0.01% |
+| Richards-t | on | 12.691G | 12.306G | -3.03% |
+| Richards-t | always | 13.886G | 13.484G | -2.89% |
+| DeltaBlue-t | on | 10.711G | 10.628G | -0.77% |
+| DeltaBlue-t | always | 11.205G | 11.114G | -0.81% |
+
+Richards on the main thread, measured with Low 1 still in: +0.02% (on), +0.00% (always).
+
+Cost per iteration of jit_worker_returns (seven direct returns), from the 400,000 - 200,000 difference under always:
+- main thread: 1,318.8 (master) and 1,318.0 (branch);
+- worker: 1,491.1 (master, C ends) and 1,351.1 (branch).
+
+So a return through the locked path costs about 5 instructions more than the owner's and about 20 fewer than the C end. Cycles were not measured.
