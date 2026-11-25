@@ -538,3 +538,150 @@ Done: checks 5, 3, 1 and 2; 8 in part. Not done: 4, 6, 7, 9. The wip instrumenta
 - **Stage 2 (the fold) is at risk and must be redesigned before it is built.** On three of ten hot sites, taking the call in line loses, and own-frame `P + F` with `F >= 0` cannot predict that. The value of a site must carry its subtree's fate. Repeat check 2 with the estimate computed.
 - **Stage 3 cannot be judged yet.** It needs checks 4 and 6. Its fallback (check 3's arm) is shown to work with oracle counts.
 - **Ruling 2 (acceptance metric) is needed for django_template only.** Pre's lead there is growth unpaid by -n 3: its extra compile is 665M against a run lead of 56M a value. Richards' and genshi's leads are paid inside the benchmark's values (check 5).
+
+## Revision 1 (2026-11-25, after stage 0)
+
+Read from origin/master at 1e1497e0, which the local ref already held, so I did not fetch. `runtime/jit/jit.c` moved since the design's tree: `hot_exit` is now at 2120-2183, `unit_losses` and `out_cost` at 2068-2105. Nothing was built or run. Predictions are arithmetic on stage 0's tables with `n(6500 + 5n)`.
+
+## R0. What changes
+
+- **Cut:** the fold, trials, records per signature, the expected-priced-IR pass, the price rule that replaced the allowance, and the shared rebuild ledger. These were old stages 2, 3 and 4.
+- **Kept:** stage 1 (sites, not levels; exact arming), with two additions from stage 0: a path key, and a bought site built as its callee's own unit is.
+- **New stage 2:** do not build what the profile does not show running. It is gated on one offline check (R2).
+- **Why:** check 3's gain is hot sites coming in, and out-of-line sites already have exact in-context counters. Check 2 shows protocol alone is the right order for small callees, and that no non-negative fold can predict three sites in ten.
+- `INLINE_BUDGET` stays as the first build's allowance. It stops being final, and with cold sites out it should rarely bind. Removing it is deferred behind a measured need (R6).
+
+## R1. Stage 0 against the design
+
+| Design claim | Stage 0 | Consequence |
+|---|---|---|
+| First builds take IR on no evidence | Confirmed: 46-89% of in-line IR in the named units and 25-68% in the cli top-20 is at sites never called | Stage 2 |
+| A site left out for budget should be bought by its count | Supported: the hot sites out are small callees (54-480 IR), and protocol is within 0.5-2 of the saving on 5 of 10 | Stage 1 unchanged in substance |
+| Value is protocol plus a non-negative fold | Cannot hold on 3 of 10 sites (losses of 770 to 3,764 a call) | Fold dropped; R4 |
+| Pre's lead is unpaid growth on all three rows | Django only | R5, R7 |
+| The site key needs only the callee added | No: 4-43% of sites share a key in one build | R3 |
+
+## R2. Not building the cold half, with build-time counts only
+
+What exists at build time:
+- **The instruction's own feedback word.** Zero means the interpreter never ran it, in any context. That is the CALL bit (`runtime/jit/jit.h:164-172`), the operator kinds word, and LOAD_ATTR's counter (`runtime/jit/eval_attr.c:126-129`). Today it is read only for the root frame's put-off (`runtime/jit/eval_arith.c:7-18`, `jit.c:1335`), and a never-run nested site is taken in line like any other.
+- **Branch words.** A direction under 1 in 64 is already not built (`runtime/jit/eval_ops.c:267-276`). A branch the interpreter never executed has a word of zero, which is not "rare" by `lu_jit_branch_rare` (`jit.h:210-218`), so both arms are built. That is one way never-run code gets in.
+- **Entries shown:** the threshold, or the killed unit's entries.
+
+The rule: at every build, a site the profile does not show running is left out through `lu_ev_room`'s existing refusal path, so it gets a counter (`runtime/jit/eval_call.c:207-220`). Two forms, smallest first:
+- **(a) Word is zero.** About 15 lines, no new state.
+- **(b) Expected calls shown below one:** entries shown times a block weight from the branch words, with a zero word as weight zero. About 80 lines: a float per IR block, set in `lu_ev_fork_with` (`runtime/jit/eval_flow.c:1942`) and summed in `lu_ev_merge` (`eval_flow.c:1147`).
+
+No density sort happens at a first build. A one-pass evaluator does not know its nested sites in advance, and check 3's plan had a whole earlier build to read. Density order is used where counts are exact: at purchases (stage 1). Sites shown running go in under today's allowance in bytecode order, as now.
+
+How close can this get to check 3's oracle? I do not know, and I expect two regimes:
+- **User code:** the words are the code's own and few callers share them. I expect most never-called sites to show zero words or zero-weight blocks.
+- **Shared kernel code in line** (`call_special`, the attribute path's type and module arms): the words are every caller's. A site cold in this context but common elsewhere reads as running, and no context-free count can see it. Django's `getattr` (713 of 829 IR cold) is probably this kind.
+
+Check 6, made cheap. Add two fields to the existing wip site log on luc-site0: the site's word (zero or not), and for form (b) the weight product (about 40 wip lines, logging only). Join offline with the count runs already taken. Per program, IR-weighted and split by kernel or user frame, report:
+- **Recall:** the share of never-called in-line IR that the test marks.
+- **Miss cost:** the share of in-line calls at sites the test marks.
+
+Stage 2 is built only if recall is at least half on the cli top-20 and miss cost is under 1%. If form (a) reaches that alone, form (b) is not built.
+
+Predictions per row (R is recall):
+- **cli compile:** IR in the largest units falls by at most R times 68% (pyflakes), 25% (black), 45% (pygments). Check 3's cli IR did not fall because the freed allowance was refilled; the same refill by sites shown running will take part of this back.
+- **tomli `key_value_rule`:** in-line IR falls from 15,424 by R times 9,500. At R = 0.5 the unit is about 11k IR and a build costs 0.66G against 1.34G by the model, across 8 builds. Run code barely moves.
+- **Run rows:** small. Cold-out frees allowance, so sites that were cut fit at first build instead of waiting for a purchase.
+
+What bounds its mistakes:
+- A site marked cold that runs has a counter armed at its break-even. It loses protocol per call until bought, once, at most its price plus one rebuild.
+- A site marked running that never runs costs what it costs today.
+- Under `lucifer_jit=always`, a first build that is not put off leaves its zero-word sites out. Some jitcheck lanes will then see a purchase where they saw a first-build inline, and may need their sizes moved.
+
+## R3. The site key
+
+Today the key is the site's code and pc and one parent frame (`jit.c:1261-1267`, `eval_call.c:195-196`). Every copy of a kernel helper shares its inner sites' keys, whatever called the helper.
+
+Proposed: the path of call sites from the unit's root, mixed over the frame chain as `lu_ev_prof` already does for profile places (`runtime/jit/eval_emit.c:108-116`), plus the callee's code. The bought set is kept per entry.
+
+Copies with the same path (the arms of one instruction over learned types, a peeled loop's two turns, a return duplicated through its caller) share one decision and one counter on purpose. They are one site of the program in one context, and its price is the sum of its copies.
+
+Cost:
+- A walk of at most 24 frames per decision at build time.
+- The same 64-bit key and the same `outs` dedup (`eval_call.c:208-217`).
+- More `lu_out` entries (40 bytes each), since nested sites stop merging.
+- No extra instruction in compiled code.
+
+Check: rerun the site log with path names. Sharing between sites with different parent chains must be zero; report what remains.
+
+## R4. Check 2's negative cases
+
+Sites 6 and 9 are the allowance, not the value. The forced copy's own calls met a full unit and went out, while the callee's own unit has them in line. Today's hot-site path already avoids half of this: a bought site's callee gets a fresh base allowance (`eval_call.c:224-243,594-598`). Check 2's forcing did not give it.
+
+Rule for stage 1: a site taken in line is built as its callee's own unit is.
+- It gets the same allowance.
+- It gets the callee's own bought sites, found by the path relative to the callee (one more lookup per enclosing frame).
+- It is priced at the callee's own unit, whole subtree.
+
+Protocol is then a floor on the saving for these two, and the parent's value assumes nothing about its children that the build does not deliver. A top-down density order with no allowance would also do this, but that is the deferred price rule.
+
+Site 4 is not selection. The 141-IR copy of `lookup_attr` in `getattr` loses 770 a call to its own 482-IR unit, with no allowance involved. Cause not established. My hypothesis is that the own unit builds from the code's own feedback while the copy reads only the context's places (`.tickets/luc-1kz0.md:165`), which here know nothing. No ledger sees it: an in-line site has no counter and no loss.
+
+Something more is needed for site 4, and it belongs to which profile an in-line frame reads, not to this ticket. First measure its size: repeat check 2's forcing out on the 20 hottest in-line sites per program, and dump both builds of `lookup_attr`.
+
+It also shows that smaller IR is not faster code, which is a second reason to drop any fold measured in IR.
+
+## R5. genshi and richards
+
+**richards (time to best build).**
+- The one site out is nested `Task.addPacket@82` to `Packet.append_to`: own unit 39 IR, 17.0k calls a value.
+- Master bought it as a doubling of the whole unit, price 38.8M, after re-arming by doubling (`jit.c:2159-2166`). It paid 59.4M at 65,536 entries, in value 8.
+- Stage 1 prices it at the build that takes it: `B(1,163) = 14.3M`, against 7.1M a value at 420. That is about two values, with no overshoot.
+- Predicted: best of three matches pre (check 3 measured 242.4 with this site in), and the late values of "all values" close.
+- Not addressed: most of master's +173M over all values at -n 3. The steady gap is only 4M a value, and luc-1kz0's diagnosis puts 199M in value 0 (756M against 557M, an older master). That is learned-rebuild and mark timing under break-even, a known ledger loss.
+
+**genshi (steady-state gap).** Three mechanisms in luc-1kz0's log:
+1. **Hot sites never bought.** One site must cover the unit's whole build alone, cost a quarter of it, and be called 64 times an entry or on half a resume unit's turns (`jit.c:2127-2157`). `XMLSerializer.__call__@116` is 6,848 IR, so one site must lose 279M; its sites make 4.4k calls a value.
+2. **Growth priced as a doubling** of large generator units.
+3. **Marks priced at every live unit** of a generator root (`jit.c:724-732`): 62.6M and 64.4M for `_flatten@69/@267`, with 69 marks against pre's 101 and `h_call_any` at +6.9M.
+
+Stage 1 removes 1 and 2. Its ceiling is check 3's 41% of the -n 3 gap: 973k calls a value come in across genshi's units. Mechanism 3 is rule change 4 of luc-1kz0, built on a scratch branch and never tabled alone; it should be tabled alone under its own ticket. The remaining share is undiagnosed.
+
+Falsifier for both: stage 1's event log at -n 20. If out-of-line calls a value are near zero and the gap stands, the rest is not inlining.
+
+## R6. The smallest design worth building now
+
+Fold and trials: dropped, not deferred. Check 2 shows protocol suffices where purchases matter (small hot callees), that the specialization on 2 of 10 sites only delays a purchase, and that the model's sign is wrong on 3 of 10. The one row that needed early purchase of large specialized callees was django, whose lead is unpaid (check 5).
+
+| Stage | Change | Files | Lines (+/−) | Lanes, failing first | Predicted | Falsifier not yet run |
+|---|---|---|---|---|---|---|
+| 1 | Sites, not levels. `hot_exit` buys the densest sites by counted calls at today's `out_cost`, against the whole build `B(n + own units)`. Path key with callee, per entry. A bought site built as its callee's own unit. A site is priced once its callee has a unit. Arm for the shortfall. Delete `grown`, `MAX_GROWN`, `LOOP_CALLS`, the quarter and turns clauses | `runtime/jit/jit.c`, `runtime/jit/eval_call.c`, `runtime/jit/target.h`, `tools/jitcheck`, two kernel programs | runtime +120/−95; tools +60/−45; tests +160 | `sitefinal`: a hot call once per entry behind more cold calls than four doublings hold. `sitepath`: one helper in line under two parents, hot under one; only that copy's site is bought. `siteshape`: a bought callee's own calls are in line as in its own unit. `sitechain` and `siteentry` replace `growchain` and `entrygrowth` | tomli about −2.9% (check 3's 27%; rebuild 1.5G by the model against 0.99G a value, so bought in value 1-2). richards best value to pre's. genshi up to −2.7% at -n 3. django about −1%. black and pygments toward −1.0% and −2.9% | Check 4 offline, protocol only, from check 1's counts: the value index of each purchase per unit. No new run |
+| 2 | Cold sites out, form (a), or (b) if the check asks | `eval_call.c`; for (b) also `eval_flow.c`, `eval_ops.c`, `runtime/jit/ssa.h`; `tools/jitcheck`; one kernel program | (a) +20/−0; (b) +80 more; tools +40; tests +120 | `coldsites`: a callee whose never-run arms hold large calls; IR built must not include them, and one arm turned hot late is bought once | cli compile IR down by at most R times 25-68% in the largest units; tomli's build cost roughly halved at R = 0.5 | Check 6 as in R2. Then full jitcheck on the wip arm for lanes that move |
+| 3, only on evidence | Value at protocol alone: delete `unit_losses`, `per_entry`, `lost_entries` and `out_cost`'s callee term | `jit.c`, `target.h` | +5/−55 | `megaiter` and `sitechain` must hold | regex_v8 windows' compile toward pre's (1.78G and 3.0G against 4.44G and 10.2G) | Stage 1's regex log: the share of purchases whose value was mostly callee losses. Build only if those purchases are still made |
+
+Each stage is tabled alone on the rows of section 8, judged as in R7.
+
+Deferred, each with what reopens it:
+- **Removing the allowance** (the price rule): reopen when sites shown running but refused for allowance at first builds carry more than 1% of calls after stages 1 and 2.
+- **Counters on a first unit's in-line sites:** reopen when check 6 shows low recall in kernel frames. The wip `LUCIFER_SITES=2` mode can give their run cost in one measurement.
+- **A generator call constant:** reopen when genshi's generator sites are bought late.
+
+## R7. Acceptance metric
+
+I agree with the coordinator's inclination, with one sharpening from check 5.
+
+Judge each pyperformance row on two figures and never on best of three alone:
+- **All values at the reference -n:** warm-up plus timed values, compile included. This is the benchmark's own work on a short horizon.
+- **Best value at -n 20:** the steady state.
+
+A change must not lose more than 1% on either. Best of three is reported, not judged.
+
+Use "all values", not the whole process, for these rows. Check 5 shows the whole process mixes in 231M to 356M of start-up saving that has nothing to do with the benchmark's units, and it flipped the sign on richards and genshi. The cli rows stay whole-process.
+
+On this metric:
+- **django_template is not a loss:** master leads by 5.9% over all values and ties in steady state. It leaves the target list.
+- **richards is a short-horizon loss:** +13.5% over all values, level in steady state.
+- **genshi is a loss on both.**
+
+## R8. What would make me abandon what is left
+
+- **Stage 1:** tabled alone, it loses more than 1% on either figure of any row because a doubling's breadth took in something no site's count asked for.
+- **Stage 2:** check 6 gives recall under half or miss cost over 1%. Stage 1 then stands alone, and the cold half waits for in-context counts.
+- **The reduced design as a route to genshi:** stage 1's log shows no out-of-line calls left and the steady gap unchanged. The gap then belongs to marks and learned rebuilds.
+
