@@ -375,8 +375,14 @@ The sitepath lane runs tests/kernel/jit_site_path.py at 16N with the event
 log: a helper in line under two parents calls leaf out of line in both
 copies, hot in one; leaf goes in line on the hot path (the start buys it,
 or buys the hot path's callee whose own unit bought it), and each build
-that takes bought sites in adds less than their own units and half of
-leaf's again: the cold path's copy stays out.
+that takes bought sites in adds less than their own units (and, when leaf
+came with a bought callee, half of leaf's again): the cold path's copy
+stays out.
+The siteown lane runs tests/kernel/jit_site_own.py at 16N with the event log:
+a helper whose own unit bought a large callee is called, within budget,
+from a caller that has not bought it: no build of the caller made before
+the caller bought anything is as large as the helper's build that took the
+callee in.
 The siteshared lane runs tests/kernel/jit_site_shared.py at 8N with the event
 log: a start whose hot call is left out of line while a place of it is still
 learning classes. The call goes in line with a rebuild that happens anyway
@@ -526,7 +532,9 @@ LEDGER = {'churn': ('jit_rebuild_churn.py', ('-X', 'lucifer_jit=on')), 'classtes
 LEDGER_SLACK = 2
 # lane: the most its count may be at GROWTH_N: twice what the tier's ledger came to when the bound was set (a
 # polymorphic rotation the ledger learns over several rebuilds, where the interpreter-era policy rebuilt once).
-AT_MOST = {'classtests': 2 * 164529}
+# megaiter: twice its count at stage 1 (sites valued at protocol alone; luc-szyb), so purchase timing cannot slip
+# unnoticed: its megamorphic iteration sites are bought later than the ledger's callee-loss valuation bought them.
+AT_MOST = {'classtests': 2 * 164529, 'megaiter': 2 * 1747620}
 # lane: (the counts, summed, that must grow by at least this many per iteration): work compiled code does.
 AT_LEAST = {'sharedcode': (r'jit: executed:.* poll (\d+)', 0.9)}
 PERF_RESOLVED = 0.95
@@ -703,7 +711,7 @@ def check_path(args):
     takes bought sites in adds what they bring and less than another copy of leaf: not the cold path's copy too."""
     problems, err = events(args, 'jit_site_path.py', 16 * GROWTH_N)
     leaf = [int(n) for n in re.findall(r'^jit-ev \S+ build leaf@1 ok ins (\d+) ', err, re.M)]
-    path_leaf = taken = False
+    path_leaf = taken = direct = False
     pending, killed, added = 0, None, []
     for line in err.splitlines():
         buy = re.match(r'jit-ev \S+ buy (\S+)@\d+ (\S+) ins (\d+) ', line)
@@ -711,18 +719,38 @@ def check_path(args):
             path_leaf = True
         elif buy and buy[1] == 'entry':
             pending += int(buy[3])
+            direct = direct or buy[2] == 'leaf'
             taken = taken or buy[2] == 'leaf' or (buy[2] == 'hot_path' and path_leaf)
         elif re.match(r'jit-ev \S+ kill entry@1 ', line) and pending:
             killed = int(re.search(r' ins (\d+)', line)[1])
         elif re.match(r'jit-ev \S+ build entry@1 ok ', line) and killed is not None:
-            added.append((int(re.search(r' ok ins (\d+)', line)[1]) - killed, pending))
-            pending, killed = 0, None
+            added.append((int(re.search(r' ok ins (\d+)', line)[1]) - killed, pending, direct))
+            pending, killed, direct = 0, None, False
     if not taken or not leaf:
         problems.append('leaf never went in line on the hot path')
+    # A copy of leaf in line is smaller than leaf's own unit; a bought callee that brings its own bought leaf
+    # is its own unit plus up to half of leaf's in frames: either way a second copy goes over.
     problems += [f'a build that took {m} IR of bought callees in added {d}, another copy of leaf ({leaf[-1]}) or more'
-                 for d, m in added if leaf and d >= m + leaf[-1] / 2]
+                 for d, m, direct in added if leaf and d >= m + (0 if direct else leaf[-1] / 2)]
     print(f"{'FAIL' if problems else 'PASS'} sitepath" + (': ' + '; '.join(problems[:5]) if problems else
-          f" (leaf {leaf[-1]} IR; builds that took bought sites in added {', '.join(f'{d} for {m}' for d, m in added)})"))
+          f" (leaf {leaf[-1]} IR; builds that took bought sites in added {', '.join(f'{d} for {m}' for d, m, _ in added)})"))
+    return 1 if problems else 0
+
+
+def check_own(args):
+    """A callee in line within budget does not bring its own unit's bought sites into a caller that did not buy."""
+    problems, err = events(args, 'jit_site_own.py', 16 * GROWTH_N)
+    took = [int(n) for n in re.findall(r'^jit-ev \S+ build helper@1 ok ins (\d+) .* bought [1-9]', err, re.M)]
+    # the caller's builds before it bought anything itself (it may buy the callee on its own calls later)
+    caller = [int(n) for n in re.findall(r'^jit-ev \S+ build caller@1 ok ins (\d+) .* bought 0 ', err, re.M)]
+    if not took:
+        problems.append('the helper never bought its callee')
+    if not caller:
+        problems.append('the caller was never built')
+    if took and caller and max(caller) >= min(took):
+        problems.append(f'the caller built at {max(caller)} IR, the helper with its callee at {min(took)}')
+    print(f"{'FAIL' if problems else 'PASS'} siteown" + (': ' + '; '.join(problems) if problems else
+          f' (caller {max(caller)} IR, the helper with its callee {min(took)})'))
     return 1 if problems else 0
 
 
@@ -767,7 +795,7 @@ def main():
     ap.add_argument('--lucifer', required=True)
     ap.add_argument('--oracle', required=True)
     ap.add_argument('--benchmarks', default=','.join(RUNS))
-    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'sitechain', 'siteentry', 'sitepath', 'siteshared', 'perf']))
+    ap.add_argument('--modes', default=','.join([*MODES, *GROWTH, *LEDGER, 'sitechain', 'siteentry', 'sitepath', 'siteshared', 'siteown', 'perf']))
     ap.add_argument('--timeout', type=float, default=600)
     args = ap.parse_args()
     failed = 0
@@ -806,6 +834,8 @@ def main():
         failed += check_path(args)
     if 'siteshared' in args.modes.split(','):
         failed += check_shared(args)
+    if 'siteown' in args.modes.split(','):
+        failed += check_own(args)
     if 'perf' in args.modes.split(','):
         failed += check_perf(args)
     print(f'{failed} failing')
