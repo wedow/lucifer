@@ -51,11 +51,12 @@ const struct lu_target lu_target = {
 
 #define SAVES 40                /* rbx, r12-r15 below rbp */
 #define RESULT_SLOT (-(SAVES + 8))
-#define CALL_BYTES 32                   /* sizeof (struct lu_jit_call), rounded to 8 */
-#define CALL_SLOT (RESULT_SLOT - CALL_BYTES)    /* the struct lu_jit_call of the direct call in hand (target.h) */
-#define CALL_AT(field) (CALL_SLOT + (int32_t)offsetof(struct lu_jit_call, field))
-#define SPILL_BASE (CALL_SLOT - 8)
-static_assert(sizeof(struct lu_jit_call) <= CALL_BYTES, "the call's record outgrew its slot");
+#define ACT_BYTES 24                    /* sizeof (struct lu_jit_act) */
+#define ACT_SLOT (RESULT_SLOT - ACT_BYTES)      /* the unit's activation (target.h struct lu_jit_act) */
+#define ACT_AT(field) (ACT_SLOT + (int32_t)offsetof(struct lu_jit_act, field))
+#define FRAME_SLOT (ACT_SLOT - 8)       /* the frame the direct call in hand pushed (target.h struct lu_jit_direct) */
+#define SPILL_BASE (FRAME_SLOT - 8)
+static_assert(sizeof(struct lu_jit_act) == ACT_BYTES, "the activation outgrew its slot");
 
 struct patch {
     int at;                     /* the rel32 to fill */
@@ -137,8 +138,10 @@ struct asm_ {
     struct exit_site *exits;
     int nexits, capexits;
     int deopts_patch;           /* the imm64 that holds the exits' table */
-    int epilogue;
-    int entered;                /* past the prologue's own setup, where the direct entry joins it */
+    int epilogue;               /* the activation's end, then the return */
+    int restore;                /* the return alone */
+    int decline;                /* an entry's decline, before its link */
+    int entered;                /* past the activation's link, where the direct entry joins the prologue */
     struct lu_func *f;
     struct lu_unit *unit;
     int serial;                 /* it stores without locks while serial: keeps the task's unlocked_jit */
@@ -1895,42 +1898,27 @@ takes_back(struct asm_ *a, uint64_t takes)
     }
 }
 
-/* After a direct entry ran its unit (EAX the enum lu_jit_result, the
-   call's record at CALL_SLOT): the activation ends, and the frame is
-   popped as lu_frame_pop pops it (its slots hold nothing: compiled code
-   owned them), the value in [rsp]; or the interpreter runs it. Then
-   `done` with the value or NULL in RAX. */
+/* After a direct entry ran its unit, which ended its activation (EAX
+   the enum lu_jit_result, the frame at FRAME_SLOT): the frame is popped
+   as lu_frame_pop pops it (its slots hold nothing: compiled code owned
+   them), the value in [rsp]; or the interpreter runs it. Then `done`
+   with the value or NULL in RAX. */
 static void
 direct_done(struct asm_ *a, uint64_t takes, int done)
 {
-    int fresh = new_label(a), alone = new_label(a), exited = new_label(a);
-    load(a, R11, RBP, CALL_AT(act.outer));
-    store(a, R14, offsetof(struct lu_task, jit_act), R11);
-    load(a, RDI, RBP, CALL_AT(act.unit));
-    int plain = new_label(a);
-    cmp_mi(a, 0, RDI, offsetof(struct lu_unit, serial), 0);
-    jcc(a, CC_E, plain);
-    load(a, R11, RBP, CALL_AT(act.unlocked_jit));
-    store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);                   /* a serial callee's entry kept it */
-    bind(a, plain);
-    cmp_mi(a, 0, RDI, offsetof(struct lu_unit, stale), 0);
-    jcc(a, CC_E, fresh);
-    store(a, RBP, CALL_SLOT, RAX);              /* the record's activation is over: room for EAX */
-    call_abs(a, (void *)lu_jit_left);
-    load(a, RAX, RBP, CALL_SLOT);
-    bind(a, fresh);
+    int alone = new_label(a), exited = new_label(a);
     b1(a, 0x83);
     b1(a, 0xF8);
     b1(a, LU_JIT_RETURN);                       /* cmp eax, LU_JIT_RETURN */
     jcc(a, CC_NE, exited);
-    load(a, RDI, RBP, CALL_AT(frame));
+    load(a, RDI, RBP, FRAME_SLOT);
     cmp_mi(a, 1, RDI, offsetof(struct lu_frame, frame_obj), 0);
     jcc(a, CC_E, alone);
     call_abs(a, (void *)lu_frame_retire);      /* a frame object only the record holds goes with it */
     bind(a, alone);
     /* lu_depth_leave, for the callee's code. */
     int user = new_label(a), left = new_label(a);
-    load(a, RDX, RBP, CALL_AT(frame));
+    load(a, RDX, RBP, FRAME_SLOT);
     load(a, RDX, RDX, offsetof(struct lu_frame, code));
     load32(a, R11, RDX, offsetof(PyCodeObject, co_flags));
     alu_ri(a, ALU_AND, R11, LU_CO_KERNEL | LU_CO_HIDDEN);
@@ -1946,18 +1934,18 @@ direct_done(struct asm_ *a, uint64_t takes, int done)
        reference frees. */
     static const int32_t refs[] = { offsetof(struct lu_frame, func), offsetof(struct lu_frame, code) };
     for (int i = 0; i < 2; i++) {
-        load(a, RDX, RBP, CALL_AT(frame));
+        load(a, RDX, RBP, FRAME_SLOT);
         load(a, RDX, RDX, refs[i]);
         decref(a, RDX, NULL, NULL, -1);
     }
-    load(a, RDX, RBP, CALL_AT(frame));
+    load(a, RDX, RBP, FRAME_SLOT);
     store(a, R14, offsetof(PyThreadState, datastack_top), RDX);
     takes_back(a, takes);
     load(a, RAX, RSP, 0);
     jmp(a, done);
     bind(a, exited);
     mov_rr(a, RDI, R14);
-    load(a, RSI, RBP, CALL_AT(frame));
+    load(a, RSI, RBP, FRAME_SLOT);
     op_rr(a, 0, 0x89, RAX, RDX);                /* mov edx, eax */
     mov_ri(a, RCX, 0);                          /* no value: not a return */
     mov_ri(a, R8, 0);                           /* no marker: the caller's frame is under it */
@@ -1997,7 +1985,7 @@ direct_call(struct asm_ *a, int nargs, int off, uint64_t takes, int slow, int do
     lea(a, RDX, RSP, off);
     mov_rr(a, RCX, RSP);                        /* the value goes over the callable's word */
     mov_ri(a, R8, (int64_t)(takes >> (off / 8)));
-    lea(a, R9, RBP, CALL_SLOT);
+    lea(a, R9, RBP, FRAME_SLOT);
     rex(a, 0, 0, 0, R11);
     b1(a, 0xFF);
     modrm_rr(a, 2, R11);                        /* call r11 */
@@ -5295,21 +5283,21 @@ saves(struct asm_ *a)
 }
 
 /* The gate, the first thing either entry does (RSP as the saves left it,
-   R14 the task): a serial unit stores the task's unlocked word, kept at
-   base + off for the activation's end, before it reads its death (the
-   switch to parallel either sees the word or is seen: runtime/thread/
-   task.c); the poll word is the version the unit was built under with no
-   event pending, a kernel unit's visible ones excepted as at its polls;
-   the C stack is above the floor. Else it returns 0 with nothing done.
-   Clobbers RAX and R11 only. */
+   R14 the task): a serial unit stores the task's unlocked word, kept in
+   the activation for its end, before it reads its death (the switch to
+   parallel either sees the word or is seen: runtime/thread/task.c); the
+   poll word is the version the unit was built under with no event
+   pending, a kernel unit's visible ones excepted as at its polls; the C
+   stack is above the floor. Else it returns 0 with nothing done
+   (a->decline). Clobbers RAX and R11 only. */
 static void
-gate(struct asm_ *a, int base, int32_t off)
+gate(struct asm_ *a)
 {
-    int decline = new_label(a);
+    int decline = a->decline;
     int64_t version = (int64_t)a->unit->version;
     if (a->serial) {
         load(a, R11, R14, (int32_t)offsetof(struct lu_task, unlocked_jit));
-        store(a, base, off, R11);
+        store(a, RBP, ACT_AT(unlocked_jit), R11);
         store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);
         jump_if_dead(a, decline);
     }
@@ -5330,15 +5318,20 @@ gate(struct asm_ *a, int base, int32_t off)
         cmp_rm(a, R11, RAX, offsetof(struct lu_carrier, poll));
     }
     jcc(a, CC_NE, decline);
-    cold_begin(a);
-    bind(a, decline);
-    if (a->serial) {
-        load(a, R11, base, off);
-        store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);
-    }
-    mov_ri(a, RAX, LU_JIT_NONE);
-    jmp(a, a->epilogue);
-    cold_end(a);
+}
+
+/* The activation linked from the task, past the gate and an entry's
+   other declines: from here to the epilogue's unlink the collector sees
+   it (jit.c "Freeing dead units"). Clobbers R11. */
+static void
+link_activation(struct asm_ *a)
+{
+    mov_ri(a, R11, (int64_t)(intptr_t)a->unit);
+    store(a, RBP, ACT_AT(unit), R11);
+    load(a, R11, R14, offsetof(struct lu_task, jit_act));
+    store(a, RBP, ACT_AT(outer), R11);
+    lea(a, R11, RBP, ACT_SLOT);
+    store(a, R14, offsetof(struct lu_task, jit_act), R11);
 }
 
 static void
@@ -5348,8 +5341,26 @@ prologue(struct asm_ *a)
     mov_rr(a, R14, RDI);
     mov_rr(a, R15, RSI);
     store(a, RBP, RESULT_SLOT, RDX);
-    gate(a, RBP, CALL_AT(act.unlocked_jit));     /* no call of its own made yet */
+    gate(a);
+    link_activation(a);
     bind(a, a->entered);
+    /* Entries, while the unit counts them (runtime/jit/jit.c), and every
+       entry under -X lucifer_jit_stats. */
+    int counted = new_label(a);
+    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->entries);
+    cmp_mi(a, 1, R11, 0, (int32_t)ENTRIES_SEEN);
+    jcc(a, CC_AE, counted);
+    rex(a, 1, 0, 0, R11);
+    b1(a, 0xFF);
+    modrm_mem(a, 0, R11, 0);                    /* inc qword [r11] */
+    bind(a, counted);
+    if (_PyRuntime.jit.stats) {
+        mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->entered);
+        b1(a, 0xF0);
+        rex(a, 1, 0, 0, R11);
+        b1(a, 0xFF);
+        modrm_mem(a, 0, R11, 0);                /* lock inc qword [r11] */
+    }
     /* Compiled code owns the frame's locals and stack from here: the
        slots hold nothing until an exit or a walker fills them. */
     rex(a, 1, RAX, 0, R15);
@@ -5365,10 +5376,11 @@ prologue(struct asm_ *a)
     store(a, R15, offsetof(struct lu_frame, jit_spills), RAX);
 }
 
+/* The machine frame popped: the caller's registers back, RSP at the
+   return address. */
 static void
-epilogue(struct asm_ *a)
+pops(struct asm_ *a)
 {
-    bind(a, a->epilogue);
     rex(a, 1, RSP, 0, RBP);
     b1(a, 0x8D);
     modrm_mem(a, RSP, RBP, -SAVES);             /* lea rsp, [rbp-40] */
@@ -5378,28 +5390,71 @@ epilogue(struct asm_ *a)
     b1(a, 0x41); b1(a, 0x5C);
     b1(a, 0x5B);
     b1(a, 0x5D);
+}
+
+/* EAX the result. The activation ends (a serial unit's unlocked word as
+   its gate found it), then the return. From the unlink on, the unit's code
+   runs in the window where nothing polls, as before its link (jit.c
+   "Freeing dead units"). A stale unit's last activation may free it in
+   `left`, which stops the world: it leaves by a jump to lu_jit_left with
+   its machine frame popped, so that no return address into it is on the
+   stack then; lu_jit_left returns EAX to the unit's caller. A decline
+   restores the serial word and returns with no activation to end. */
+static void
+epilogue(struct asm_ *a)
+{
+    int stale = new_label(a);
+    bind(a, a->epilogue);
+    load(a, R11, RBP, ACT_AT(outer));
+    store(a, R14, offsetof(struct lu_task, jit_act), R11);
+    if (a->serial) {
+        load(a, R11, RBP, ACT_AT(unlocked_jit));
+        store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);
+    }
+    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->stale);
+    cmp_mi(a, 0, R11, 0, 0);
+    jcc(a, CC_NE, stale);
+    bind(a, a->restore);
+    pops(a);
     b1(a, 0xC3);
+    cold_begin(a);
+    bind(a, stale);
+    pops(a);
+    mov_ri(a, RDI, (int64_t)(intptr_t)a->unit);
+    op_rr(a, 0, 0x89, RAX, RSI);                /* mov esi, eax */
+    mov_ri(a, R11, (int64_t)(intptr_t)lu_jit_left);
+    rex(a, 0, 0, 0, R11);
+    b1(a, 0xFF);
+    modrm_rr(a, 4, R11);                        /* jmp r11 */
+    bind(a, a->decline);
+    if (a->serial) {
+        load(a, R11, RBP, ACT_AT(unlocked_jit));
+        store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);
+    }
+    mov_ri(a, RAX, LU_JIT_NONE);
+    jmp(a, a->restore);
+    cold_end(a);
 }
 
 /* The direct entry (target.h struct lu_jit_direct): RDI the task, RSI
    the function, RDX its arguments, RCX the result's word, R8 the
-   arguments that give their references, R9 the caller's struct
-   lu_jit_call. The gate, then what making the frame needs (a live unit
-   for the function's globals and builtins, recursion and datastack room,
-   as lu_frame_push), decline with 0 and nothing done. The
-   frame is then pushed and bound as lu_frame_push makes it, the
-   activation linked in the caller's record, the prologue run (in line
-   for COPY_FREE_VARS alone, else in C), and the unit run from where its
-   own entry has set up the same registers. Its offset in the code. */
+   arguments that give their references, R9 the caller's word for the
+   frame. The gate, then what making the frame needs (a live unit for the
+   function's globals and builtins, recursion and datastack room, as
+   lu_frame_push), decline with 0 and nothing done. Then the activation is
+   linked, the frame pushed and bound as lu_frame_push makes it, the
+   prologue run (in line for COPY_FREE_VARS alone, else in C), and the
+   unit run from where its own entry has set up the same registers. Its
+   offset in the code. */
 static int
 direct_entry(struct asm_ *a)
 {
     struct lu_func *f = a->f;
     PyCodeObject *code = f->code;
-    int at = a->n, decline = new_label(a), counted = new_label(a);
+    int at = a->n, decline = a->decline;
     saves(a);
     mov_rr(a, R14, RDI);
-    gate(a, R9, offsetof(struct lu_jit_call, act.unlocked_jit));      /* back at the activation's end */
+    gate(a);
     /* A function of the same code with other globals or builtins has units of its own. */
     load(a, R11, RSI, offsetof(PyFunctionObject, func_globals));
     mov_ri(a, RAX, (int64_t)(intptr_t)a->unit->globals);
@@ -5425,6 +5480,7 @@ direct_entry(struct asm_ *a)
     alu_rr(a, ALU_SUB, R11, R10);
     alu_ri(a, ALU_CMP, R11, 8 * words);
     jcc(a, CC_B, decline);
+    link_activation(a);
     /* The frame. */
     lea(a, R11, R10, 8 * words);
     store(a, R14, offsetof(PyThreadState, datastack_top), R11);
@@ -5436,12 +5492,7 @@ direct_entry(struct asm_ *a)
     }
     mov_rr(a, R15, R10);
     store(a, RBP, RESULT_SLOT, RCX);
-    store(a, R9, offsetof(struct lu_jit_call, frame), R15);
-    mov_ri(a, R11, (int64_t)(intptr_t)a->unit);
-    store(a, R9, offsetof(struct lu_jit_call, act.unit), R11);
-    load(a, R11, R14, offsetof(struct lu_task, jit_act));
-    store(a, R9, offsetof(struct lu_jit_call, act.outer), R11);
-    store(a, R14, offsetof(struct lu_task, jit_act), R9);
+    store(a, R9, 0, R15);
     mov_ri(a, R11, (int64_t)(intptr_t)code);
     store(a, R15, offsetof(struct lu_frame, code), R11);
     incref(a, R11);                             /* clobbers RAX and RCX only */
@@ -5525,14 +5576,6 @@ direct_entry(struct asm_ *a)
         }
         store(a, R14, offsetof(PyThreadState, current_frame), R15);
     }
-    /* Entries, while the unit counts them (runtime/jit/jit.c). */
-    mov_ri(a, R11, (int64_t)(intptr_t)&a->unit->entries);
-    cmp_mi(a, 1, R11, 0, (int32_t)ENTRIES_SEEN);
-    jcc(a, CC_AE, counted);
-    rex(a, 1, 0, 0, R11);
-    b1(a, 0xFF);
-    modrm_mem(a, 0, R11, 0);                    /* inc qword [r11] */
-    bind(a, counted);
     unsigned long *stat = lu_jit_direct_count();
     if (stat != NULL) {
         mov_ri(a, R11, (int64_t)(intptr_t)stat);
@@ -5542,13 +5585,6 @@ direct_entry(struct asm_ *a)
         modrm_mem(a, 0, R11, 0);                /* lock inc qword [r11] */
     }
     jmp(a, a->entered);
-    bind(a, decline);
-    if (a->serial) {
-        load(a, R11, R9, offsetof(struct lu_jit_call, act.unlocked_jit));
-        store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);
-    }
-    mov_ri(a, RAX, 0);
-    jmp(a, a->epilogue);
     return at;
 }
 
@@ -5606,6 +5642,8 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     }
     unit->serial = a->serial;
     a->epilogue = new_label(a);
+    a->restore = new_label(a);
+    a->decline = new_label(a);
     a->entered = new_label(a);
     a->save_all = new_label(a);
     a->restore_all = new_label(a);
@@ -5619,7 +5657,7 @@ lu_target_emit(struct lu_func *f, struct lu_unit *unit)
     }
     /* After push rbp the stack is 16-aligned and the five saves leave it
        8 off, so the frame is 8 more than a multiple of 16. */
-    int bytes = 8 + CALL_BYTES + 8 * f->nspill + 8 * maxargs;     /* RESULT_SLOT, CALL_SLOT, spills, arguments */
+    int bytes = 8 + ACT_BYTES + 8 + 8 * f->nspill + 8 * maxargs;  /* RESULT_SLOT, ACT_SLOT, FRAME_SLOT, spills, arguments */
     a->frame_bytes = ((bytes + 15) & ~15) + 8;
     for (int v = 0; v < f->nins; v++) {
         int32_t loc = f->ins[v].loc;

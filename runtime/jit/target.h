@@ -306,7 +306,8 @@ void *lu_code_alloc(size_t n, void **rw);
 void lu_code_free(void *code, size_t n);
 
 /* An activation of a unit, linked from its task (jit_act) while it runs,
-   so that jit.c frees no unit one is in. */
+   so that jit.c frees no unit one is in. The unit keeps it in its machine
+   frame: its entries link it after their gate, its epilogue unlinks it. */
 struct lu_jit_act {
     struct lu_unit *unit;
     struct lu_jit_act *outer;
@@ -325,29 +326,26 @@ struct lu_jit_act {
 
    The entry is a C function:
        int entry(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args,
-                 PyObject **result, uint64_t takes, struct lu_jit_call *call)
+                 PyObject **result, uint64_t takes, struct lu_frame **frame)
    It makes the checks the interpreter makes at a call and at RESUME, and
    returns 0 with nothing done when one fails. Else it pushes the frame,
-   binds the nargs arguments (those in `takes`, bits by index, give their
-   references to the parameters; the others are counted), links the
-   activation in `call`, names the frame there, runs the prologue
-   (lu_jit_prologue where it makes cells: LU_JIT_ERROR when that raises)
-   and runs the unit: an enum lu_jit_result. The caller then ends the
-   activation (lu_jit_left) and either pops the frame (LU_JIT_RETURN, the
-   value in *result) as lu_frame_pop pops it, or has the interpreter run it
-   (lu_jit_finish). */
+   names it in *frame, binds the nargs arguments (those in `takes`, bits
+   by index, give their references to the parameters; the others are
+   counted), runs the prologue (lu_jit_prologue where it makes cells:
+   LU_JIT_ERROR when that raises) and runs the unit: an enum
+   lu_jit_result. The caller then either pops the frame (LU_JIT_RETURN,
+   the value in *result) as lu_frame_pop pops it, or has the interpreter
+   run it (lu_jit_finish). */
 struct lu_jit_direct {
     void *entry;
     int nargs;
 };
 int lu_jit_direct_nargs(PyCodeObject *code);
 
-struct lu_jit_call {
-    struct lu_jit_act act;
-    struct lu_frame *frame;
-};
-
-void lu_jit_left(struct lu_unit *u);
+/* A stale unit's epilogue jumps here, its machine frame popped, with r
+   its result: the activation it ended is counted (jit.c left), which may
+   free the unit; then r to the unit's caller. */
+int lu_jit_left(struct lu_unit *u, int r);
 int lu_jit_prologue(struct lu_frame *frame);
 /* The end of a unit a C caller or a direct call entered (r not
    LU_JIT_NONE), the frame's value in `value` when r is LU_JIT_RETURN:
