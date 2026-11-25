@@ -56,12 +56,15 @@ def report(name, total, requests):
 
 
 ALWAYS = sys._xoptions.get('lucifer_jit') == 'always'
-DEOPT_STRESS = str(sys._xoptions.get('lucifer_stress', '')).startswith('deopt')
 # Source compiled anew per request, each handler hot: code, its units,
-# function and namespace are one cycle. Left out under the deopt stress
-# mode, where serve's own unit (live module code) inlines the first
-# handler it learned as its callee and keeps that namespace (luc-k7ns).
-if not DEOPT_STRESS:
+# function and namespace are one cycle. Left out wherever every function
+# compiles at its first call (luc-k7ns): serve's outer-loop unit, built in
+# the first request, inlines that request's handler as its learned callee
+# (guarded by identity) and keeps that handler and its namespace. It leaves
+# each later request at the inlined compile, before the guard, so it never
+# pays a loss there; a learned rebuild kills only the unit that paid (the
+# inner loop's), and the outer one lives on.
+if not ALWAYS:
     report('fresh code, hot', serve(lambda: compile(SRC, 'handlers', 'exec'), 20, N // 10), 20)
 # One code object, its first namespace's handler hot, then a namespace per
 # request whose handler runs once: those stay cold, so nothing keeps them.

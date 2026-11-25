@@ -20,3 +20,13 @@ Conditions for the ephemeron design (from the review of luc-3s7n): (1) the key m
 Weigh first the simpler alternative: hold globals and learned callees weakly (identities, not references) and kill the unit when one of them dies (a dict or function dealloc watcher event), so a unit never keeps its namespace alive and the collector needs no change; what else the unit folded from the namespace (values it read, functions it inlined) must then be guarded or held through the same weak path.
 
 Acceptance: tests/kernel/jit_shared_code_collect.py passes with both of its cases unskipped in every lane (its skips under -X lucifer_jit=always and the deopt stress mode are this ticket's). Observed holders today: under -X lucifer_jit=always, the shared code's own units keep each namespace they were built for; under the deopt stress mode, serve's unit at its inner loop (live module-level code) inlined the first request's handler as a learned callee (guarded by identity) and keeps that handler and its namespace: 19 of 20 namespaces freed, the referrers of the kept one are serve's code (through its unit's constants) and the handler's own garbage code.
+
+## 2026-11-25: the fresh-code case now leaks under -X lucifer_jit=always too
+
+The daily of 2026-11-25 failed jit_shared_code_collect in the jit lane (19 of 20 namespaces freed). Bisected by building: first bad b20b81a9 (the ledger: "rebuild and grow when the losses paid cover the build"); 8827f901 and f626ea38 pass. Same leak as this ticket, a different unit holding it:
+
+- serve has two units: serve@73 (the inner `for _ in range(calls): total += h(50)`) and serve@14 (the outer request loop, built in request 0). serve@14 inlines the inner loop with a GUARD_IS on request 0's handler at serve@79; that constant holds the handler, its globals and the namespace's witness.
+- Before b20b81a9, request 1's handler failed serve@73's guard at serve@79 and the exit marked the site (mark-nospec), which killed every unit of the root: serve@14 and serve@73 both died and were reclaimed.
+- Since b20b81a9 the exit is at a place that learned since the build, so it goes to serve@73's own stale ledger and kills only serve@73 (learned-since-build), rebuilt with a generic call. serve@14 survives every request: each entry leaves at the inlined compile frame (compile@414) before the guard, so it never pays a loss there and is never rebuilt; it keeps namespace 0 until it dies (gc referrers: the handler is held only by serve's code, through its units' constants).
+
+The fresh-code case is now skipped wherever every function compiles at its first call (the jit and jit-deopt lanes); the acceptance is unchanged: both cases pass unskipped in every lane.
