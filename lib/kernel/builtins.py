@@ -5,7 +5,7 @@ Those with keywords parse them with _args, which words theirs as Argument
 Clinic does."""
 
 from _lucifer import (
-    str_join, error, kind, type_lookup, type_tp_name, MISSING, static_type, is_callable,
+    str_join, error, kind, type_lookup, attr_way, type_tp_name, MISSING, static_type, is_callable,
     is_subtype, size, int_format, int_add, int_as_double, str_chr, str_ord, bytes_ord, str_len,
     object_id, caller_locals, caller_globals, caller_code_flags, eval_code, kernel_get, kernel_set,
     import_state, field_get, setattr_native, compile as _lucifer_compile, kernel_twin, iter_set,
@@ -101,7 +101,7 @@ def _check(obj, cls, method, fallback):
 
 
 _object_class = type_lookup(object, '__class__')
-_object_getattribute = type_lookup(object, '__getattribute__')
+_READ, _GENERIC, _GENERIC_GETATTR = _object._READ, _object._GENERIC, _object._GENERIC_GETATTR
 
 
 def isinstance(obj, class_or_tuple, /):
@@ -110,8 +110,9 @@ def isinstance(obj, class_or_tuple, /):
     if t is class_or_tuple:
         return True
     # A negative answer asks obj.__class__ (object_isinstance), unless its
-    # type keeps object's.
-    plain = type_lookup(t, '__class__') is _object_class and type_lookup(t, '__getattribute__') is _object_getattribute
+    # type keeps object's and reads it with object's lookup.
+    way = attr_way(t, _READ)
+    plain = type_lookup(t, '__class__') is _object_class and (way == _GENERIC or way == _GENERIC_GETATTR)
     if type(class_or_tuple) is type:
         if is_subtype(t, class_or_tuple):
             return True

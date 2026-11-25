@@ -52,6 +52,11 @@ def _module_getattr(self, name, suppress=False):
     attribute_error(text, name, self)
 
 
+# Bound before module's __getattribute__ exists, which the kernel's hooks
+# then run through it (object.py getattr_hook).
+_object.module_getattr = _module_getattr
+
+
 @kernel_type(static_type('module'))
 class module:
     """Create a module object.
@@ -87,7 +92,3 @@ The name must be a string; the optional doc argument can have any type."""
         if hook is not MISSING:
             return hook()
         return list(d)
-
-
-_object.module_getattribute = ns_get(type_dict(module), '__getattribute__', MISSING)
-_object.module_getattr = _module_getattr

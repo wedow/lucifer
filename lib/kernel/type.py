@@ -377,6 +377,11 @@ def _type_getattr(cls, name, suppress=False):
         "type object '", type_tp_name(cls), "' has no attribute '", name, "'")), name=name, obj=cls)
 
 
+# Bound before type's __getattribute__ exists, which the kernel's hooks
+# then run through it (object.py getattr_hook).
+_object.type_getattr = _type_getattr
+
+
 @kernel_type(type)
 class type:
     """type(object) -> the object's type
@@ -560,7 +565,5 @@ def _remro_slots(cls):
 
 
 _type_dict = type_dict(type)
-_object.type_getattribute = ns_get(_type_dict, '__getattribute__', MISSING)
-_object.type_getattr = _type_getattr
 _type_new = ns_get(_type_dict, '__new__', MISSING)
 _type_mro = ns_get(_type_dict, 'mro', MISSING)

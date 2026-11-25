@@ -342,13 +342,23 @@ lu_ev_prim(struct ctx *c, const char *name, lu_v *args, int nargs)
         return t != NULL ? lu_ev_konst(c, (PyObject *)t) : LU_EV_NONE;
     }
     uint32_t version;
-    if (nargs == 2 && strcmp(name, "type_lookup") == 0 && k1 != NULL && PyUnicode_CheckExact(k1)) {
+    int lookup = nargs == 2 && strcmp(name, "type_lookup") == 0 && k1 != NULL && PyUnicode_CheckExact(k1);
+    long which = -1;
+    if (nargs == 2 && strcmp(name, "attr_way") == 0 && k1 != NULL && PyLong_CheckExact(k1)
+        && lu_long_as_long(k1, &which) < 0) {
+        PyErr_Clear();
+        which = -1;
+    }
+    if (lookup || (which >= 0 && which <= 2)) {
+        /* A class's attribute, or a field of its attribute protocol word, as
+           of its version. */
         lu_v cls = args[0];
         PyObject *t = lu_ev_learn_const(c, &cls, 0, LU_PROF_CLASS);
         if (t == NULL || !PyType_Check(t) || !lu_ev_class_as_of(c, (PyTypeObject *)t, &version)) {
             return LU_EV_NONE;
         }
-        PyObject *r = _PyType_LookupRef((PyTypeObject *)t, k1);
+        PyObject *r = lookup ? _PyType_LookupRef((PyTypeObject *)t, k1)
+            : PyLong_FromLong(lu_attr_way((PyTypeObject *)t, LU_ATTR_READ + 3 * (int)which));
         lu_v k = lu_ev_konst(c, r != NULL ? r : LU_MISSING);
         Py_XDECREF(r);
         return lu_ev_class_relied(c, cls, version) ? k : LU_EV_NONE;

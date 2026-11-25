@@ -1635,41 +1635,6 @@ prim_descr_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return Py_NewRef((PyObject *)((PyDescrObject *)args[0])->d_type);
 }
 
-/* generic_wrapper(d, name, tp): whether d is a C type's slot wrapper `name`
-   (__getattribute__, __setattr__ or __delattr__) of PyObject_GenericGetAttr
-   or PyObject_GenericSetAttr for a base of the type tp, which the kernel's
-   hooks run as generic access (slot_tp_getattr_hook's test; with tp None,
-   for any type, as that hook does before __getattr__). */
-static int
-generic_wrapper_of(PyObject *d, PyObject *name, PyObject *tp)
-{
-    PyWrapperDescrObject *w = (PyWrapperDescrObject *)d;
-    return d != NULL && Py_IS_TYPE(d, &PyWrapperDescr_Type)
-        && (w->d_wrapped == (void *)PyObject_GenericGetAttr || w->d_wrapped == (void *)PyObject_GenericSetAttr)
-        && PyUnicode_EqualToUTF8(name, w->d_base->name)
-        && (tp == Py_None || (PyType_Check(tp) && PyType_IsSubtype((PyTypeObject *)tp, PyDescr_TYPE(w))));
-}
-
-static PyObject *
-prim_generic_wrapper(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
-{
-    ARGS(3);
-    int generic = generic_wrapper_of(args[0], args[1], args[2]);
-    if (generic && args[2] != Py_None) {
-        /* the kernel asks of the dunder the type finds: its word says generic */
-        PyTypeObject *tp = (PyTypeObject *)args[2];
-        const char *dunder = ((PyWrapperDescrObject *)args[0])->d_base->name;   /* args[1]: checked above */
-        int field = dunder[2] == 'g' ? LU_ATTR_READ : dunder[2] == 's' ? LU_ATTR_STORE : LU_ATTR_DELETE;
-#define GENERIC_WAY (field == LU_ATTR_READ ? lu_attr_generic_read(tp) : lu_attr_way(tp, field) == LU_ATTR_GENERIC)
-        if (!GENERIC_WAY) {     /* the lookup again only then: the hooks call this on every access */
-            LU_ATTR_CHECK("generic_wrapper", tp, field, GENERIC_WAY,
-                          generic_wrapper_of(_PyType_Lookup(tp, args[1]), args[1], args[2]), 0);
-        }
-#undef GENERIC_WAY
-    }
-    return Py_NewRef(generic ? Py_True : Py_False);
-}
-
 /* bind(d, obj): a method descriptor bound to obj (a builtin method), a
    classmethod descriptor bound to the type obj, a slot wrapper bound to
    obj (a method-wrapper). The kernel has checked obj's type. */
@@ -1942,7 +1907,7 @@ prim_kernel_get(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 PyMethodDef lu_prim_descr_methods[] = {
     FAST(kernel_get), FAST(setattr_native),
     FAST(install_kernel_body), PURE(getset_kernel), FAST(getset_get),
-    FAST(getset_set), FAST(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), PURE(generic_wrapper), FAST(bind),
+    FAST(getset_set), FAST(member_get), PURE(member_peek), FAST(member_set), PURE(descr_type), FAST(bind),
     FAST(method_new), FAST(instancemethod_new), PURE(field_get), FAST(field_set), FAST(proxy_new), FAST(kernel_set), FAST(kernel_twin), FAST(next_missing_set), FAST(next_missing_of),
     { NULL, NULL, 0, NULL },
 };

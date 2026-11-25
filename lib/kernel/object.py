@@ -9,8 +9,7 @@ dict, then non-data descriptors and plain class attributes.
 from _lucifer import (
     MISSING, error, attribute_error, str_join, kind, type_lookup, type_dict, type_bases, type_tp_name, type_qualname,
     instance_dict, instance_load, instance_store, ns_get, ns_set, ns_del, alloc, set_class, kernel_set, address,
-    object_hash, type_flag, object_size, type_can_new, static_type, is_subtype, descr_type, member_peek,
-    generic_wrapper,
+    object_hash, type_flag, object_size, type_can_new, static_type, is_subtype, descr_type, member_peek, attr_way,
 )
 from _lucifer import _boot
 
@@ -26,6 +25,10 @@ __all__ = ('object',)
 _member_descriptor = static_type('member_descriptor')
 _IS_ABSTRACT = 1 << 20          # Py_TPFLAGS_IS_ABSTRACT
 _MANAGED_DICT = 1 << 4          # Py_TPFLAGS_MANAGED_DICT
+# attr_way(tp, which): which protocol a type's instances read (0), store (1)
+# and delete (2) attributes with (LU_ATTR_* in runtime/lucifer.h).
+_READ, _STORE, _DELETE = 0, 1, 2
+_GENERIC, _TYPE, _MODULE, _GENERIC_GETATTR = 1, 2, 5, 6
 
 
 def _abstract_error(cls):
@@ -109,8 +112,7 @@ def generic_setattr(obj, name, value, dct=MISSING):
         if descr is not MISSING:
             error(AttributeError, str_join('', (
                 "'", type_tp_name(tp), "' object attribute '", name, "' is read-only")))
-        if (type_lookup(tp, '__setattr__') is _object_setattr
-                and type_lookup(tp, '__delattr__') is _object_delattr):
+        if attr_way(tp, _STORE) == _GENERIC and attr_way(tp, _DELETE) == _GENERIC:
             attribute_error(str_join('', (
                 "'", type_tp_name(tp), "' object has no attribute '", name,
                 "' and no __dict__ for setting new attributes")), name, obj)
@@ -123,33 +125,38 @@ def generic_setattr(obj, name, value, dct=MISSING):
 def getattr_hook(obj, name):
     """PyObject_GetAttr for every kernel type and class."""
     tp = type(obj)
-    getattribute = type_lookup(tp, '__getattribute__')
+    way = attr_way(tp, _READ)
+    if way == _GENERIC:
+        return generic_getattr(obj, name)
+    if way == _TYPE:
+        return type_getattr(obj, name)
+    if way == _MODULE:
+        return module_getattr(obj, name)
+    return _hooked_getattr(obj, name, tp, way)
+
+
+def _hooked_getattr(obj, name, tp, way):
+    """slot_tp_getattr_hook for the rest: the type's __getattribute__ (or
+    object's lookup, way _GENERIC_GETATTR), then its __getattr__ on
+    AttributeError."""
     getattr_ = type_lookup(tp, '__getattr__')
     if getattr_ is MISSING:
-        if getattribute is _object_getattribute:
-            return generic_getattr(obj, name)
-        if getattribute is type_getattribute and kind(obj, 'type'):
-            return type_getattr(obj, name)
-        if getattribute is module_getattribute and is_subtype(tp, descr_type(getattribute)):
-            return module_getattr(obj, name)
-        if generic_wrapper(getattribute, '__getattribute__', tp):
-            return generic_getattr(obj, name)
-        return call_special(getattribute, obj, name)
+        return call_special(type_lookup(tp, '__getattribute__'), obj, name)
     try:
-        if getattribute is _object_getattribute or generic_wrapper(getattribute, '__getattribute__', None):
+        if way == _GENERIC_GETATTR:
             v = generic_getattr(obj, name, True)
             if v is not MISSING:
                 return v
         else:
-            return call_special(getattribute, obj, name)
+            return call_special(type_lookup(tp, '__getattribute__'), obj, name)
     except AttributeError:
         pass
     return call_special(getattr_, obj, name)
 
 
-# The __getattribute__ of types and of modules, and their lookups with
-# suppress, which type.py and module.py bind.
-type_getattribute = type_getattr = module_getattribute = module_getattr = None
+# The lookups of types and of modules, with suppress, which type.py and
+# module.py bind.
+type_getattr = module_getattr = None
 
 
 def lookup_attr(obj, name):
@@ -157,38 +164,32 @@ def lookup_attr(obj, name):
     raises AttributeError. Generic, type and module attributes are looked up
     with suppress, as CPython does, so that no AttributeError is made."""
     tp = type(obj)
+    way = attr_way(tp, _READ)
     try:
-        if type_lookup(tp, '__getattr__') is MISSING:
-            getattribute = type_lookup(tp, '__getattribute__')
-            if getattribute is _object_getattribute:
-                return generic_getattr(obj, name, True)
-            if getattribute is type_getattribute and kind(obj, 'type'):
-                return type_getattr(obj, name, True)
-            if getattribute is module_getattribute and is_subtype(tp, descr_type(getattribute)):
-                return module_getattr(obj, name, True)
-            if generic_wrapper(getattribute, '__getattribute__', tp):
-                return generic_getattr(obj, name, True)
-        return getattr_hook(obj, name)
+        if way == _GENERIC:
+            return generic_getattr(obj, name, True)
+        if way == _TYPE:
+            return type_getattr(obj, name, True)
+        if way == _MODULE:
+            return module_getattr(obj, name, True)
+        return _hooked_getattr(obj, name, tp, way)
     except AttributeError:
         return MISSING
 
 
 def setattr_hook(obj, name, value):
-    """PyObject_SetAttr for every kernel type and class: a C type's generic
-    slot runs as its function does, without its wrapper."""
+    """PyObject_SetAttr for every kernel type and class."""
     tp = type(obj)
-    setattr_ = type_lookup(tp, '__setattr__')
-    if generic_wrapper(setattr_, '__setattr__', tp):
+    if attr_way(tp, _STORE) == _GENERIC:
         return generic_setattr(obj, name, value)
-    call_special(setattr_, obj, name, value)
+    call_special(type_lookup(tp, '__setattr__'), obj, name, value)
 
 
 def delattr_hook(obj, name):
     tp = type(obj)
-    delattr_ = type_lookup(tp, '__delattr__')
-    if generic_wrapper(delattr_, '__delattr__', tp):
+    if attr_way(tp, _DELETE) == _GENERIC:
         return generic_setattr(obj, name, MISSING)
-    call_special(delattr_, obj, name)
+    call_special(type_lookup(tp, '__delattr__'), obj, name)
 
 
 def merge_class_dict(d, cls):
@@ -425,9 +426,6 @@ _object_reduce = ns_get(_object_dict, '__reduce__', MISSING)
 _object_getstate = ns_get(_object_dict, '__getstate__', MISSING)
 _object_new = ns_get(_object_dict, '__new__', MISSING)
 _object_init = ns_get(_object_dict, '__init__', MISSING)
-_object_getattribute = ns_get(_object_dict, '__getattribute__', MISSING)
-_object_setattr = ns_get(_object_dict, '__setattr__', MISSING)
-_object_delattr = ns_get(_object_dict, '__delattr__', MISSING)
 
 kernel_set('getattr', getattr_hook)
 kernel_set('generic_getattr', generic_getattr)

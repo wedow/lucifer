@@ -2032,6 +2032,20 @@ prim_type_lookup(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     return v != NULL ? v : Py_NewRef(LU_MISSING);
 }
 
+/* attr_way(t, which): the attribute protocol word's field of t (LU_ATTR_*,
+   runtime/lucifer.h) for reads (0), stores (1) or deletes (2). */
+static PyObject *
+prim_attr_way(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
+{
+    ARGS(2); TYPE_ARG(0);
+    long which;
+    if (!PyLong_CheckExact(args[1]) || lu_long_as_long(args[1], &which) < 0 || which < 0 || which > 2) {
+        lu_err_format(PyExc_TypeError, "attr_way(t, which): which is 0, 1 or 2");
+        return NULL;
+    }
+    return PyLong_FromLong(lu_attr_way((PyTypeObject *)args[0], LU_ATTR_READ + 3 * (int)which));
+}
+
 /* type_dict(t): the type's own dict (interpreter state for static types). */
 static PyObject *
 prim_type_dict(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
@@ -2967,7 +2981,7 @@ prim_static_type(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
 #define PURE(name) { #name, (PyCFunction)(void (*)(void))prim_##name, METH_FASTCALL | LU_METH_NOPY, NULL }
 PyMethodDef lu_prim_type_methods[] = {
     PURE(static_type),
-    PURE(type_lookup), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
+    PURE(type_lookup), PURE(attr_way), PURE(type_dict), PURE(type_mro), PURE(type_bases), PURE(type_base),
     FAST(type_name), FAST(type_qualname), FAST(type_set_name), FAST(type_flag), FAST(type_set_flag), FAST(type_layout), FAST(object_size),
     FAST(type_can_new), FAST(type_has_sq_item), FAST(type_new_layout), FAST(type_set_mro), FAST(type_set_bases),
     FAST(type_set_names),
