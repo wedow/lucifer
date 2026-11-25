@@ -913,6 +913,8 @@ Against the landing bar: no row is worse than 1% on either figure (worst: black 
 
 Compile ms read 1,350 for master in the earlier session and 1,171 here: compile ms is time and moves with the host's load, which is why master and this arm were interleaved.
 
+Rides a whole-build purchase would refuse (event logs of this arm): pyflakes makes no purchase and 4 rides (232 IR: isinstance into Checker.handleChildren three times at 8,009-25,503 calls, 75 IR each; one 7-IR site); regex_v8 (-n 3) no purchase and 10 rides (325 IR, the largest _text_of, 80 IR at 10,254 calls). Each covers its marginal price; none would pay a whole rebuild alone (for example _getslice, 30 IR at 1,941 calls: 0.8M against a build of about 84M). They are what riding is for; no second threshold was added.
+
 ## State (2026-11-25)
 
 - Revision 1 stages 1 and 3 done on luc-site1 (lanes d6dca23c, 2fa93b9b; changes 9afb781e, 468a61cc, c1de0377), gated, tabled against master: meets the landing bar. For review and landing; not pushed.
