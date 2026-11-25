@@ -47,8 +47,7 @@ lu_count_kind(const struct lu_ins *in)
     case OP_INLINE_LOAD: case OP_INLINE_LOAD_F: case OP_INLINE_LOAD_I: case OP_INLINE_ORIGIN: case OP_ATTR_LOAD:
     case OP_SLOT_LOAD:
         return CNT_attr_load;
-    case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I: case OP_ATTR_STORE: return CNT_attr_store;
-    case OP_GLOBAL_LOAD: return CNT_global_load;
+    case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I: return CNT_attr_store;
     case OP_LIST_ITEM: case OP_LIST_STORE: case OP_STR_ORD: case OP_BYTES_ITEM: case OP_TYPED_LOAD:
     case OP_TYPED_STORE: case OP_STR_CMP1:
         return CNT_item;

@@ -80,7 +80,7 @@ unsettles(const struct lu_ins *in)
     case OP_DECREF:
         return 0;               /* a release that runs code checks that the unit lives (emit.c settle) */
     case OP_LIST_STORE: case OP_INLINE_STORE: case OP_INLINE_STORE_F: case OP_INLINE_STORE_I:
-    case OP_ATTR_STORE: case OP_STORE:
+    case OP_STORE:
         return 1;
     default:
         return 0;

@@ -260,7 +260,7 @@ lu_deopt_obj(const struct lu_deopt *d, int k)
     X(guard_type) X(guard_type_of) X(guard_type_itself) X(guard_keys) X(guard_func) \
     X(guard_is) X(guard_cell) X(guard_global) X(guard_bit) X(guard_not_null) X(guard_other) \
     X(unbox) X(live) X(poll) X(load_type) X(load_version) X(load_size) X(load_other) \
-    X(attr_load) X(attr_store) X(global_load) X(item) X(helper) X(truth) X(incref) X(decref) X(box) \
+    X(attr_load) X(attr_store) X(item) X(helper) X(truth) X(incref) X(decref) X(box) \
     X(call_unknown) X(call_poly) X(call_refused) X(call_c) X(call_kw) X(hold)
 enum lu_count {
 #define LU_COUNT_ENUM(name) CNT_##name,
@@ -547,11 +547,6 @@ void lu_jit_prof_built(struct lu_prof *p, int base, int calls);
    ledger counts (settled). */
 enum lu_generic { LU_GENERIC_ITER, LU_GENERIC_ATTR, LU_GENERIC_OP, LU_GENERIC_CALL, LU_GENERIC_KINDS };
 void lu_jit_generic(struct lu_unit *u, enum lu_generic kind);
-
-/* POW_F's call (runtime/jit/helpers.c): a NaN with these bits where the
-   power raises or is complex. */
-#define LU_JIT_POW_FAILED 0x7ff4dead0000beefULL
-double lu_jit_float_pow(double v, double w);
 
 /* Whether the register allocator treats the instruction as a call, which
    clobbers every register but the preserved ones: an IF_CALL instruction.

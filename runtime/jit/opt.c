@@ -455,7 +455,6 @@ borrow_safe(const struct lu_ins *in)
     case OP_GUARD_FRAMES: case OP_GUARD_DEPTH: case OP_GUARD_ENTRY:
     case OP_INLINE_LOAD: case OP_INLINE_LOAD_I: case OP_INLINE_LOAD_F: case OP_INLINE_ORIGIN:
     case OP_RITER_NEXT: case OP_JUMP: case OP_BRANCH: case OP_PHI: case OP_ENTRY_LOCAL: case OP_ENTRY_STACK:
-    case OP_ENTRY_PC:
         return 1;
     case OP_HELPER:
         /* Runs no Python and releases nothing that may hold others (FX_SEEN), nor parks. */
@@ -968,7 +967,7 @@ borrow_items(struct lu_func *f)
         if (entry_fs == NULL && in->fs != NULL) {
             entry_fs = in->fs;
         }
-        pure &= in->op == OP_ENTRY_LOCAL || in->op == OP_ENTRY_STACK || in->op == OP_ENTRY_PC || in->op == OP_CONST
+        pure &= in->op == OP_ENTRY_LOCAL || in->op == OP_ENTRY_STACK || in->op == OP_CONST
                 || in->op == OP_CONST_I || in->op == OP_CONST_F || in->op == OP_UNBOX_INT || in->op == OP_UNBOX_FLOAT
                 || in->op == OP_GUARD_TYPE || in->op == OP_GUARD_DEPTH || in->op == OP_GUARD_ENTRY || in->op == OP_JUMP;
     }

@@ -58,7 +58,6 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(CONST_F, REP_F64, IF_PURE)        /* imm: the bits */ \
     X(ENTRY_LOCAL, REP_OBJ, 0)          /* imm: frame->localsplus[imm], borrowed from the slot */ \
     X(ENTRY_STACK, REP_OBJ, 0)          /* imm: the stack entry, owned */ \
-    X(ENTRY_PC, REP_I64, 0)             /* the code unit frame->instr names: a resume unit's entry */ \
     X(PHI, REP_NONE, 0)                 /* args: one input per predecessor; rep set by the builder */ \
     X(UNBOX_INT, REP_I64, IF_GUARD | IF_EFFECT)     /* a: an exact int that fits one digit; kept, since */ \
     X(UNBOX_FLOAT, REP_F64, IF_GUARD | IF_EFFECT)   /* a's known type lets later code fold */ \
@@ -84,7 +83,6 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(NEG_F, REP_F64, IF_PURE) \
     X(ABS_F, REP_F64, IF_PURE) \
     X(SQRT_F, REP_F64, IF_GUARD | IF_EFFECT)        /* a negative operand deopts (math.sqrt raises) */ \
-    X(POW_F, REP_F64, IF_GUARD | IF_EFFECT | IF_CALL)   /* a ** b as float.__pow__; deopts where that raises or is complex */ \
     X(CMP_I, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE */ \
     X(CMP_F, REP_BIT, IF_PURE)          /* imm: Py_LT .. Py_GE, false on NaN except != */ \
     X(IS, REP_BIT, IF_PURE)             /* a is b */ \
@@ -118,7 +116,6 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(TYPED_STORE, REP_NONE, IF_GUARD | IF_EFFECT)     /* a[b] = c (i64, f64) as typecode imm; deopts as TYPED_LOAD \
                                                           and for a c out of the typecode's range */ \
     X(ATTR_LOAD, REP_OBJ, IF_GUARD)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
-    X(ATTR_STORE, REP_NONE, IF_RAISE | IF_EFFECT | IF_CALL)     /* a.(name c) = b, borrowing b */ \
     X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b;   \
                                                        imm2: 1 + the words after it in the class's room (0: unknown), \
                                                        LU_STORE_BY_C when the name's kind does not take it */ \
@@ -129,7 +126,6 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
     X(INLINE_ORIGIN, REP_OBJ, IF_GUARD) /* a's inline value at byte imm as the object it is, a new reference; NULL when it is unboxed */ \
     X(INLINE_STORE_F, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* a's inline word at byte imm = the float b, unboxed */ \
     X(INLINE_STORE_I, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN)   /* the same for the int b */ \
-    X(GLOBAL_LOAD, REP_OBJ, IF_GUARD | IF_CALL) /* imm: the dict, imm2: keys version << 32 | entry */ \
     X(INCREF, REP_NONE, IF_EFFECT) \
     X(DECREF, REP_NONE, IF_EFFECT)    /* imm 1: its type may run code when freed: publishes fs */ \
     X(ENTRY_BORROW, REP_OBJ, IF_GUARD) /* a, uncounted: an entry value that is b[c - 1] (c LU_NOV: b's last item; imm 1: b a tuple), \
