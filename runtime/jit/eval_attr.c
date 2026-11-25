@@ -416,6 +416,42 @@ instance_store(struct ctx *c, lu_v owner, struct lu_vobj *o, PyObject *name)
     return 1;
 }
 
+/* w, an exact staticmethod or classmethod that the class cls has, read
+   through cls or an instance of it, in the owner's place: its callable,
+   read as of its callable field (which __init__ may set again), and for a
+   classmethod bound to cls (in the method form, cls as self; read without
+   a call, a bound method not made until needed, which only a function's
+   can be). 0 when w has no callable, or is a classmethod of anything else
+   read without a call. */
+static int
+wrapped_callable(struct ctx *c, PyObject *w, lu_v cls)
+{
+    PyObject *fn = lu_try_xget_ref((PyObject **)((char *)w + lu_classmethod_callable_offset));
+    int cm = Py_IS_TYPE(w, &PyClassMethod_Type), method = c->oparg & 1;
+    if (fn == NULL || (cm && !method && !PyFunction_Check(fn))) {
+        Py_XDECREF(fn);
+        return 0;
+    }
+    lu_v g = lu_ev_guard(c, OP_GUARD_IS, lu_ev_konst(c, w), (int64_t)(intptr_t)fn);
+    I(c, g)->imm2 = GI_FIELD | (int64_t)lu_classmethod_callable_offset;
+    lu_v f = lu_ev_konst(c, fn);
+    Py_DECREF(fn);              /* the unit holds its constants */
+    if (!cm) {
+        replace_owner(c, f, LU_NOV);
+    }
+    else if (method) {
+        replace_owner(c, f, cls);
+    }
+    else {
+        struct lu_vobj *o;
+        lu_v m = lu_ev_virt_new(c, VK_METHOD, &PyMethod_Type, 2, &o);
+        o->f[0] = f;
+        o->f[1] = cls;
+        replace_owner(c, m, LU_NOV);
+    }
+    return 1;
+}
+
 /* The interpreter's own lookup, called, which tells `pic` (or NULL) what it meets. */
 static void
 load_generic(struct ctx *c, struct lu_pic *pic)
@@ -490,6 +526,28 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
         /* One way of several, which join after the instruction: called out of line. */
         lu_v args[3] = { lu_ev_konst(c, fget), LU_NOV, owner };
         replace_owner(c, lu_ev_helper(c, H_call, 3, args, 1), LU_NOV);
+        break;
+    }
+    case LU_PIC_LOAD_WRAPPED: {
+        /* A staticmethod or classmethod of the owner's class, which the
+           cache names by the class's version alone: found again here, as
+           of that version. */
+        PyTypeObject *t = owner_class(c, owner, version);
+        uint32_t now = 0;
+        int managed = 0;
+        PyObject *w = t != NULL ? lu_specialize_instance_method(t, name, &now, &managed) : NULL;
+        if (w != NULL && now == version) {
+            lu_ev_guard_version(c, owner, version);
+            if (managed) {
+                lu_v args[2] = { owner, lu_ev_konst(c, name) };
+                lu_ev_guard(c, OP_GUARD_BIT, lu_ev_helper(c, H_dict_lacks, 2, args, 0), 1);
+            }
+        }
+        if (w == NULL || now != version || !wrapped_callable(c, w, lu_ev_konst(c, (PyObject *)t))) {
+            load_generic(c, pic);
+        }
+        Py_XDECREF(w);
+        Py_XDECREF(t);
         break;
     }
     case LOAD_ATTR_INSTANCE_VALUE:
@@ -568,12 +626,15 @@ attr_ways(struct ctx *c, struct lu_pic *pic, int n, int i, attr_as *as, int gene
     return 0;
 }
 
-/* A plain attribute of a class the unit knows (Color.RED, a constant kept
-   on a class), as type.__getattribute__ finds it: the metaclass has
-   nothing by the name and its lookup is type's own, and what the class
-   has is a plain value. Read as of the versions of both classes and of
-   the value's own class, which the unit then depends on. 1 with the
-   attribute in place of the owner; 0 when it is not such an attribute. */
+/* An attribute of a class the unit knows, as type.__getattribute__ finds
+   it: the metaclass has nothing by the name and its lookup is type's own.
+   A plain value (Color.RED, a constant kept on a class) is itself, as of
+   its own class's version; a function is itself; a staticmethod is its
+   callable, and a classmethod its callable bound to the class (in the
+   method form, the class as self), read as of the callable field, which
+   __init__ may set again. All as of the versions of the class and the
+   metaclass, which the unit then depends on. 1 with the attribute in
+   place of the owner; 0 when it is none of these. */
 static int
 class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
 {
@@ -589,10 +650,14 @@ class_attribute(struct ctx *c, lu_v owner, PyTypeObject *cls, PyObject *name)
         || _PyType_Lookup(meta, LU_ID(__getattribute__)) != _PyType_Lookup(&PyType_Type, LU_ID(__getattribute__))) {
         return 0;
     }
+    int wrapped = Py_IS_TYPE(k, &PyStaticMethod_Type) || Py_IS_TYPE(k, &PyClassMethod_Type);
     lu_v value = lu_ev_konst(c, k);
-    if (!lu_ev_plain_value(c, k) || !lu_ev_class_relied(c, owner, vc)
-        || !lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)meta), vm)) {
+    if ((!wrapped && !PyFunction_Check(k) && !lu_ev_plain_value(c, k))
+        || !lu_ev_class_relied(c, owner, vc) || !lu_ev_class_relied(c, lu_ev_konst(c, (PyObject *)meta), vm)) {
         return 0;
+    }
+    if (wrapped) {
+        return wrapped_callable(c, k, owner);
     }
     replace_owner(c, value, LU_NOV);
     return 1;
@@ -652,8 +717,18 @@ lu_ev_load_attr(struct ctx *c)
        so has one whose one shape kept failing: its tests leave nowhere. */
     struct lu_pic *pic = op == LOAD_ATTR && owner >= 0
         ? lu_jit_pic(c->code, (int)(c->cache - 1 - lu_code_start(c->code)), 1) : NULL;
-    int done = pic != NULL ? attr_ways(c, pic, __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE), 0, load_as, LOAD_ATTR)
-                           : load_as(c, op, version, index, descr, NULL);
+    int n = pic != NULL ? __atomic_load_n(&pic->n, __ATOMIC_ACQUIRE) : 0;
+    int done;
+    if (n == 1 && pic->e[0].op == LU_PIC_LOAD_WRAPPED && !nospec(c, c->pc)) {
+        /* A staticmethod or classmethod, the one way the site has met: in
+           line, so that the call knows its callee; the version guard
+           leaves for any other class. A lookup that finds it gone loads
+           as the interpreter does, which tells the cache what it meets. */
+        done = load_as(c, LU_PIC_LOAD_WRAPPED, pic->e[0].version, 0, NULL, pic);
+    }
+    else {
+        done = pic != NULL ? attr_ways(c, pic, n, 0, load_as, LOAD_ATTR) : load_as(c, op, version, index, descr, NULL);
+    }
     Py_XDECREF(descr);
     return done;
 }

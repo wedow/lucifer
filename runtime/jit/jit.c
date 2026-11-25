@@ -2272,14 +2272,25 @@ lu_jit_pic_note(struct lu_pic *pic, PyObject *owner, PyObject *name, struct lu_u
             lu_cache_store32(site + 1 + LA_VERSION, tag);      /* a change since takes the tag back */
         }
     }
-    if (op != LU_PIC_STORE_PROPERTY && op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
+    uint32_t wrapped = 0;
+    int managed;
+    PyObject *w = !pic->store && op == LOAD_ATTR ? lu_specialize_instance_method(tp, name, &wrapped, &managed) : NULL;
+    if (w != NULL && wrapped != 0) {
+        /* A staticmethod or classmethod of the class, named by its version
+           alone (the wrapper is no deferred object a cache could hold). */
+        op = LU_PIC_LOAD_WRAPPED;
+        lu_cache_store32(site + 1 + LA_VERSION, wrapped);
+    }
+    Py_XDECREF(w);
+    if (op != LU_PIC_STORE_PROPERTY && op != LU_PIC_LOAD_WRAPPED && op != LOAD_ATTR_INSTANCE_VALUE && op != LOAD_ATTR_METHOD_NO_DICT && op != LOAD_ATTR_METHOD_WITH_VALUES
         && op != LOAD_ATTR_NONDESCRIPTOR_NO_DICT && op != LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
         && op != LOAD_ATTR_WITH_HINT && op != LOAD_ATTR_SLOT && op != LOAD_ATTR_PROPERTY
         && op != STORE_ATTR_INSTANCE_VALUE && op != STORE_ATTR_WITH_HINT && op != STORE_ATTR_SLOT) {
         return;
     }
     struct lu_pic_entry e = { lu_cache_load32(site + 1 + LA_VERSION), (uint16_t)op, lu_cache_load(site + 1 + LA_INDEX),
-                              prop != NULL ? prop : pic->store ? NULL : lu_cache_load_ptr(site + 1 + LA_DESCR) };
+                              prop != NULL ? prop : pic->store || op == LU_PIC_LOAD_WRAPPED ? NULL
+                              : lu_cache_load_ptr(site + 1 + LA_DESCR) };
     int added = 0;
     PyMutex_Lock(&_PyRuntime.pic_lock);
     n = pic->n;

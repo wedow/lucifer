@@ -271,9 +271,14 @@ void lu_jit_note_resume(void);
    Python function (descr the property): the interpreter has no such
    specialization, so the cache makes it itself (jit.c lu_jit_pic_note). */
 #define LU_PIC_STORE_PROPERTY 0x1000
+/* A pic entry's op for a load of an exact staticmethod or classmethod that
+   the owner's class has (specialize.h lu_specialize_instance_method):
+   descr NULL, the wrapper found again from the class by its version when
+   compiled. */
+#define LU_PIC_LOAD_WRAPPED 0x1001
 struct lu_pic_entry {
     uint32_t version;
-    uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _WITH_HINT, _SLOT, _METHOD_*, _NONDESCRIPTOR_* or _PROPERTY;
+    uint16_t op;                /* LOAD_ATTR_INSTANCE_VALUE, _WITH_HINT, _SLOT, _METHOD_*, _NONDESCRIPTOR_*, _PROPERTY or LU_PIC_LOAD_WRAPPED;
                                    STORE_ATTR_INSTANCE_VALUE, _WITH_HINT, _SLOT or LU_PIC_STORE_PROPERTY */
     uint16_t index;
     PyObject *descr;
