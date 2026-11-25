@@ -339,3 +339,30 @@ print(ready.Added.__module__, ready.Added.__name__, type(ready.Added()).__qualna
 # a static type that copies float's tp_hash hashes as a float, though a base of it is unhashable
 x = ready.FloatCmp()
 print(hash(x) == hash(0.0), len({x, x}), {x: 'v'}[x], ready.CmpOnly.__hash__, float(x))
+
+# A thread gives a class over Vec (whose getattro is its own) object's
+# __getattribute__ and takes it away while this one reads an attribute:
+# every read sees one protocol or the other.
+import threading
+
+
+class Flipped(Vec):
+    pass
+
+
+def flip_vec(stop):
+    while not stop.is_set():
+        Flipped.__getattribute__ = object.__getattribute__
+        del Flipped.__getattribute__
+
+
+f = Flipped(1, 2)
+stop = threading.Event()
+flipper = threading.Thread(target=flip_vec, args=(stop,))
+flipper.start()
+try:
+    bad = sum(f.x != 1.0 for _ in range(200000))
+finally:
+    stop.set()
+    flipper.join()
+print('vec flip', bad, f.x)

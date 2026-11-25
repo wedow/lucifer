@@ -1646,8 +1646,8 @@ prim_generic_wrapper(PyObject *m, PyObject *const *args, Py_ssize_t nargs)
     if (generic && args[2] != Py_None) {
         /* the kernel asks of the dunder the type finds: its word says generic */
         PyTypeObject *tp = (PyTypeObject *)args[2];
-        int field = PyUnicode_EqualToUTF8(args[1], "__getattribute__") ? LU_ATTR_READ
-            : PyUnicode_EqualToUTF8(args[1], "__setattr__") ? LU_ATTR_STORE : LU_ATTR_DELETE;
+        const char *dunder = ((PyWrapperDescrObject *)args[0])->d_base->name;   /* args[1]: checked above */
+        int field = dunder[2] == 'g' ? LU_ATTR_READ : dunder[2] == 's' ? LU_ATTR_STORE : LU_ATTR_DELETE;
 #define GENERIC_WAY (field == LU_ATTR_READ ? lu_attr_generic_read(tp) : lu_attr_way(tp, field) == LU_ATTR_GENERIC)
         if (!GENERIC_WAY) {     /* the lookup again only then: the hooks call this on every access */
             LU_ATTR_CHECK("generic_wrapper", tp, field, GENERIC_WAY,

@@ -345,16 +345,13 @@ attr_word(PyTypeObject *tp)
         | (unsigned long)lu_attr_classify(tp, LU_ATTR_DELETE) << LU_ATTR_DELETE;
 }
 
-/* Whether a heap type's attribute slots are the ones attribute_thunk
-   decides: the thunks or object's functions (a C function of its own, or
-   a base's, was given by C or by a wrapper and stays). */
+/* Whether tp's attribute slot (LU_TPFLAGS_GET_DECIDED or _SET_DECIDED) is
+   the one attribute_thunk decided, as lu_set_slot records it; a slot C
+   gave the type stays as C set it. */
 static int
-decided_here(PyTypeObject *tp)
+decided_here(PyTypeObject *tp, unsigned long which)
 {
-    void *get = (void *)tp->tp_getattro, *set = (void *)tp->tp_setattro;
-    return (tp->tp_flags & Py_TPFLAGS_HEAPTYPE)
-        && (get == (void *)lu_slot_tp_getattro || get == (void *)PyObject_GenericGetAttr)
-        && (set == (void *)lu_slot_tp_setattro || set == (void *)PyObject_GenericSetAttr);
+    return (__atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED) & which) != 0;
 }
 
 /* Stores the word, after the slots it reads; the caller holds attr_lock.
@@ -378,8 +375,10 @@ void
 lu_attr_update(PyTypeObject *tp, int decide)
 {
     PyMutex_Lock(&attr_lock);
-    if (decide && decided_here(tp)) {
+    if (decide && decided_here(tp, LU_TPFLAGS_GET_DECIDED)) {
         tp->tp_getattro = (getattrofunc)attribute_thunk(tp, (void *)lu_slot_tp_getattro);
+    }
+    if (decide && decided_here(tp, LU_TPFLAGS_SET_DECIDED)) {
         tp->tp_setattro = (setattrofunc)attribute_thunk(tp, (void *)lu_slot_tp_setattro);
     }
     store_word(tp);
@@ -393,11 +392,11 @@ static int
 attr_current(PyTypeObject *tp)
 {
     unsigned long word = __atomic_load_n(&tp->tp_flags, __ATOMIC_RELAXED) & LU_TPFLAGS_ATTR;
-    int current = (word == 0 || word == attr_word(tp))
-        && (!decided_here(tp)
-            || ((void *)tp->tp_getattro == attribute_thunk(tp, (void *)lu_slot_tp_getattro)
-                && (void *)tp->tp_setattro == attribute_thunk(tp, (void *)lu_slot_tp_setattro)));
-    return current;
+    return word != 0 && word == attr_word(tp)
+        && (!decided_here(tp, LU_TPFLAGS_GET_DECIDED)
+            || (void *)tp->tp_getattro == attribute_thunk(tp, (void *)lu_slot_tp_getattro))
+        && (!decided_here(tp, LU_TPFLAGS_SET_DECIDED)
+            || (void *)tp->tp_setattro == attribute_thunk(tp, (void *)lu_slot_tp_setattro));
 }
 
 static int
@@ -419,21 +418,29 @@ has_gap(PyTypeObject *tp, int gap)
    whether the word is current are evaluated again under attr_lock, which
    holds the word and slots still (a writer that changed the dict before
    the lookups and has not rewritten the slots shows as a word that is not
-   current); the disagreement is the site's only if it is still there. */
-int
+   current); the disagreement is the site's only if it is still there,
+   and the type's tag, taken under the lock and non-zero, is the same at
+   the end: a dict store clears it, and stores into a class's dict do not
+   take attr_lock. The tag, with the lock held; 0 for no check. */
+uint32_t
 lu_attr_check_begin(PyTypeObject *tp, int gap)
 {
     if (!PyInterpreterState_Get()->kernel_booted || has_gap(tp, gap)) {
         return 0;
     }
     PyMutex_Lock(&attr_lock);
-    return 1;
+    uint32_t tag = __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE);
+    if (tag == 0) {
+        PyMutex_Unlock(&attr_lock);
+    }
+    return tag;
 }
 
 void
-lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ, int legacy)
+lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ, int legacy, uint32_t tag)
 {
-    int fatal = differ && !has_gap(tp, gap) && attr_current(tp);
+    int fatal = differ && !has_gap(tp, gap) && attr_current(tp)
+        && __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) == tag;
     PyMutex_Unlock(&attr_lock);
     if (!fatal) {
         return;
@@ -1023,6 +1030,16 @@ lu_set_slot(PyTypeObject *tp, int index, int how, PyTypeObject *from)
         PyMutex_Lock(&attr_lock);
     }
     int err = set_slot(tp, s, how, from);
+    if (attribute && err == 0) {
+        unsigned long which = s->offset == offsetof(PyTypeObject, tp_getattro) ? LU_TPFLAGS_GET_DECIDED
+            : LU_TPFLAGS_SET_DECIDED;
+        if (how == 1 && tp != &PyBaseObject_Type) {
+            __atomic_fetch_or(&tp->tp_flags, which, __ATOMIC_RELAXED);
+        }
+        else {
+            __atomic_fetch_and(&tp->tp_flags, ~which, __ATOMIC_RELAXED);
+        }
+    }
     if (attribute) {
         store_word(tp);
         PyMutex_Unlock(&attr_lock);

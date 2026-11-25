@@ -96,4 +96,55 @@ def main():
     print(bad, s.a, s.b, getattr(s, 'nope', 'default'), Owned.a, getattr(Owned, 'nope', 'default'))
 
 
+# Two threads assigning and deleting the hooks of one class while a third
+# reads: at the end, with every hook in a known state, the class behaves as
+# that state says.
+class Contested:
+    pass
+
+
+def assign(names, rounds):
+    for k in range(rounds):
+        name = names[k % len(names)]
+        f = dict((n, f) for _, n, f in FLIPS[:3])[name]
+        setattr(Contested, name, f)
+        if k % 3:
+            try:
+                delattr(Contested, name)
+            except AttributeError:
+                pass
+
+
+def contested():
+    stop = threading.Event()
+    seen = set()
+
+    def read():
+        c = Contested()
+        while not stop.is_set():
+            c.a = 1
+            seen.add(type(getattr(c, 'a', None)).__name__)
+    reader = threading.Thread(target=read)
+    reader.start()
+    writers = [threading.Thread(target=assign, args=(names, 3000))
+               for names in (('__getattribute__', '__setattr__'), ('__getattr__', '__setattr__'))]
+    for w in writers:
+        w.start()
+    for w in writers:
+        w.join()
+    stop.set()
+    reader.join()
+    for name in ('__getattribute__', '__getattr__', '__setattr__'):
+        if name in Contested.__dict__:
+            delattr(Contested, name)
+    c = Contested()
+    c.a = 3
+    print('contested', c.a, getattr(c, 'nope', 'default'), seen <= {'int', 'str'})
+    Contested.__setattr__ = hook_setattr
+    Contested.__getattr__ = hook_getattr
+    c.a = 4
+    print('contested after', c.a, c.nope)
+
+
 main()
+contested()

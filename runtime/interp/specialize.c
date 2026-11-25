@@ -182,6 +182,13 @@ analyze(PyTypeObject *tp, PyObject *name, int field, int *way, PyObject **descr,
 {
     *version = lu_type_assign_version(tp) ? __atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) : 0;
     *way = lu_attr_way(tp, field);
+    /* The slot as well: C may have set its own and not said so
+       (PyType_Modified), which only the slot shows. */
+    void *slot = field == LU_ATTR_READ ? (void *)tp->tp_getattro : (void *)tp->tp_setattro;
+    if (slot != (void *)PyObject_GenericGetAttr && slot != (void *)lu_slot_tp_getattro
+        && slot != (void *)PyObject_GenericSetAttr && slot != (void *)lu_slot_tp_setattro) {
+        *way = LU_ATTR_SLOT;
+    }
     *descr = _PyType_LookupRef(tp, name);
     if (__atomic_load_n(&tp->tp_version_tag, __ATOMIC_ACQUIRE) != *version) {
         *version = 0;

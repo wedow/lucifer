@@ -452,6 +452,85 @@ for cls in (SlotsPlain, SlotsNode):
     print('slots after', cls.__name__, hot(slot_get, obj), hot(store_slot, obj))
 
 
+# 8. A class's metaclass changed under a hot class-attribute load.
+class MetaA(type):
+    pass
+
+
+class MetaB(type):
+    def __getattribute__(cls, name):
+        return 'meta-b-' + name if name == 'k' else type.__getattribute__(cls, name)
+
+
+class Switched(metaclass=MetaA):
+    k = 'class-k'
+
+
+def class_k(c):
+    return c.k
+
+
+print('metaclass change', hot(class_k, Switched))
+Switched.__class__ = MetaB
+print('metaclass change after', hot(class_k, Switched))
+Switched.__class__ = MetaA
+print('metaclass change back', hot(class_k, Switched))
+
+
+# 11. super() bypasses the instance's __getattribute__.
+class Parent:
+    def who(self):
+        return 'parent'
+
+
+class Child(Parent):
+    def __getattribute__(self, name):
+        return lambda: 'hooked-' + name
+
+    def ask(self):
+        return super().who()
+
+
+print('super bypasses', hot(Child.ask, Child()), hot(lambda o: o.who(), Child()))
+
+
+# 14. A descriptor with __set__ and no __delete__, and the reverse.
+calls = []
+
+
+class SetOnlyDescr:
+    def __get__(self, obj, owner=None):
+        return 'got'
+
+    def __set__(self, obj, value):
+        calls.append(('descr-set', value))
+
+
+class DelOnlyDescr:
+    def __get__(self, obj, owner=None):
+        return 'got'
+
+    def __delete__(self, obj):
+        calls.append(('descr-del',))
+
+
+class Described:
+    s = SetOnlyDescr()
+    d = DelOnlyDescr()
+
+
+def descr_ops(o):
+    out = [o.s, o.d]
+    o.s = 1
+    for f in (lambda: setattr(o, 'd', 2), lambda: delattr(o, 's'), lambda: delattr(o, 'd')):
+        out.append(attempt(f))
+    return out
+
+
+calls.clear()
+print('descriptor halves', hot(descr_ops, Described()), len(calls), sorted(set(calls)))
+
+
 # 15. isinstance negatives on classes with each protocol, and a __class__ that
 #     lies, gained and lost.
 def negative(o):
@@ -465,9 +544,13 @@ class Liar:
 for label, obj in (('plain', Root()), ('node', node(Node)), ('hooked', Hooked()), ('module', mod),
                    ('class', Root), ('liar', Liar())):
     print('isinstance', label, hot(negative, obj))
-Liar.__class__ = property(lambda self: Order)
-print('isinstance liar', hot(negative, Liar()))
-del Liar.__class__
+
+
+class PropertyLiar(Liar):
+    __class__ = property(lambda self: Order)
+
+
+print('isinstance liar by property', hot(negative, PropertyLiar()))
 Liar.__getattribute__ = lambda self, name: Order if name == '__class__' else object.__getattribute__(self, name)
 print('isinstance liar by hook', hot(negative, Liar()))
 del Liar.__getattribute__

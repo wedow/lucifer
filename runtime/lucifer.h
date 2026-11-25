@@ -444,6 +444,10 @@ enum {
 #define LU_ATTR_STORE 44
 #define LU_ATTR_DELETE 47
 #define LU_TPFLAGS_ATTR (0x1ffUL << LU_ATTR_READ)
+/* The class's tp_getattro, tp_setattro is the one attribute_thunk decided
+   (runtime/types/slots.c lu_set_slot), not one C gave it. */
+#define LU_TPFLAGS_GET_DECIDED (1UL << 50)
+#define LU_TPFLAGS_SET_DECIDED (1UL << 51)
 /* The field decided from tp's slots and MRO as they are now, not stored. */
 int lu_attr_classify(PyTypeObject *tp, int field);
 static inline int
@@ -464,13 +468,15 @@ enum {
     LU_ATTR_GAP_THUNK = 2,      /* the slot is the thunk: slot tests miss what it does */
     LU_ATTR_GAP_FALLBACK = 4,   /* the type has __getattr__ */
 };
-int lu_attr_check_begin(PyTypeObject *tp, int gap);
-void lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ, int legacy);
+__attribute__((cold)) uint32_t lu_attr_check_begin(PyTypeObject *tp, int gap);
+__attribute__((cold)) void lu_attr_check_end(const char *site, PyTypeObject *tp, int field, int gap, int differ,
+                                             int legacy, uint32_t tag);
 #define LU_ATTR_CHECK(site, tp, field, expected, legacy, gap) \
     __extension__({ \
         int legacy_ = !!(legacy); \
-        if (legacy_ != !!(expected) && lu_attr_check_begin(tp, gap)) { \
-            lu_attr_check_end(site, tp, field, gap, !!(legacy) != !!(expected), legacy_);  /* again, under the lock */ \
+        uint32_t tag_; \
+        if (__builtin_expect(legacy_ != !!(expected), 0) && (tag_ = lu_attr_check_begin(tp, gap)) != 0) { \
+            lu_attr_check_end(site, tp, field, gap, !!(legacy) != !!(expected), legacy_, tag_);  /* again, under the lock */ \
         } \
         legacy_; \
     })

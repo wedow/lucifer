@@ -409,27 +409,72 @@ PyType_Modified(PyTypeObject *tp)
     lu_type_modified(tp);
 }
 
-/* tp and the classes under it. No lock is held while a word is decided:
-   its lookups assign versions under type_lock. */
-static void
-attr_walk(PyTypeObject *tp, int decide)
+/* The classes a walk has visited: an open-addressed set of addresses. */
+struct seen {
+    PyTypeObject **at;
+    size_t n, cap;
+};
+
+/* 1 when tp is new to the set (now in it), 0 when seen, -1 out of memory. */
+static int
+see(struct seen *s, PyTypeObject *tp)
 {
-    lu_attr_update(tp, decide);
-    PyObject *subs = subclasses_snapshot(tp);
-    for (Py_ssize_t i = 0; subs != NULL && i < PyList_GET_SIZE(subs); i++) {
-        attr_walk((PyTypeObject *)PyList_GET_ITEM(subs, i), decide);
+    if (2 * (s->n + 1) > s->cap) {
+        struct seen g = { .cap = s->cap ? 2 * s->cap : 64 };
+        if ((g.at = PyMem_RawCalloc(g.cap, sizeof *g.at)) == NULL) {
+            return -1;
+        }
+        for (size_t i = 0; i < s->cap; i++) {
+            if (s->at[i] != NULL) {
+                see(&g, s->at[i]);
+            }
+        }
+        PyMem_RawFree(s->at);
+        *s = g;
     }
-    if (subs == NULL) {
-        PyErr_Clear();          /* out of memory: the subclasses keep their words */
+    size_t i = ((uintptr_t)tp >> 4) & (s->cap - 1);
+    for (; s->at[i] != NULL; i = (i + 1) & (s->cap - 1)) {
+        if (s->at[i] == tp) {
+            return 0;
+        }
+    }
+    s->at[i] = tp;
+    s->n++;
+    return 1;
+}
+
+/* tp and the classes under it, each once. No lock is held while a word is
+   decided: its lookups assign versions under type_lock. */
+static void
+attr_walk(PyTypeObject *tp, int decide, struct seen *seen)
+{
+    int fresh = see(seen, tp);
+    if (fresh == 0) {
+        return;
+    }
+    lu_attr_update(tp, decide);
+    PyObject *exc = PyErr_GetRaisedException();     /* a caller's error stays as it was */
+    PyObject *subs = fresh > 0 ? subclasses_snapshot(tp) : NULL;
+    for (Py_ssize_t i = 0; subs != NULL && i < PyList_GET_SIZE(subs); i++) {
+        attr_walk((PyTypeObject *)PyList_GET_ITEM(subs, i), decide, seen);
     }
     Py_XDECREF(subs);
+    PyErr_SetRaisedException(exc);  /* out of memory: the subclasses keep their words */
+}
+
+static void
+attr_walk_all(PyTypeObject *tp, int decide)
+{
+    struct seen seen = { 0 };
+    attr_walk(tp, decide, &seen);
+    PyMem_RawFree(seen.at);
 }
 
 void
 lu_attr_refresh(PyTypeObject *tp, int subclasses)
 {
     if (subclasses) {
-        attr_walk(tp, 0);
+        attr_walk_all(tp, 0);
     }
     else {
         lu_attr_update(tp, 0);
@@ -442,7 +487,7 @@ lu_attr_boot(void)
     for (PyTypeObject *const *t = lu_static_types; *t != NULL; t++) {
         lu_attr_update(*t, 0);
     }
-    attr_walk(&PyBaseObject_Type, 1);   /* and every class the kernel made while its bases' dicts were filled */
+    attr_walk_all(&PyBaseObject_Type, 1);   /* and every class the kernel made while its bases' dicts were filled */
 }
 
 /* The watcher API (typeobject.c). Id 0 is CPython's own, so ids start at 1. */
@@ -1877,7 +1922,7 @@ type_new_layout(PyTypeObject *meta, PyObject *name, PyObject *bases, PyObject *n
             goto fail_type;
         }
     }
-    tp->tp_flags |= Py_TPFLAGS_READY;
+    __atomic_fetch_or(&tp->tp_flags, Py_TPFLAGS_READY, __ATOMIC_RELAXED);    /* the class is reachable: store_word */
     return (PyObject *)tp;
 fail_type:
     Py_DECREF(et);
