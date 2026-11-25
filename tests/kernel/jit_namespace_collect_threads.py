@@ -61,3 +61,30 @@ t.join()
 slot[0] = None
 gc.collect()
 print('wrong', progress[1], 'dead', sum(r() is None for r in refs), 'of', len(refs))
+
+
+# Collections while another thread compiles: a function of a new namespace
+# each round, called at once (compiled at its first call where every
+# function is), while this thread collects.
+stop = []
+made = [0]
+
+
+def compiler():
+    while not stop:
+        ns = load(made[0])
+        f = ns['plain']
+        for i in range(50):
+            f(i)
+        made[0] += 1
+
+
+t = threading.Thread(target=compiler)
+t.start()
+for k in range(40):
+    gc.collect()
+    time.sleep(0.001)
+stop.append(1)
+t.join()
+gc.collect()
+print('compiled while collecting', made[0] > 0)

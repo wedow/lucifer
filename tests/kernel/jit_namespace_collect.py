@@ -168,3 +168,82 @@ def reload_loop(rounds):
 
 
 print('reload', reload_loop(40), Marker.live, len(RESULTS))
+
+
+# Frozen while the caller learned from it, unfrozen before it is dropped:
+# the namespace still goes.
+def frozen_case():
+    gc.freeze()
+    ns = load(8)
+    before = call_direct(ns['plain'], N)
+    gc.unfreeze()
+    ref = weakref.ref(ns['marker'])
+    del ns
+    gc.collect()
+    print('frozen', before, ref() is None)
+
+
+frozen_case()
+
+
+# Dropped and collected while the caller that learned from it still runs:
+# gone once the caller has returned.
+def run_swapping(holder):
+    t = 0
+    for i in range(N):
+        t += holder[0]['plain'](i)
+        if i == N // 2:
+            holder[0] = load(10)
+            gc.collect()
+    return t
+
+
+def running_case():
+    holder = [load(9)]
+    ref = weakref.ref(holder[0]['marker'])
+    t = run_swapping(holder)
+    del holder
+    gc.collect()
+    print('running', t, ref() is None)
+
+
+running_case()
+
+# A finalizer brings a learned function back to life; the caller goes on
+# calling it.
+KEEP = []
+SRC2 = """
+def kept(x):
+    return x * SCALE
+
+class Keeper:
+    def __del__(self):
+        KEEP.append(kept)
+
+keeper = Keeper()
+"""
+
+
+def resurrect_case():
+    ns = {'SCALE': 11, 'KEEP': KEEP}
+    exec(SRC2, ns)
+    before = call_direct(ns['kept'], N)
+    del ns
+    gc.collect()
+    f = KEEP.pop()
+    print('resurrected', before, call_direct(f, N), f.__globals__['SCALE'])
+
+
+resurrect_case()
+
+
+# What refers to a function a hot caller learned: what the program holds.
+def referrers_case():
+    ns = load(12)
+    call_direct(ns['plain'], N)
+    print('referrers', sorted(type(r).__name__ for r in gc.get_referrers(ns['plain'])))
+
+
+referrers_case()
+gc.collect()
+print('live at the end', Marker.live)
