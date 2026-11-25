@@ -63,7 +63,7 @@ PyMonitoring_EnterScope(PyMonitoringState *state_array, uint64_t *version, const
                         Py_ssize_t length)
 {
     PyInterpreterState *interp = PyInterpreterState_Get();
-    uint32_t current = (uint32_t)interp->monitoring_version;
+    uint64_t current = interp->monitoring_version;
     if (current == *version) {
         return 0;
     }

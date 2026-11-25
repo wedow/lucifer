@@ -1581,11 +1581,10 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
             return LU_JIT_NONE;
         }
         u = find(jc, pc, frame);
-        if (u != NULL && tools_moved(jc, u, code->_co_instrumentation_version)) {
-            return LU_JIT_NONE;
-        }
     }
-    if (u == NULL && (u = compile_at(ts, frame, pc)) == NULL) {
+    /* A build that tools changed under (it may park) is stale at once. */
+    if ((u == NULL && (u = compile_at(ts, frame, pc)) == NULL)
+        || tools_moved(state_of(code), u, __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
         return LU_JIT_NONE;
     }
     count(&stats.entries, 1);

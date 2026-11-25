@@ -78,21 +78,24 @@ int lu_frame_set_lineno(struct lu_frame *f, PyObject *value);
 /* Brings `code` to the interpreter's monitoring version (RESUME). */
 int lu_instrument(PyCodeObject *code, PyInterpreterState *interp);
 /* Whether a tool may watch `code` run, so that it runs only in the
-   interpreter: at its last instrumentation (force_instrument) it had local
-   events or a tool had a global event on, or tools changed since. A code
-   whose tools have all gone has no instrumented opcode left and runs
-   compiled again. Its version is read first: force_instrument writes the
-   byte before it publishes the version. */
+   interpreter: tools changed since its last instrumentation
+   (force_instrument), or then it had local events or a tool had a global
+   event on. A code whose tools have all gone has no instrumented opcode
+   left and runs compiled again; kernel and shim code fire no events. Its
+   version is read first: force_instrument writes the byte before it
+   publishes the version. */
 static inline int
 lu_code_watched(PyCodeObject *code)
 {
-    lu_monitoring *data = __atomic_load_n(&code->_co_monitoring, __ATOMIC_ACQUIRE);
-    if (data == NULL) {
+    if (code->co_flags & (LU_CO_KERNEL | LU_CO_HIDDEN | LU_CO_NO_MONITORING_EVENTS)) {
         return 0;
     }
     uintptr_t version = __atomic_load_n(&code->_co_instrumentation_version, __ATOMIC_ACQUIRE);
-    return version != (uint32_t)__atomic_load_n(&lu_interp()->monitoring_version, __ATOMIC_RELAXED)
-        || __atomic_load_n(&data->watched, __ATOMIC_RELAXED);
+    if (version != __atomic_load_n(&lu_interp()->monitoring_version, __ATOMIC_RELAXED)) {
+        return 1;
+    }
+    lu_monitoring *data = __atomic_load_n(&code->_co_monitoring, __ATOMIC_ACQUIRE);
+    return data != NULL && __atomic_load_n(&data->watched, __ATOMIC_RELAXED);
 }
 /* Frees a code object's monitoring data. */
 void lu_monitoring_free(PyCodeObject *code);

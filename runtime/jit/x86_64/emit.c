@@ -2224,7 +2224,7 @@ parked_end(struct asm_ *a, struct lu_ins *in)
         int polled = exit_to(a, in->fs, EXIT_POLL, 0, 0);
         jcc(a, CC_NE, seen);
         load(a, RCX, R14, offsetof(struct lu_task, carrier));
-        mov_ri(a, R11, (int64_t)a->f->code->_co_instrumentation_version);
+        mov_ri(a, R11, (int64_t)a->f->unit->version);
         cmp_rm(a, R11, RCX, offsetof(struct lu_carrier, poll));
         jcc(a, CC_E, kept);
         parked_leave(a, in, polled);
@@ -5127,7 +5127,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            come back. */
         int poll = exit_to(a, in->fs, EXIT_POLL, 0, 0), done = new_label(a), top = new_label(a);
         int merge = new_label(a), slow = new_label(a);
-        int64_t version = (int64_t)a->f->code->_co_instrumentation_version;
+        int64_t version = (int64_t)a->f->unit->version;
         uintptr_t stays = LU_POLL_QSBR | (in->fs->code->co_flags & LU_CO_KERNEL ? LU_POLL_VISIBLE : 0);
         bind(a, top);
         load(a, RAX, R14, offsetof(struct lu_task, carrier));
@@ -5382,7 +5382,7 @@ direct_entry(struct asm_ *a)
     jcc(a, CC_B, decline);
     /* No event pending, and the tools as the code was compiled under. */
     load(a, RAX, RAX, offsetof(struct lu_carrier, poll));
-    mov_ri(a, R11, (int64_t)code->_co_instrumentation_version);
+    mov_ri(a, R11, (int64_t)a->f->unit->version);
     alu_rr(a, ALU_CMP, RAX, R11);
     jcc(a, CC_NE, decline);
     /* No tool watches it (lu_code_watched; the version is the compare above). */

@@ -608,17 +608,17 @@ most_significant_bit(uint8_t bits)
     return 31 - __builtin_clz((unsigned)bits);
 }
 
-static uint32_t
+static uintptr_t
 global_version(PyInterpreterState *interp)
 {
-    return (uint32_t)__atomic_load_n(&interp->monitoring_version, __ATOMIC_RELAXED);
+    return __atomic_load_n(&interp->monitoring_version, __ATOMIC_RELAXED);
 }
 
 /* Publishes a new version: the interpreter's, which tasks bound from now on
    read, and every bound carrier's poll word, without touching its reasons.
    The world is stopped. */
 static void
-set_global_version(PyInterpreterState *interp, uint32_t version)
+set_global_version(PyInterpreterState *interp, uintptr_t version)
 {
     __atomic_store_n(&interp->monitoring_version, version, __ATOMIC_SEQ_CST);
     pthread_mutex_lock(&interp->tasks_lock.mutex);      /* tasks come and go during a stop */
@@ -1360,11 +1360,7 @@ lu_monitoring_set_events(int tool_id, lu_event_set events)
     if (get_events(&interp->monitors, tool_id) == events) {
         return 0;
     }
-    uint32_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
-    if (new_version == 0) {
-        PyErr_Format(PyExc_OverflowError, "events set too many times");
-        return -1;
-    }
+    uintptr_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
     set_events(&interp->monitors, tool_id, events);
     set_global_version(interp, new_version);
     return instrument_all_executing_code_objects(interp);
@@ -1389,11 +1385,7 @@ lu_monitoring_set_local_events(PyCodeObject *code, int tool_id, lu_event_set eve
     if (get_local_events(local, tool_id) == events) {
         return 0;
     }
-    uint32_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
-    if (new_version == 0) {
-        PyErr_Format(PyExc_OverflowError, "events set too many times");
-        return -1;
-    }
+    uintptr_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
     set_local_events(local, tool_id, events);
     /* Compiled code that runs the code, in line or not, was built under the
        version before: it leaves, as for a global change. */
@@ -1414,12 +1406,7 @@ lu_monitoring_clear_tool(int tool_id)
         lu_stw_start(interp);
         return -1;
     }
-    uint32_t version = global_version(interp) + MONITORING_VERSION_INCREMENT;
-    if (version == 0) {
-        PyErr_Format(PyExc_OverflowError, "events set too many times");
-        lu_stw_start(interp);
-        return -1;
-    }
+    uintptr_t version = global_version(interp) + MONITORING_VERSION_INCREMENT;
     /* This version invalidates the local events of the tool on every code
        object, and is ready for the next set_local_events. */
     interp->monitoring_tool_versions[tool_id] = version;
@@ -1436,13 +1423,8 @@ lu_monitoring_restart(void)
 {
     PyInterpreterState *interp = PyInterpreterState_Get();
     lu_stw_stop(interp);
-    uint32_t restart_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
-    uint32_t new_version = restart_version + MONITORING_VERSION_INCREMENT;
-    if (new_version <= MONITORING_VERSION_INCREMENT) {
-        lu_stw_start(interp);
-        PyErr_Format(PyExc_OverflowError, "events set too many times");
-        return -1;
-    }
+    uintptr_t restart_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
+    uintptr_t new_version = restart_version + MONITORING_VERSION_INCREMENT;
     interp->last_restart_version = restart_version;
     set_global_version(interp, new_version);
     int res = instrument_all_executing_code_objects(interp);
