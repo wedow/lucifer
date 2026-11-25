@@ -180,6 +180,7 @@ static struct {
     unsigned long compiles, failures, entries, returns, units_dead, direct, compiled, invalidated, waited, retired,
         generic;
     unsigned long resumes, resumes_compiled, raised;
+    unsigned long declined_events, declined_stale, declined_other;     /* stage 1 of one entry protocol */
     unsigned long exits[EXIT_REASONS];
     unsigned long inlined;
     unsigned long bailouts[256];        /* side exits planted, per base opcode */
@@ -1637,11 +1638,16 @@ listed(const char *list, const char *name)
 
 /* The unit to enter at pc, compiled now if this thread may: the checks
    that hold for the code's whole life are made here, before its first
-   unit. */
+   unit, after those that hold for the unit's (its gate holds them while
+   it lives: the version moves whenever they change). */
 static struct lu_unit *
 compile_at(PyThreadState *ts, struct lu_frame *frame, int pc)
 {
     PyCodeObject *code = frame->code;
+    _PyFrameEvalFunction hook = ts->interp->eval_frame;
+    if (lu_code_watched(code) || (hook != NULL && hook != lu_perf_eval) || lu_jit_stack_low()) {
+        return NULL;
+    }
     if (!ts->interp->kernel_booted || !(code->co_flags & CO_OPTIMIZED)) {
         if (_PyRuntime.jit.events) {
             tally(ts->interp->kernel_booted ? "refused-unoptimized" : "refused-boot", code, pc, NULL, 0, NULL, 0);
@@ -1699,26 +1705,8 @@ lu_jit_backend(void)
     return lu_target.name;
 }
 
-/* Entering a unit that stores without locks while serial: the task's
-   unlocked_jit is 1 before the unit's death is read, so that the switch to
-   parallel either sees the word or is seen (runtime/thread/task.c); the
-   word before is the activation's, back when it ends. Whether it died. */
-static int
-serial_entry_dead(struct lu_task *t, struct lu_jit_act *act)
-{
-    act->unlocked_jit = t->unlocked_jit;
-    if (!act->unit->serial) {
-        return 0;
-    }
-    __atomic_store_n(&t->unlocked_jit, 1, __ATOMIC_RELAXED);
-    __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    if (!__atomic_load_n(&act->unit->dead, __ATOMIC_RELAXED)) {
-        return 0;
-    }
-    __atomic_store_n(&t->unlocked_jit, act->unlocked_jit, __ATOMIC_RELAXED);
-    return 1;
-}
-
+/* The end of a serial unit's activation: the task's unlocked word as it
+   was before its gate stored 1 (runtime/thread/task.c). */
 static void
 serial_exit(struct lu_task *t, struct lu_jit_act *act)
 {
@@ -1729,7 +1717,7 @@ serial_exit(struct lu_task *t, struct lu_jit_act *act)
 
 /* The code was instrumented for tools other than those the unit was built
    under (the poll word's version): the unit runs what it took in line as it
-   was then, and its polls never pass. It dies; the next build is current. */
+   was then, and its gate never passes. It dies; the next build is current. */
 static int
 tools_moved(struct lu_jit_code *jc, struct lu_unit *u, uintptr_t version)
 {
@@ -1740,21 +1728,26 @@ tools_moved(struct lu_jit_code *jc, struct lu_unit *u, uintptr_t version)
     return 1;
 }
 
-enum lu_jit_result
-lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
+static uintptr_t
+poll_word(PyThreadState *ts)
 {
-    PyCodeObject *code = frame->code;
-    struct lu_task *task = (struct lu_task *)ts;
-    /* What can change while the code has units: the frame, tools, a hook. */
-    if (frame->locals != NULL || lu_code_watched(code) || lu_jit_stack_low()
-        || ts->tracing || (ts->interp->eval_frame != NULL && ts->interp->eval_frame != lu_perf_eval)
-        || code->_co_instrumentation_version
-           != (__atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
-        return LU_JIT_NONE;
+    return __atomic_load_n(&((struct lu_task *)ts)->carrier->poll, __ATOMIC_RELAXED);
+}
+
+/* The unit to enter frame by at pc: the live one built for its globals
+   and builtins, else (compile) one built now unless the code's entry
+   waits. None while the frame's locals are a mapping or a tool's callback
+   runs on the thread. */
+static struct lu_unit *
+unit_for(PyThreadState *ts, struct lu_frame *frame, struct lu_jit_code *jc, int pc, int compile)
+{
+    if (frame->locals != NULL || ts->tracing) {
+        return NULL;
     }
-    int pc = (int)(frame->instr - lu_code_start(code));
-    struct lu_jit_code *jc = state_of(code);
-    struct lu_unit *u = NULL;
+    struct lu_unit *u = jc != NULL ? find(jc, pc, frame) : NULL;
+    if (u != NULL || !compile) {
+        return u;
+    }
     if (jc != NULL) {
         uint32_t wait = __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED);
         if (wait != 0 || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
@@ -1762,33 +1755,94 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
                 __atomic_store_n(&jc->wait[pc], wait - 1, __ATOMIC_RELAXED);
                 count(&stats.waited, 1);
                 if (_PyRuntime.jit.events) {
-                    tally(jc->print != 0 ? "waited-after-unit" : "waited-cold", code, pc, NULL, 0, NULL, 0);
+                    tally(jc->print != 0 ? "waited-after-unit" : "waited-cold", frame->code, pc, NULL, 0, NULL, 0);
                 }
             }
-            return LU_JIT_NONE;
+            return NULL;
         }
-        u = find(jc, pc, frame);
     }
-    /* A build that tools changed under (it may park) is stale at once. */
-    if ((u == NULL && (u = compile_at(ts, frame, pc)) == NULL)
-        || tools_moved(state_of(code), u, __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED) & ~LU_POLL_EVENTS_MASK)) {
-        return LU_JIT_NONE;
-    }
-    count(&stats.entries, 1);
-    struct lu_jit_act act = { u, task->jit_act, 0 };
-    if (serial_entry_dead(task, &act)) {
-        return LU_JIT_NONE;
-    }
+    return compile_at(ts, frame, pc);
+}
+
+/* Runs u on frame, its activation linked meanwhile (lu_jit_reclaim reads
+   it); nothing between the find and here polls. The unit's gate declines
+   (LU_JIT_NONE) for an event pending, a low C stack, death, or tools other
+   than those it was built under: then it dies. */
+static int
+enter(PyThreadState *ts, struct lu_unit *u, struct lu_frame *frame, PyObject **result)
+{
+    struct lu_task *task = (struct lu_task *)ts;
+    struct lu_jit_act act = { u, task->jit_act, task->unlocked_jit };
     task->jit_act = &act;
     bump_entries(u);
+    int r = u->fn(ts, frame, result);
+    if (r == LU_JIT_NONE) {
+        /* Before left, which may free a stale unit. */
+        tools_moved(state_of(frame->code), u, poll_word(ts) & ~LU_POLL_EVENTS_MASK);
+    }
+    serial_exit(task, &act);
+    task->jit_act = act.outer;
+    left(u);
+    return r;
+}
+
+/* Stage 1 of one entry protocol: what the C gates before it refused frame
+   for, or NULL (c: lu_jit_run's, which also refused an event pending,
+   a kernel unit's visible ones excepted now, and a disabled code). */
+static const char *
+old_refusal(PyThreadState *ts, struct lu_frame *frame, uintptr_t poll, int c)
+{
+    PyCodeObject *code = frame->code;
+    uintptr_t events = poll & LU_POLL_EVENTS_MASK & ~(code->co_flags & LU_CO_KERNEL ? (uintptr_t)LU_POLL_VISIBLE : 0);
+    struct lu_jit_code *jc = state_of(code);
+    return lu_code_watched(code) ? "a tool watches its code"
+        : lu_jit_stack_low() ? "the C stack is low"
+        : ts->interp->eval_frame != NULL && ts->interp->eval_frame != lu_perf_eval ? "a frame evaluation hook"
+        : code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK) ? "its code's version is not the poll word's"
+        : c && events != 0 ? "an event pending"
+        : c && jc != NULL && __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) ? "its code disabled"
+        : NULL;
+}
+
+/* Stage 1: a unit that ran where the old gates refused is fatal; one that
+   declined where they would have entered is counted, by reason. */
+static void
+checked(PyThreadState *ts, struct lu_unit *u, int r, const char *why, const char *site)
+{
+    if (r != LU_JIT_NONE && why != NULL) {
+        fprintf(stderr, "jit: %s entered %s@%d, which the old gate refused: %s\n", site,
+                PyUnicode_AsUTF8(u->code->co_qualname), u->entry_pc, why);
+        Py_FatalError("jit: a unit ran that the old entry gate refused");
+    }
+    if (r == LU_JIT_NONE && why == NULL) {
+        uintptr_t poll = poll_word(ts);
+        count(poll & LU_POLL_EVENTS_MASK ? &stats.declined_events
+              : u->version != (poll & ~LU_POLL_EVENTS_MASK) ? &stats.declined_stale : &stats.declined_other, 1);
+    }
+}
+
+void
+lu_jit_entry_broken(const char *what)
+{
+    Py_FatalError(what);
+}
+
+enum lu_jit_result
+lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
+{
+    PyCodeObject *code = frame->code;
+    int pc = (int)(frame->instr - lu_code_start(code));
+    struct lu_unit *u = unit_for(ts, frame, state_of(code), pc, 1);
+    if (u == NULL) {
+        return LU_JIT_NONE;
+    }
+    const char *why = old_refusal(ts, frame, poll_word(ts), 0);
     int debug = _PyRuntime.jit.debug;
     if (debug) {
         fprintf(stderr, "jit: enter %s@%d\n", PyUnicode_AsUTF8(code->co_qualname), pc);
     }
-    int r = u->fn(ts, frame, result);
-    serial_exit(task, &act);
-    task->jit_act = act.outer;
-    left(u);
+    int r = enter(ts, u, frame, result);
+    checked(ts, u, r, why, "lu_jit_enter");
     if (debug) {
         struct lu_frame *cf = (struct lu_frame *)ts->current_frame;
         int py = cf != NULL && cf->code != NULL;       /* else back in a C caller, or its shim frame */
@@ -1801,6 +1855,9 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
             PyErr_SetRaisedException(e);
         }
     }
+    if (r != LU_JIT_NONE) {
+        count(&stats.entries, 1);
+    }
     if (r == LU_JIT_RETURN) {
         count(&stats.returns, 1);
     }
@@ -1808,13 +1865,14 @@ lu_jit_enter(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
 }
 
 /* MAKE_CELL and COPY_FREE_VARS as the interpreter runs them, up to the
-   RESUME (or a generator's RETURN_GENERATOR): 0, or -1 with an exception
+   RESUME, instrumented or not (or a generator's RETURN_GENERATOR): 0, or -1 with an exception
    and frame->instr after the instruction that raised. */
 static int
 prologue(struct lu_frame *frame)
 {
     PyCodeObject *code = frame->code;
-    for (lu_codeunit *at = lu_code_start(code); at->op.code != RESUME && at->op.code != RETURN_GENERATOR; at++) {
+    for (lu_codeunit *at = lu_code_start(code);
+         at->op.code != RESUME && at->op.code != INSTRUMENTED_RESUME && at->op.code != RETURN_GENERATOR; at++) {
         if (at->op.code == COPY_FREE_VARS) {
             PyObject **closure = &PyTuple_GET_ITEM(((PyFunctionObject *)frame->func)->func_closure, 0);
             PyObject **free = frame->localsplus + code->co_nlocalsplus - at->op.arg;
@@ -1862,9 +1920,6 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     PyCodeObject *code = frame->code;
     struct lu_jit_code *jc = state_of(code);
     struct lu_task *task = (struct lu_task *)ts;
-    /* lu_jit_enter's conditions, and RESUME's: no poll pending, the code
-       instrumented for the tools as they are now. */
-    uintptr_t poll = __atomic_load_n(&task->carrier->poll, __ATOMIC_RELAXED);
     /* A generator's frame, resumed, goes on in the unit entered after
        the RESUME it was saved at (a yield's, not a delegation's, which
        the interpreter's loop runs), if there is one: with no turn of the
@@ -1880,72 +1935,45 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
         return 0;
     }
     int at = gen ? (int)(resume - lu_code_start(code)) + 1 + lu_opcode_caches[RESUME] : jc != NULL ? jc->call_pc : 0;
-    if (jc == NULL || at <= 0 || frame->locals != NULL || lu_jit_stack_low()
-        || (poll & LU_POLL_EVENTS_MASK)
-        || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || lu_code_watched(code)
-        || ts->tracing || code->_co_instrumentation_version != (poll & ~LU_POLL_EVENTS_MASK)) {
+    struct lu_unit *u = at > 0 ? unit_for(ts, frame, jc, at, 0) : NULL;
+    if (u == NULL) {
         return 0;
     }
-    /* A unit is live only while its entry does not wait (kill marks it dead). */
-    struct lu_unit *u = find(jc, at, frame);
-    if (u == NULL || tools_moved(jc, u, poll & ~LU_POLL_EVENTS_MASK)) {
-        return 0;
-    }
-    struct lu_jit_act act = { u, task->jit_act, 0 };
-    if (serial_entry_dead(task, &act)) {
-        return 0;
-    }
-    task->jit_act = &act;
+    const char *why = old_refusal(ts, frame, poll_word(ts), 1);
     if (_PyRuntime.jit.debug) {
         fprintf(stderr, "jit: call %s\n", PyUnicode_AsUTF8(code->co_qualname));
     }
     if (fresh) {
         Py_DECREF(*--frame->stackpointer);
     }
-    int pc = u->entry_pc;
     struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
     entry.previous = (struct lu_frame *)ts->current_frame;
     frame->previous = &entry;
     ts->current_frame = (struct _PyInterpreterFrame *)frame;
-    if (!gen && pc > 1 && prologue(frame) < 0) {
-        serial_exit(task, &act);
-        task->jit_act = act.outer;
-        left(u);
-        *result = lu_eval_continue(ts, 1);
-        return 1;
+    if (!gen && at > 1) {
+        if (prologue(frame) < 0) {
+            *result = lu_eval_continue(ts, 1);
+            return 1;
+        }
+        u = find(jc, at, frame);        /* a collection in the prologue may have taken it */
     }
-    frame->instr = lu_code_start(code) + pc;
+    frame->instr = lu_code_start(code) + at;
     frame->last = frame->instr - 1 - lu_opcode_caches[RESUME];
     lu_qsbr_quiescent(task->carrier);
-    count(gen ? &stats.resumes_compiled : &stats.direct, 1);
-    bump_entries(u);
-    int r = u->fn(ts, frame, result);
-    serial_exit(task, &act);
-    task->jit_act = act.outer;
-    left(u);
-    if (r == LU_JIT_YIELD) {
-        /* As the interpreter's YIELD_VALUE, back to a C caller. */
-        lu_gen_suspend(ts, frame, frame->instr[-1].op.arg);
-        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
+    int r = LU_JIT_NONE;
+    if (u != NULL) {
+        r = enter(ts, u, frame, result);
+        checked(ts, u, r, why, "lu_jit_run");
     }
-    else if (r == LU_JIT_RETURN && gen) {
-        /* As its return_frame: a loop's step ends with no value. */
-        uint8_t ret = frame->ret;
-        lu_gen_finish(ts, frame);
-        if (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT) {
-            Py_DECREF(*result);
-            *result = LU_MISSING;
-        }
-        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
-    }
-    else if (r == LU_JIT_RETURN || r == LU_JIT_RAISED) {
-        lu_frame_pop(ts, frame);
-        ts->current_frame = (struct _PyInterpreterFrame *)entry.previous;
-        *result = r == LU_JIT_RETURN ? *result : NULL;
+    if (r == LU_JIT_NONE) {
+        /* Declined, the frame made ready: the interpreter runs it from its RESUME. */
+        frame->instr = frame->last;
+        r = LU_JIT_DEOPT;
     }
     else {
-        *result = lu_eval_continue(ts, r == LU_JIT_ERROR);
+        count(gen ? &stats.resumes_compiled : &stats.direct, 1);
     }
+    *result = lu_jit_finish(ts, frame, r, *result, &entry);
     return 1;
 }
 
@@ -1957,8 +1985,9 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
     struct lu_jit_code *jc = state_of(code);
     int (*entry)(PyThreadState *, PyFunctionObject *, PyObject *const *, PyObject **, uint64_t, struct lu_jit_call *) =
         jc != NULL && jc->direct.nargs == nargs ? __atomic_load_n(&jc->direct.entry, __ATOMIC_ACQUIRE) : NULL;
-    /* An exception pending, which lu_eval would set aside: the interpreter's call. */
-    if (entry == NULL || ts->current_exception != NULL) {
+    /* An exception pending, which lu_eval would set aside, or a tool's
+       callback running: the interpreter's call. */
+    if (entry == NULL || ts->current_exception != NULL || ts->tracing) {
         return 0;
     }
     takes &= nargs < 64 ? ((uint64_t)1 << nargs) - 1 : ~(uint64_t)0;
@@ -1971,12 +2000,7 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
     serial_exit((struct lu_task *)ts, &call.act);     /* the entry kept the word in the record */
     ((struct lu_task *)ts)->jit_act = call.act.outer;
     left(call.act.unit);
-    if (r == LU_JIT_RETURN) {
-        lu_frame_pop(ts, call.frame);
-    }
-    else {
-        result = lu_jit_call_finish(ts, call.frame, r);
-    }
+    result = lu_jit_finish(ts, call.frame, r, result, NULL);
     /* The parameters released what the arguments gave them: they have it again. */
     for (; takes != 0; takes &= takes - 1) {
         Py_INCREF(args[__builtin_ctzll(takes)]);
@@ -2837,6 +2861,8 @@ lu_jit_report(void)
     fprintf(stderr, ", raised %lu\n", stats.raised);
     fprintf(stderr, "jit: entries waited %lu, units retired %lu, generic passes %lu\n", stats.waited, stats.retired,
             stats.generic);
+    fprintf(stderr, "jit: entry gate declined where the old gates entered: an event pending %lu, stale %lu, other %lu\n",
+            stats.declined_events, stats.declined_stale, stats.declined_other);
     fprintf(stderr, "jit: units freed %lu, dead held %lu\n", dying.freed, dying.n);
     fprintf(stderr, "jit: side exits compiled (bailouts) by opcode:");
     for (int i = 0; i < 256; i++) {

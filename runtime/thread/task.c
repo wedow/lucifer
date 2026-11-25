@@ -8,6 +8,8 @@
 
 #define _GNU_SOURCE
 #include "thread/lock.h"
+#include "interp/instrument.h"
+#include "interp/perf.h"
 
 #include <errno.h>
 #include <unistd.h>
@@ -590,8 +592,23 @@ _PyInterpreterState_GetEvalFrameFunc(PyInterpreterState *interp)
     return interp->eval_frame != NULL ? interp->eval_frame : _PyEval_EvalFrameDefault;
 }
 
+/* Whether frames must reach `f` (perf's hook needs none from compiled code). */
+static int
+hooked(_PyFrameEvalFunction f)
+{
+    return f != NULL && f != lu_perf_eval;
+}
+
 void
 _PyInterpreterState_SetEvalFrameFunc(PyInterpreterState *interp, _PyFrameEvalFunction eval_frame)
 {
-    interp->eval_frame = eval_frame == _PyEval_EvalFrameDefault ? NULL : eval_frame;
+    eval_frame = eval_frame == _PyEval_EvalFrameDefault ? NULL : eval_frame;
+    if (hooked(eval_frame) == hooked(interp->eval_frame)) {
+        interp->eval_frame = eval_frame;
+        return;
+    }
+    lu_stw_stop(interp);
+    interp->eval_frame = eval_frame;
+    lu_monitoring_hook_changed(interp);
+    lu_stw_start(interp);
 }

@@ -255,6 +255,7 @@ swap_streams(struct asm_ *a)
 }
 
 static void jmp(struct asm_ *a, int label);
+static void broken_if(struct asm_ *a, int cc, const char *what);
 static int new_label(struct asm_ *a);
 static void bind(struct asm_ *a, int label);
 
@@ -1959,7 +1960,9 @@ direct_done(struct asm_ *a, uint64_t takes, int done)
     mov_rr(a, RDI, R14);
     load(a, RSI, RBP, CALL_AT(frame));
     op_rr(a, 0, 0x89, RAX, RDX);                /* mov edx, eax */
-    call_abs(a, (void *)lu_jit_call_finish);
+    mov_ri(a, RCX, 0);                          /* no value: not a return */
+    mov_ri(a, R8, 0);                           /* no marker: the caller's frame is under it */
+    call_abs(a, (void *)lu_jit_finish);
     if (takes != 0) {
         store(a, RSP, 0, RAX);
         takes_back(a, takes);
@@ -4385,15 +4388,15 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         return 0;
     }
     case OP_GUARD_ENTRY: {
-        int other = exit_to(a, in->fs, EXIT_POLL, 0, 0);
+        /* find and the direct entry compared them (stage 1 of one entry protocol). */
         load(a, RCX, R15, offsetof(struct lu_frame, globals));
         mov_ri(a, RAX, in->imm);
         alu_rr(a, ALU_CMP, RCX, RAX);
-        jcc(a, CC_NE, other);
+        broken_if(a, CC_NE, "jit: a unit entered with another function's globals");
         load(a, RCX, R15, offsetof(struct lu_frame, builtins));
         mov_ri(a, RAX, in->imm2);
         alu_rr(a, ALU_CMP, RCX, RAX);
-        jcc(a, CC_NE, other);
+        broken_if(a, CC_NE, "jit: a unit entered with another function's builtins");
         return 0;
     }
     case OP_GUARD_FRAMES: {
@@ -5304,6 +5307,65 @@ saves(struct asm_ *a)
     alu_ri(a, ALU_SUB, RSP, a->frame_bytes);
 }
 
+/* The gate, the first thing either entry does (RSP as the saves left it,
+   R14 the task): a serial unit stores the task's unlocked word, kept at
+   base + off for the activation's end, before it reads its death (the
+   switch to parallel either sees the word or is seen: runtime/thread/
+   task.c); the poll word is the version the unit was built under with no
+   event pending, a kernel unit's visible ones excepted as at its polls;
+   the C stack is above the floor. Else it returns 0 with nothing done.
+   Clobbers RAX and R11 only. */
+static void
+gate(struct asm_ *a, int base, int32_t off)
+{
+    int decline = new_label(a);
+    int64_t version = (int64_t)a->unit->version;
+    if (a->serial) {
+        load(a, R11, R14, (int32_t)offsetof(struct lu_task, unlocked_jit));
+        store(a, base, off, R11);
+        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);
+        jump_if_dead(a, decline);
+    }
+    load(a, RAX, R14, offsetof(struct lu_task, carrier));
+    cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
+    jcc(a, CC_B, decline);
+    if (a->f->code->co_flags & LU_CO_KERNEL) {
+        load(a, RAX, RAX, offsetof(struct lu_carrier, poll));
+        alu_ri(a, ALU_AND, RAX, (int32_t)~LU_POLL_VISIBLE);
+        mov_ri(a, R11, version);
+        alu_rr(a, ALU_CMP, RAX, R11);
+    }
+    else if (version <= INT32_MAX) {
+        cmp_mi(a, 1, RAX, offsetof(struct lu_carrier, poll), (int32_t)version);
+    }
+    else {
+        mov_ri(a, R11, version);
+        cmp_rm(a, R11, RAX, offsetof(struct lu_carrier, poll));
+    }
+    jcc(a, CC_NE, decline);
+    cold_begin(a);
+    bind(a, decline);
+    if (a->serial) {
+        load(a, R11, base, off);
+        store(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), R11);
+    }
+    mov_ri(a, RAX, LU_JIT_NONE);
+    jmp(a, a->epilogue);
+    cold_end(a);
+}
+
+/* Stage 1 of one entry protocol: a test the gate made redundant that
+   still fails is a broken claim. */
+static void
+broken_if(struct asm_ *a, int cc, const char *what)
+{
+    int fine = new_label(a);
+    jcc(a, cc ^ 1, fine);
+    mov_ri(a, RDI, (int64_t)(intptr_t)what);
+    call_abs(a, (void *)lu_jit_entry_broken);
+    bind(a, fine);
+}
+
 static void
 prologue(struct asm_ *a)
 {
@@ -5311,6 +5373,7 @@ prologue(struct asm_ *a)
     mov_rr(a, R14, RDI);
     mov_rr(a, R15, RSI);
     store(a, RBP, RESULT_SLOT, RDX);
+    gate(a, RBP, CALL_AT(act.unlocked_jit));     /* no call of its own made yet */
     bind(a, a->entered);
     /* Compiled code owns the frame's locals and stack from here: the
        slots hold nothing until an exit or a walker fills them. */
@@ -5346,9 +5409,9 @@ epilogue(struct asm_ *a)
 /* The direct entry (target.h struct lu_jit_direct): RDI the task, RSI
    the function, RDX its arguments, RCX the result's word, R8 the
    arguments that give their references, R9 the caller's struct
-   lu_jit_call. The checks the interpreter makes at a call and at RESUME,
-   and lu_jit_run's, decline with 0 and nothing done; so does a datastack
-   chunk without room for the frame, which lu_frame_push would make. The
+   lu_jit_call. The gate, then what making the frame needs (a live unit
+   for the function's globals and builtins, recursion and datastack room,
+   as lu_frame_push), decline with 0 and nothing done. The
    frame is then pushed and bound as lu_frame_push makes it, the
    activation linked in the caller's record, the prologue run (in line
    for COPY_FREE_VARS alone, else in C), and the unit run from where its
@@ -5361,11 +5424,7 @@ direct_entry(struct asm_ *a)
     int at = a->n, decline = new_label(a), hooked = new_label(a), counted = new_label(a), unwatched = new_label(a);
     saves(a);
     mov_rr(a, R14, RDI);
-    if (a->serial) {
-        load(a, R11, R14, (int32_t)offsetof(struct lu_task, unlocked_jit));
-        store(a, R9, offsetof(struct lu_jit_call, act.unlocked_jit), R11);     /* back at its end */
-        store_mi(a, R14, (int32_t)offsetof(struct lu_task, unlocked_jit), 1);    /* before the unit's death is read */
-    }
+    gate(a, R9, offsetof(struct lu_jit_call, act.unlocked_jit));      /* back at the activation's end */
     jump_if_dead(a, decline);                   /* a caller may have read the entry before it died */
     /* A function of the same code with other globals or builtins has units of its own. */
     load(a, R11, RSI, offsetof(PyFunctionObject, func_globals));
@@ -5376,32 +5435,23 @@ direct_entry(struct asm_ *a)
     mov_ri(a, RAX, (int64_t)(intptr_t)a->unit->builtins);
     alu_rr(a, ALU_CMP, R11, RAX);
     jcc(a, CC_NE, decline);
-    load(a, RAX, R14, offsetof(struct lu_task, carrier));
-    cmp_rm(a, RSP, RAX, offsetof(struct lu_carrier, jit_stack_floor));
-    jcc(a, CC_B, decline);
-    /* No event pending, and the tools as the code was compiled under. */
-    load(a, RAX, RAX, offsetof(struct lu_carrier, poll));
-    mov_ri(a, R11, (int64_t)a->f->unit->version);
-    alu_rr(a, ALU_CMP, RAX, R11);
-    jcc(a, CC_NE, decline);
-    /* No tool watches it (lu_code_watched; the version is the compare above). */
+    /* What the gate's version stands for (stage 1 of one entry protocol). */
     mov_ri(a, R11, (int64_t)(intptr_t)&code->_co_monitoring);
     load(a, R11, R11, 0);
     test_rr(a, R11, R11);
     jcc(a, CC_E, unwatched);
     cmp8_mi(a, R11, offsetof(lu_monitoring, watched), 0);
-    jcc(a, CC_NE, decline);
+    broken_if(a, CC_NE, "jit: a direct entry into a unit whose code a tool watches");
     bind(a, unwatched);
     cmp_mi(a, 0, R14, offsetof(PyThreadState, tracing), 0);
-    jcc(a, CC_NE, decline);
-    /* No PEP 523 hook but perf's, which compiled code needs no frames from. */
+    broken_if(a, CC_NE, "jit: a direct entry while the thread is tracing");
     load(a, R11, R14, offsetof(PyThreadState, interp));
     load(a, R11, R11, offsetof(struct _is, eval_frame));
     test_rr(a, R11, R11);
     jcc(a, CC_E, hooked);
     mov_ri(a, RAX, (int64_t)(intptr_t)lu_perf_eval);
     alu_rr(a, ALU_CMP, R11, RAX);
-    jcc(a, CC_NE, decline);
+    broken_if(a, CC_NE, "jit: a direct entry under a frame evaluation hook");
     bind(a, hooked);
     int words = code->co_framesize, kernel = lu_frame_is_kernel(code);
     if (kernel) {

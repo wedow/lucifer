@@ -1416,6 +1416,15 @@ lu_monitoring_clear_tool(int tool_id)
     return res;
 }
 
+/* A PEP 523 hook came or went (runtime/thread/task.c): compiled code, built
+   to enter frames with none, leaves at its next poll and is not entered, as
+   for a tools change. The world is stopped. */
+void
+lu_monitoring_hook_changed(PyInterpreterState *interp)
+{
+    set_global_version(interp, global_version(interp) + MONITORING_VERSION_INCREMENT);
+}
+
 /* sys.monitoring.restart_events: DISABLEd events fire again. The restart
    version must exceed every code's version and stay below the current one. */
 int

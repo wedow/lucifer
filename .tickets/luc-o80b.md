@@ -546,3 +546,17 @@ State: the adversarial review's M1 and M2 fixed and gated; its per-code dependen
 - New tests: `tools_version_many`, `tools_toggle_points` (clear_tool_id, free_tool_id, restart_events part-way through a compiled run, settrace_all_threads, a generator suspended across a toggle, f_trace_opcodes on the outermost frame of a recursion only), `threads_local_events_inlined`; verified in a fresh worktree built with make -j4 in plain, jit-off, jit, jit-deopt, handoff, handoff:3.
 - Gate: 21 programs in plain, jit-off, jit, jit-deopt and handoff, 5 in handoff:3, all pass; jitcheck 0 failing (`toolsoff` PASS); check-capi-ext PASS; `raise_inlined_monitored` matches in four modes; the four floor units: 0 lost, 0 gained against master's binary in jit and deopt.
 - Numbers (instructions:u, pinned, two runs per arm, master's binary against this branch): `-c pass` on +0.17%, always +0.04%; pyflakes on +0.12% (master's second run read 9.947G against 9.973G: +0.25% on the mean), always +0.12%; Richards on -0.03%, always -0.03%. Toggle loop: 2.0 ns/iteration before and 2.8 after one settrace toggle (master 366). Question 4 unchanged: about 6.7 builds and 0.7-0.8 ms per local-event toggle.
+
+## Stage 1 on master after the tools fix (2026-11-25)
+
+Read from origin/master f0bde3b5 (tools fix d3367bc4 in it).
+
+Already true:
+- Version sources: global events, tool clear, restart and local events move the version under a stopped world (local events since the tools fix). The stop-the-world pass makes compiled frames real; `lu_jit_deopt` brings handed-back frames up to the tools version (B11's class).
+- `u->version` is recorded at build and every emitted compare (polls, parked calls, the stub) uses it.
+- Stale-version kill: `tools_moved` in both C gates (before the entry, not after a decline).
+- Compile-side predicate: one function already, `lu_code_watched` (instrument.h), used by both C gates, inlining, generator adoption, `raised_arm_ok`, `call_function`'s new-generator path and (in its emitted form) the stub. No `lu_jit_may_compile` is needed.
+
+Changed shape: the `_co_monitoring != NULL` tests became `lu_code_watched` (a `watched` byte plus the code's version), not an active-monitors walk.
+
+Remaining (this stage): the hook setter moving the version; the gate emitted once at both entry points; `enter()` shared by `lu_jit_enter` and `lu_jit_run` with `find` before the wait (B7); `lu_jit_finish` for the three C tails; the stage 1 checks.

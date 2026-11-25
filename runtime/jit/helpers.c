@@ -972,21 +972,41 @@ polled(struct lu_task *t, PyObject *r)
 }
 
 PyObject *
-lu_jit_call_finish(PyThreadState *ts, struct lu_frame *callee, int r)
+lu_jit_finish(PyThreadState *ts, struct lu_frame *frame, int r, PyObject *value, struct lu_frame *entry)
 {
     struct lu_task *t = (struct lu_task *)ts;
-    if (r == LU_JIT_RAISED) {
-        lu_frame_pop(ts, callee);       /* unwound: the call's value is the exception */
-        return NULL;
+    if (r == LU_JIT_DEOPT || r == LU_JIT_ERROR) {
+        /* The frame returns into a C-entry marker, as under lu_eval. */
+        struct lu_frame own = { .owner = LU_FRAME_C_ENTRY };
+        if (entry == NULL) {
+            own.previous = frame->previous;
+            frame->previous = &own;
+        }
+        t->pin++;
+        value = lu_eval_continue(ts, r == LU_JIT_ERROR);
+        t->pin--;
+        return entry == NULL ? polled(t, value) : value;
     }
-    /* The callee's frame returns into a C-entry marker, as under lu_eval. */
-    struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
-    entry.previous = callee->previous;
-    callee->previous = &entry;
-    t->pin++;
-    PyObject *v = lu_eval_continue(ts, r == LU_JIT_ERROR);
-    t->pin--;
-    return polled(t, v);
+    if (r == LU_JIT_YIELD) {
+        /* As the interpreter's YIELD_VALUE, back to a C caller. */
+        lu_gen_suspend(ts, frame, frame->instr[-1].op.arg);
+    }
+    else if (frame->owner == LU_FRAME_GENERATOR) {
+        /* As its return_frame: a loop's step ends with no value. */
+        uint8_t ret = frame->ret;
+        lu_gen_finish(ts, frame);
+        if (r == LU_JIT_RETURN && (ret == LU_RETURN_FOR_ITER || ret == LU_RETURN_NEXT)) {
+            Py_DECREF(value);
+            value = LU_MISSING;
+        }
+    }
+    else {
+        lu_frame_pop(ts, frame);
+    }
+    if (entry != NULL) {
+        ts->current_frame = (struct _PyInterpreterFrame *)entry->previous;
+    }
+    return r == LU_JIT_RAISED ? NULL : value;
 }
 
 /* SEND: a generator or coroutine is resumed as the interpreter resumes it:

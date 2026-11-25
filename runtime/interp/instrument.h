@@ -105,6 +105,7 @@ int lu_monitoring_set_events(int tool_id, lu_event_set events);
 int lu_monitoring_set_local_events(PyCodeObject *code, int tool_id, lu_event_set events);
 int lu_monitoring_clear_tool(int tool_id);
 int lu_monitoring_restart(void);
+void lu_monitoring_hook_changed(PyInterpreterState *interp);
 PyObject *lu_monitoring_register_callback(int tool_id, int event_id, PyObject *callback);
 
 const char *lu_monitoring_event_name(int event);
