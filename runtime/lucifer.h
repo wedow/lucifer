@@ -1748,6 +1748,11 @@ int lu_ns_delete(PyObject *dict, PyObject *key);
    hold borrowed: the old value's finalizer runs in the caller, after the
    dict is let go. */
 int lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old);
+/* lu_ns_exchange's store, the replaced value released after: 0, or -1. */
+int lu_ns_assign(PyObject *dict, PyObject *key, PyObject *value);
+/* Whether dict surely has no entry for key: its keys are exact strs and
+   none is key (another key may equal it: only Python says). */
+int lu_ns_lacks(PyObject *dict, PyObject *key);
 /* PyDict_Next over the namespace: *pos starts at 0; key and value are
    borrowed. A dict other threads may write is iterated in its critical
    section, as cp314t's dict_merge and PyDict_Copy do. */

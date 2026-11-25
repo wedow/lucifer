@@ -765,6 +765,9 @@ class_attr_native(PyObject *owner, PyObject *name)
     PyObject *v = _PyType_LookupRef((PyTypeObject *)owner, name);
     if (v != NULL && Py_TYPE(v)->tp_descr_get != NULL && !PyFunction_Check(v)) {
         Py_SETREF(v, lu_static_or_class_get(v, owner));
+        if (v == NULL) {
+            PyErr_Clear();      /* no memory to bind: the kernel asks again and raises */
+        }
     }
     return v;
 }
@@ -817,6 +820,9 @@ generic_attr_native(PyObject *owner, PyObject *name, int fallback, PyObject *cal
         : Py_IS_TYPE(descr, &PyMethodDescr_Type) || Py_IS_TYPE(descr, &PyWrapperDescr_Type)
         ? lu_method_descr_bind(descr, owner) : lu_static_or_class_get(descr, (PyObject *)tp);
     Py_DECREF(descr);
+    if (v == NULL) {
+        PyErr_Clear();          /* no memory to bind: the kernel asks again and raises */
+    }
     return v;
 }
 
@@ -3264,8 +3270,7 @@ op_LOAD_ATTR_METHOD: {
     }
     if (with_dict) {
         PyObject *dict = LU_MANAGED_DICT(owner);
-        if (dict != NULL && (!PyDict_CheckExact(dict) || !lu_dict_str_keys(dict)
-                             || lu_ns_lookup(dict, NAME(oparg >> 1)) != NULL)) {
+        if (dict != NULL && (!PyDict_CheckExact(dict) || !lu_ns_lacks(dict, NAME(oparg >> 1)))) {
             goto op_LOAD_ATTR;
         }
     }
@@ -3327,8 +3332,6 @@ op_LOAD_ATTR: {
             }
             DISPATCH();
         }
-        /* A native getter's error, or no memory to bind */
-        ERROR_IF(kargs[0] == NULL && PyErr_Occurred());
         if (kargs[0] != NULL) {
             /* A data descriptor whose __get__ is a Python function decides
                the access: run it in this loop, as generic_getattr would. */
@@ -3407,9 +3410,7 @@ op_STORE_ATTR_FAST: {
     }
     else {
         SAVE_FRAME();
-        PyObject *old;
-        err = lu_ns_exchange(dict, NAME(oparg), v, &old);
-        Py_XDECREF(old);
+        err = lu_ns_assign(dict, NAME(oparg), v);
         Py_DECREF(v);
     }
     Py_DECREF(owner);

@@ -1370,6 +1370,21 @@ lu_ns_exchange(PyObject *dict, PyObject *key, PyObject *value, PyObject **old)
 }
 
 int
+lu_ns_assign(PyObject *dict, PyObject *key, PyObject *value)
+{
+    PyObject *old;
+    int r = lu_ns_exchange(dict, key, value, &old);
+    Py_XDECREF(old);
+    return r < 0 ? -1 : 0;
+}
+
+int
+lu_ns_lacks(PyObject *dict, PyObject *key)
+{
+    return lu_dict_str_keys(dict) && lu_ns_lookup(dict, key) == NULL;
+}
+
+int
 lu_ns_next(PyObject *dict, Py_ssize_t *pos, PyObject **key, PyObject **value)
 {
     PyDictObject *mp = (PyDictObject *)dict;
