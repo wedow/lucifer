@@ -683,3 +683,67 @@ The unit's return (OP_RETURN of a root, RETURN or RAISED), in order:
 - A stale unit with a fast-path end takes the same jump with no frame to end.
 
 Callers then hold no frame of the unit's to read: `ceval.c` reads the caller, `ret`, the generator and kernel flags before `lu_jit_enter` and goes to `returned` (after `return_frame`'s drop) or the RAISED tail of `unwound`; `lu_jit_run` reads `ret` and the generator flag before the entry; the emitted site and `lu_jit_direct` take the value. For DEOPT and ERROR the unit names the root frame in the result word (as the design's 2.1 says), so the site needs no frame word.
+
+## Stage 4 and the review of stage 3 (2026-11-25, branch luc-entry3, not landed)
+
+Ruling: stage 3 lands with stage 4, judged as a pair against master.
+
+Built:
+- OP_UNLINK gives the depth back for every root (B6's order: before the releases).
+- A plain root's return ends its frame in the unit (`frame_end`, emit.c) when nothing can be freed. The conditions: no frame object, not its chunk's first frame, and the function's and code's counts each immortal or this thread's and above one. All are tested before either count moves; then the two decrements and the `datastack_top` store. Anything else, and every generator root, goes to the epilogue's `end` path: unlink, serial word, then `lu_jit_left(u, r, ts, frame)` reached by a jump after the pops. It runs `left` first, then `lu_frame_end` (`lu_frame_drop`'s second half, now split out) or `lu_gen_finish`.
+- The eval loop reads the caller, `ret`, the kernel and generator flags before `lu_jit_enter`, and goes to `returned` (after `return_frame`'s drop) or `unwound_caller` (the RAISED tail). The generator value goes through `lu_gen_returned` (gen.h), shared with `return_frame` and `lu_jit_run`.
+- `lu_jit_finish` no longer ends frames. `direct_done` keeps only the compare, `takes_back` and the value; its non-RETURN path is cold. DEOPT and ERROR name the unit's frame in the result word (exits and the stub's prologue error), so `FRAME_SLOT` and the entry's sixth argument are gone. `lu_jit_direct` and `lu_jit_run` no longer pop.
+- Post-condition checks (depth and `datastack_top` as before the push) ran as fatal checks for the gate and were dropped in 422202f6 without measuring their cost. The current-frame check was dropped earlier (fca16108). It fired on test_sys_settrace, legitimately: a walker that makes an inlined caller's frames real during a call gives the callee a new `previous` (the caller's record, exit.c), which is current after the return.
+- Review T1: `lu_code_free` fills freed code with int3 and `free_unit` overwrites the unit with a pattern before `free`, unconditionally (frees are rare; the pair's numbers below include it). Stats now print `stale leaves` and `frames ended in C`.
+
+Review L1 (policy shift). `u->entries` now counts an interpreter or C entry when the run starts, where `bump_entries` counted after `fn` returned. Within the first activation of a C-entered unit (a loop unit entered once at a back-edge), entries read 1 where they read 0, which changes two things:
+- `hot_exit`'s `loop = LOOP_CALLS * entries` needs 64 calls where it needed none.
+- `unit_losses` computes a per-entry loss instead of returning 0.
+
+The ledger lanes in jitcheck, master against the pair: churn, learnprice, grown, megaiter and entrygrowth are identical. classtests' first line moved 208,839 -> 208,868 and typed's 634,530 -> 634,565 (+0.01%); their ledger rows are identical (classtests 55,537 first / 7,628 rebuilt; typed 72,256 / 17,828).
+
+Tests (first, all pass on master in plain, jit-off, jit, jit-deopt, gc:1):
+- `entry_frame_end`: frame objects kept past the return with f_locals; finalizers at the return that walk frames, rebind a folded global, replace the callee's `__code__`, or raise; a code whose last reference is the returning frame's; generators returning into for, next, sum and list; frames first in a datastack chunk; recursion returning near the limit, with the RecursionError depth identical over 30 tries.
+- `threads_serial_decline`: a serial unit's direct entry declines at the recursion limit, then threads start.
+
+Not added: the stub's prologue error after the link (needs `PyCell_New` to fail), and a split of the stale-tail count by entry kind (the tail cannot tell; `stale leaves` reads 2 to 4 on threads_kill_in_chains in both modes).
+
+Gate (fca16108; 422202f6 only removes the checks and was verified in the fresh worktree):
+- 94 programs (stage 3's 88 plus the two new ones, return_release, jit_return_release_kill, jit_release_order, frame_teardown) pass in plain, jit-off, jit and jit-deopt (same XFAILs as master).
+- 55 threads_ programs pass in handoff and handoff:3; 15 reclaim, release, collect and new programs pass in gc:1.
+- jitcheck: 0 failing, the same GAP lines (two counts differ by one).
+- check-capi-ext PASS.
+- The four floor units, master's binary against the pair in jit and deopt: 566/26/1 both, 0 lost.
+- A fresh worktree at 422202f6 built with plain `make -j4` passes the three new programs in plain, jit-off, jit, jit-deopt, handoff:3 and gc:1.
+
+Numbers, pair (422202f6) against master (4f56066d). Instructions:u, pinned on core leases, two runs per arm (DeltaBlue the minimum of three). The "no padding" column builds both arms with `jcc_erratum()` returning 0 (analysis only, not committed):
+
+| row | mode | master | pair | change | no padding |
+|---|---|---|---|---|---|
+| -c pass | on | 130.13M | 130.13M | +0.00% | -0.00% |
+| -c pass | always | 851.72M | 846.60M | -0.60% | -0.53% |
+| pyflakes | on | 7.813G | 7.751G | -0.79% | -0.91% |
+| pyflakes | always | 14.201G | 14.062G | -0.98% | -1.10% |
+| Richards | on | 11.211G | 11.192G | -0.17% | -0.73% |
+| Richards | always | 12.324G | 12.300G | -0.19% | -0.73% |
+| DeltaBlue | on | 5.4457G | 5.4089G | -0.68% | -1.09% |
+| DeltaBlue | always | 6.3613G | 6.3138G | -0.75% | -0.98% |
+
+Slope (instructions per direct call, tools/bench/ladder, both runs):
+
+| row | mode | master | pair | no padding |
+|---|---|---|---|---|
+| op.call_positional | on | 166 | 166 | 154 -> 148/149 |
+| op.call_positional | always | 167 | 166 | 154 -> 149/148 |
+| op.call_method | on | 209 | 208 | 193 -> 188 |
+| op.call_method | always | 209 | 208 | 193 -> 188 |
+
+Code bytes per unit, stats off (sizes the code dump reports):
+- jit_compiled_calls: on 8,424 -> 8,389 (-0.4%); always 23,964 -> 22,780 (-4.9%).
+- pyflakes: on 38,996 -> 36,514 (-6.4%); always 47,317 -> 43,495 (-8.1%).
+
+tools/jitcost row call: 372 against CALL_COST 420 (ratio 1.13), PASS, so the constant is unchanged.
+
+Acceptance: every row is better or equal with padding on, in both modes. The slope fell about 5.5 a call without padding (the design's 3 + 5 = 8 was optimistic), and 0 to 1 with it.
+
+State: stages 3 and 4 committed on luc-entry3, not pushed; waiting for the adversarial review of stage 4. Stage 5 not started.
