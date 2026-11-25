@@ -94,6 +94,11 @@ require that a count of the tier's does not grow with the iterations:
          closure the call site learned, of a closure that is a constant,
          and its own: the helpers compiled code calls. Each read is a load
          of the cell's word, or a compare of a constant cell's word.
+  genericslots tests/kernel/jit_generic_slot_attrs.py, whose hot loop
+         loads and stores attributes of instances of Python subclasses of
+         a C type whose attribute slots are object's generic functions:
+         the helpers compiled code calls. Each access takes the shape its
+         site learned.
   cmethods tests/kernel/jit_class_methods.py, whose hot methods call
          classmethods and staticmethods through their class: entries into
          compiled code, direct and compiled calls. The loads bind at
@@ -399,6 +404,7 @@ GROWTH = {
     'shapes': ('jit_call_shapes.py', r'jit: entries (\d+), returns \d+, direct calls (\d+)', 0),
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
     'cells': ('jit_cell_reads.py', r'jit: executed:.* helper (\d+)', 0, ('-X', 'lucifer_jit=on')),
+    'genericslots': ('jit_generic_slot_attrs.py', r'jit: executed:.* helper (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'bound': ('jit_bound_calls.py', r'jit: executed:.* call_kw (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'toolsoff': ('jit_tools_toggle.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), .* poll (\d+) side', 0,
                  (), (['settrace'], ['setprofile'], ['monitoring'], ['restore'], ['cprofile'], ['breakpoint'],
