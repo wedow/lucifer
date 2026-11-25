@@ -1748,23 +1748,19 @@ unit_for(PyThreadState *ts, struct lu_frame *frame, struct lu_jit_code *jc, int 
     return u != NULL || !compile ? u : compile_at(ts, frame, pc);
 }
 
-/* Runs u on frame. Nothing between the find and the unit's link of its
-   activation polls ("Freeing dead units"). The unit's gate declines
-   (LU_JIT_NONE) for an event pending, a low C stack, death, or tools other
-   than those it was built under: then it dies, still in that window, as
-   it linked nothing. */
-/* The task as a frame's push left it, for checking a unit's frame end:
-   current frame, depth and datastack top. */
+/* The task as a frame's push found it, for checking a unit's frame end:
+   depth and datastack top. (Not the current frame: a walker that makes
+   an inlined caller's frames real during the call gives the frame a new
+   previous, its record, which is current after the return.) */
 struct as_before {
-    struct _PyInterpreterFrame *current;
     int remaining, kernel_room;
     PyObject **top;
 };
 
 static struct as_before
-as_before(PyThreadState *ts, struct _PyInterpreterFrame *current, PyCodeObject *code, PyObject **top)
+as_before(PyThreadState *ts, PyCodeObject *code, PyObject **top)
 {
-    struct as_before b = { current, ts->py_recursion_remaining, ((struct lu_task *)ts)->kernel_room, top };
+    struct as_before b = { ts->py_recursion_remaining, ((struct lu_task *)ts)->kernel_room, top };
     if (code != NULL) {
         b.remaining += !lu_frame_is_kernel(code);
         b.kernel_room += lu_frame_is_kernel(code) ? code->co_framesize : 0;
@@ -1779,17 +1775,22 @@ check_ended(PyThreadState *ts, int r, struct as_before b)
     if (r != LU_JIT_RETURN && r != LU_JIT_RAISED) {
         return;
     }
-    if (ts->current_frame != b.current || ts->py_recursion_remaining != b.remaining
+    if (ts->py_recursion_remaining != b.remaining
         || ((struct lu_task *)ts)->kernel_room != b.kernel_room || (b.top != NULL && ts->datastack_top != b.top)) {
         Py_FatalError("jit: a unit's frame did not end as before its push");
     }
 }
 
+/* Runs u on frame. Nothing between the find and the unit's link of its
+   activation polls ("Freeing dead units"). The unit's gate declines
+   (LU_JIT_NONE) for an event pending, a low C stack, death, or tools other
+   than those it was built under: then it dies, still in that window, as
+   it linked nothing. */
 static int
 enter(PyThreadState *ts, struct lu_unit *u, struct lu_frame *frame, PyObject **result)
 {
     int first = (PyObject **)frame == &ts->datastack_chunk->data[0] || frame->owner == LU_FRAME_GENERATOR;
-    struct as_before b = as_before(ts, (struct _PyInterpreterFrame *)frame->previous, frame->code,
+    struct as_before b = as_before(ts, frame->code,
                                    first ? NULL : (PyObject **)frame);
     int r = u->fn(ts, frame, result);
     if (r == LU_JIT_NONE) {
@@ -1955,7 +1956,7 @@ lu_jit_direct(PyThreadState *ts, PyFunctionObject *func, PyObject *const *args, 
     }
     takes &= nargs < 64 ? ((uint64_t)1 << nargs) - 1 : ~(uint64_t)0;
     PyObject **top = ts->datastack_top;
-    struct as_before b = as_before(ts, ts->current_frame, NULL,
+    struct as_before b = as_before(ts, NULL,
                                    top != NULL && top != &ts->datastack_chunk->data[0] ? top : NULL);
     PyObject *result;
     int r = entry(ts, func, args, &result, takes);
