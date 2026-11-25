@@ -484,6 +484,7 @@ GROWTH = {
     'boolpow': ('jit_bool_float_pow.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)', 0),
     'useriter': ('jit_user_iter_end.py', r'exits guard \d+ stress \d+ poll \d+ side (\d+) error (\d+)', 0),
     'megaiter': ('jit_mega_iter.py', r'compiled calls (\d+)', 24),
+    'xreturns': ('jit_worker_returns.py', r'frames ended in C (\d+)', 0),
     'imports': ('jit_import_hot.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'order': ('jit_call_order.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
               r'|call_unknown (\d+) call_poly (\d+)', 0, (), (['ab'], ['ba'])),
