@@ -366,3 +366,123 @@ finally:
     stop.set()
     flipper.join()
 print('vec flip', bad, f.x)
+
+
+# A static type with its dict at tp_dictoffset and object's attribute
+# functions: dict attributes, members of each kind and a getset read,
+# stored and deleted at hot sites, on the type and on a Python subclass.
+from ready import Dicted
+
+
+def hot(f, *args):
+    seen = []
+    for _ in range(200):
+        try:
+            r = f(*args)
+        except (AttributeError, TypeError) as e:
+            r = type(e).__name__ + ': ' + str(e)
+        if r not in seen:
+            seen.append(r)
+    return seen
+
+
+def get(o, name):
+    return getattr(o, name)
+
+
+def read_a(o):
+    return o.a
+
+
+def write_a(o):
+    o.a = 'a'
+    return 'stored'
+
+
+def drop_a(o):
+    del o.a
+    return 'deleted'
+
+
+def write_all(o):
+    o.o = 1
+    o.ox = 2
+    o.g = 3
+    return o.o, o.ox, o.g
+
+
+def drop_each(o):
+    out = []
+    for name in ('o', 'ox', 'ro', 'g', 'a'):
+        try:
+            delattr(o, name)
+            out.append('deleted')
+        except (AttributeError, TypeError) as e:
+            out.append(type(e).__name__ + ': ' + str(e))
+    return tuple(out)
+
+
+class DictedSub(Dicted):
+    pass
+
+
+for cls in (Dicted, DictedSub):
+    o = cls()
+    print(cls.__name__, hot(read_a, o), hot(write_a, o), hot(read_a, o), dict(o.__dict__), hot(drop_a, o), o.__dict__)
+    print(cls.__name__, 'members', [hot(get, o, n) for n in ('o', 'ox', 'ro', 'g')], hot(write_all, o))
+    print(cls.__name__, 'deletes', drop_each(o), hot(drop_each, o), [hot(get, o, n) for n in ('o', 'ox', 'g')])
+    o.__dict__ = {'a': 'replaced'}
+    print(cls.__name__, 'dict replaced', hot(read_a, o), hot(write_a, o), o.__dict__)
+    o.__dict__ = {}
+    print(cls.__name__, 'dict emptied', hot(read_a, o), hot(write_a, o), o.__dict__)
+    shared = {'a': 'shared'}
+    p, q = cls(), cls()
+    p.__dict__ = q.__dict__ = shared
+    p.a = 'via p'
+    print(cls.__name__, 'dict shared', hot(read_a, q), shared)
+
+# a C getset, a C member and object's getset copied into a class they do not describe
+Stranger = type('Stranger', (), {'sum': Vec.__dict__['sum'], 'x': Vec.__dict__['x'],
+                                 'g': Dicted.__dict__['g'], 'ox': Dicted.__dict__['ox']})
+for name in ('sum', 'x', 'g', 'ox'):
+    s = Stranger()
+    print('stranger', name, hot(get, s, name), hot(setattr, s, name, 1.0), hot(delattr, s, name))
+
+# two threads make the dict with their first stores; another replaces it under reads
+made = [Dicted() for _ in range(2000)]
+start = threading.Barrier(2)
+
+
+def first_stores(name):
+    start.wait()
+    for o in made:
+        setattr(o, name, name)
+
+
+threads = [threading.Thread(target=first_stores, args=(n,)) for n in ('left', 'right')]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+print('first stores', sum(sorted(o.__dict__) == ['left', 'right'] for o in made))
+
+o = Dicted()
+o.a = 0
+stop = threading.Event()
+
+
+def replace_dicts():
+    i = 0
+    while not stop.is_set():
+        i += 1
+        o.__dict__ = {'a': i}
+
+
+replacer = threading.Thread(target=replace_dicts)
+replacer.start()
+try:
+    bad = sum(not isinstance(o.a, int) for _ in range(200000))
+finally:
+    stop.set()
+    replacer.join()
+print('dict replaced under reads', bad)

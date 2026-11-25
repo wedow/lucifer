@@ -285,6 +285,116 @@ static PyTypeObject Vec_Type = {
     .tp_getset = vec_getset,
 };
 
+/* ready.Dicted: a static type with its instance dict at tp_dictoffset and
+   object's attribute functions, with members of each kind and a getset. */
+typedef struct {
+    PyObject_HEAD
+    PyObject *dict;
+    PyObject *o;        /* Py_T_OBJECT: unset reads None */
+    PyObject *ox;       /* Py_T_OBJECT_EX: unset raises */
+    PyObject *ro;       /* read-only */
+    PyObject *g;        /* behind the getset */
+} Dicted;
+
+static PyObject *
+dicted_new(PyTypeObject *tp, PyObject *args, PyObject *kw)
+{
+    Dicted *self = (Dicted *)tp->tp_alloc(tp, 0);
+    if (self != NULL) {
+        self->ro = PyUnicode_FromString("fixed");
+    }
+    return (PyObject *)self;
+}
+
+static int
+dicted_traverse(PyObject *op, visitproc visit, void *arg)
+{
+    Dicted *self = (Dicted *)op;
+    Py_VISIT(Py_TYPE(op));
+    Py_VISIT(self->dict);
+    Py_VISIT(self->o);
+    Py_VISIT(self->ox);
+    Py_VISIT(self->ro);
+    Py_VISIT(self->g);
+    return 0;
+}
+
+static int
+dicted_clear(PyObject *op)
+{
+    Dicted *self = (Dicted *)op;
+    Py_CLEAR(self->dict);
+    Py_CLEAR(self->o);
+    Py_CLEAR(self->ox);
+    Py_CLEAR(self->ro);
+    Py_CLEAR(self->g);
+    return 0;
+}
+
+static void
+dicted_dealloc(PyObject *op)
+{
+    PyTypeObject *tp = Py_TYPE(op);
+    PyObject_GC_UnTrack(op);
+    dicted_clear(op);
+    tp->tp_free(op);
+    if (tp->tp_flags & Py_TPFLAGS_HEAPTYPE) {
+        Py_DECREF(tp);
+    }
+}
+
+static PyObject *
+dicted_get_g(PyObject *op, void *closure)
+{
+    PyObject *g = ((Dicted *)op)->g;
+    if (g == NULL) {
+        PyErr_SetString(PyExc_AttributeError, "g is unset");
+        return NULL;
+    }
+    return Py_NewRef(g);
+}
+
+static int
+dicted_set_g(PyObject *op, PyObject *value, void *closure)
+{
+    Dicted *self = (Dicted *)op;
+    if (value == NULL && self->g == NULL) {
+        PyErr_SetString(PyExc_AttributeError, "g is unset");
+        return -1;
+    }
+    Py_XSETREF(self->g, Py_XNewRef(value));
+    return 0;
+}
+
+static PyGetSetDef dicted_getset[] = {
+    { "g", dicted_get_g, dicted_set_g, NULL, NULL },
+    { "__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL },
+    { NULL }
+};
+
+static PyMemberDef dicted_members[] = {
+    { "o", _Py_T_OBJECT, offsetof(Dicted, o), 0, NULL },
+    { "ox", Py_T_OBJECT_EX, offsetof(Dicted, ox), 0, NULL },
+    { "ro", Py_T_OBJECT_EX, offsetof(Dicted, ro), Py_READONLY, NULL },
+    { NULL }
+};
+
+static PyTypeObject Dicted_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "ready.Dicted",
+    .tp_basicsize = sizeof(Dicted),
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC,
+    .tp_new = dicted_new,
+    .tp_dealloc = dicted_dealloc,
+    .tp_traverse = dicted_traverse,
+    .tp_clear = dicted_clear,
+    .tp_getattro = PyObject_GenericGetAttr,
+    .tp_setattro = PyObject_GenericSetAttr,
+    .tp_members = dicted_members,
+    .tp_getset = dicted_getset,
+    .tp_dictoffset = offsetof(Dicted, dict),
+};
+
 /* ready.Vec3 inherits from Vec and adds a field and nothing else. */
 typedef struct {
     Vec base;
@@ -1357,7 +1467,7 @@ PyInit_ready(void)
         || PyType_Ready(&Delegate_Type) < 0 || PyType_Ready(&Mapped_Type) < 0
         || PyType_Ready(&Unhashable_Type) < 0
         || PyType_Ready(&CmpOnly_Type) < 0 || PyType_Ready(&OldAttr_Type) < 0 || PyType_Ready(&DocSig_Type) < 0
-        || PyType_Ready(&OldAttrSub_Type) < 0) {
+        || PyType_Ready(&OldAttrSub_Type) < 0 || PyType_Ready(&Dicted_Type) < 0) {
         return NULL;
     }
     BytesCopy_Type.tp_richcompare = PyBytes_Type.tp_richcompare;
@@ -1378,6 +1488,7 @@ PyInit_ready(void)
     if (m == NULL
         || PyModule_AddObjectRef(m, "Vec", (PyObject *)&Vec_Type) < 0
         || PyModule_AddObjectRef(m, "Vec3", (PyObject *)&Vec3_Type) < 0
+        || PyModule_AddObjectRef(m, "Dicted", (PyObject *)&Dicted_Type) < 0
         || PyModule_AddObjectRef(m, "Locked", (PyObject *)&Locked_Type) < 0
         || PyModule_AddObjectRef(m, "Counter", (PyObject *)&Counter_Type) < 0
         || PyModule_AddObjectRef(m, "MyList", (PyObject *)&MyList_Type) < 0

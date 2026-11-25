@@ -600,6 +600,23 @@ Liar.__getattribute__ = lambda self, name: Order if name == '__class__' else obj
 print('isinstance liar by hook', hot(negative, Liar()))
 del Liar.__getattribute__
 print('isinstance liar after', hot(negative, Liar()))
+
+
+# The __class__ property gained and lost mid-loop, through a base: the
+# negatives answered from the type must stop while it is there.
+class Honest:
+    pass
+
+
+class Shifty(Honest):
+    pass
+
+
+print('isinstance property before', hot(negative, Shifty()))
+Shifty.__bases__ = (PropertyLiar,)
+print('isinstance property gained', hot(negative, Shifty()))
+Shifty.__bases__ = (Honest,)
+print('isinstance property lost', hot(negative, Shifty()))
 Node.__getattribute__ = lambda self, name: Order if name == '__class__' else object.__getattribute__(self, name)
 print('isinstance node by hook', hot(negative, node(Node)))
 del Node.__getattribute__

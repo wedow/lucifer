@@ -101,6 +101,7 @@ HANDOFF_XFAIL = {
 }
 # name -> ticket: the same, for known divergences in every lane.
 XFAIL = {
+    "capi_generic_getattr": "luc-c997",
     "entry_tracebacks": "luc-mj6t",
     "threads_kill_under_calls": "luc-33lu",
 }
