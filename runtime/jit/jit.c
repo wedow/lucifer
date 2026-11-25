@@ -114,8 +114,10 @@ struct lu_jit_code {
     uint8_t *grown;             /* per code unit: doublings of the inlining budget of the unit entered there, which
                                    its own calls left out bought (hot_exit); another entry starts at the base */
     struct lu_callees **callees;        /* per code unit: a call site's callees */
-    int ncode_keyed;                    /* their entries that hold globals (LU_CALLEE_CODE) */
+    int *keyed, nkeyed;                 /* the sites whose tables hold globals (LU_CALLEE_CODE entries) */
     struct lu_prof *profs;              /* a root's: what it learned of values, by context (target.h) */
+    struct lu_prof **held;              /* those that met a mortal GC object, which the collector reads */
+    int nheld;
     unsigned long learned;              /* how often one of them changed */
     int built_ins;                      /* instructions its last build made: about what the next costs */
     PyMutex prof_lock;                  /* theirs, and hot's */
@@ -127,10 +129,30 @@ struct lu_jit_code {
     struct lu_jit_code *next, **pprev;  /* the codes with JIT state (below) */
 };
 
-/* Every code's JIT state, for the collector (lu_jit_traverse, lu_jit_collect).
-   The lock is a pthread mutex no holder detaches under, so a stopped world
-   finds it free. A code leaves the list before its dealloc frees anything. */
+/* The codes whose JIT state holds references, for the collector
+   (lu_jit_traverse, lu_jit_collect): a code joins before its first unit,
+   profile or code-keyed callee, and leaves first in its dealloc. The lock is
+   a pthread mutex no holder detaches under, so a stopped world finds it
+   free. */
 static struct { pthread_mutex_t lock; struct lu_jit_code *head; } states = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+static void
+enroll(struct lu_jit_code *jc)
+{
+    if (__atomic_load_n(&jc->pprev, __ATOMIC_ACQUIRE) != NULL) {
+        return;
+    }
+    pthread_mutex_lock(&states.lock);
+    if (jc->pprev == NULL) {
+        jc->next = states.head;
+        if (states.head != NULL) {
+            states.head->pprev = &jc->next;
+        }
+        states.head = jc;
+        __atomic_store_n(&jc->pprev, &states.head, __ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&states.lock);
+}
 
 
 struct lu_prof {
@@ -145,6 +167,7 @@ struct lu_prof {
     uint8_t value_kind;         /* lu_prof_value_kind, or zero for types of operands */
     uint8_t poly;               /* it had more than those: nothing to rely on */
     uint8_t dropped;            /* not relied on: a guard on its one type failed as a site's does (kills_cost) */
+    uint8_t held;               /* on its root's held list */
     uint64_t fails;             /* what that guard's exits lost (exit_cost) */
     unsigned long at;           /* its root's learned count when it last learned: a unit built before then is
                                    stale here */
@@ -426,14 +449,6 @@ state_for(PyCodeObject *code)
     while (seen == 0 || (seen & 1)) {
         if (__atomic_compare_exchange_n((uintptr_t *)&code->co_executors, &seen, (uintptr_t)jc, 0,
                                         __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {
-            pthread_mutex_lock(&states.lock);
-            jc->next = states.head;
-            jc->pprev = &states.head;
-            if (states.head != NULL) {
-                states.head->pprev = &jc->next;
-            }
-            states.head = jc;
-            pthread_mutex_unlock(&states.lock);
             return jc;
         }
     }
@@ -672,6 +687,15 @@ lu_jit_prof_note(struct lu_prof *p, PyObject *o, unsigned long learned, struct l
     }
     if (!known && p->n < LU_OPCLASS_WAYS
         && (!kind || (kind == LU_PROF_CLASS ? PyType_Check(o) : _Py_IsImmortal(o)))) {
+        if (!p->held && lu_is_gc(t) && !_Py_IsImmortal(t) && !(t->ob_gc_bits & LU_GC_FROZEN)) {
+            struct lu_prof **held = realloc(jc->held, sizeof(*held) * (size_t)(jc->nheld + 1));
+            if (held != NULL) {
+                held[jc->nheld++] = p;
+                jc->held = held;
+                p->held = 1;
+                enroll(jc);
+            }
+        }
         p->met[p->n] = Py_NewRef(t);
         __atomic_store_n(&p->n, p->n + 1, __ATOMIC_RELEASE);
         __atomic_store_n(&p->at, ++jc->learned, __ATOMIC_RELAXED);
@@ -1077,28 +1101,29 @@ static void
 weaken(struct lu_jit_code *jc, int keeping, int (*unreachable)(PyObject *), void (*keep)(PyObject *))
 {
     int compiling = __atomic_load_n(&jc->compiling, __ATOMIC_RELAXED);
-    if (keeping == compiling) {
-        for (struct lu_prof *p = jc->profs; p != NULL; p = p->next) {
-            int k = 0;
-            for (int i = 0; i < p->n; i++) {
-                if (keeping || !unreachable(p->met[i])) {
+    for (int j = 0; keeping == compiling && j < jc->nheld; j++) {
+        struct lu_prof *p = jc->held[j];
+        int k = 0;
+        for (int i = 0; i < p->n; i++) {
+            if (keeping || !unreachable(p->met[i])) {
+                if (keeping) {
                     keep(p->met[i]);
-                    p->met[k++] = p->met[i];
                 }
-                else {
-                    forgot_add(p->met[i]);
-                }
+                p->met[k++] = p->met[i];
             }
-            __atomic_store_n(&p->n, k, __ATOMIC_RELEASE);
+            else {
+                forgot_add(p->met[i]);
+            }
         }
+        __atomic_store_n(&p->n, k, __ATOMIC_RELEASE);
     }
-    for (int pc = 0; !keeping && jc->ncode_keyed > 0 && pc < jc->ncode; pc++) {
+    for (int j = 0; !keeping && j < jc->nkeyed; j++) {
+        int pc = jc->keyed[j];
         struct lu_callees *t = jc->callees[pc];
         int k = 0;
         for (int i = 0; t != NULL && i < t->n; i++) {
             if ((t->e[i].kind & LU_CALLEE_CODE) && unreachable(t->e[i].globals)) {
                 forgot_add(t->e[i].globals);
-                jc->ncode_keyed--;
             }
             else {
                 t->e[k++] = t->e[i];
@@ -1116,13 +1141,13 @@ weaken(struct lu_jit_code *jc, int keeping, int (*unreachable)(PyObject *), void
         /* The objects the build made itself die with the unit: it lives
            while what it learned does, and then keeps them too. */
         int dies = 0;
-        for (int i = 0; i < u->nconsts && !dies; i++) {
+        for (int i = 0; i < u->ngc && !dies; i++) {
             PyObject *o = u->consts[i];
             int made = 0;
             for (int k = 0; k < u->nmine && !made; k++) {
                 made = u->mine[k] == o;
             }
-            if (o != NULL && !made && unreachable(o)) {
+            if (!made && unreachable(o)) {
                 if (keeps) {
                     keep(o);
                 }
@@ -1279,6 +1304,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
 {
     struct lu_func f = { 0 };
     struct lu_unit *u = calloc(1, sizeof(struct lu_unit));
+    enroll(jc);
     u->code = frame->code;
     u->globals = frame->globals;
     u->builtins = frame->builtins;
@@ -1404,6 +1430,13 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     u->refused = f.refused;
     u->consts = f.consts;
     u->nconsts = f.nconsts;
+    for (int i = 0; i < u->nconsts; i++) {
+        PyObject *o = u->consts[i];
+        if (o != NULL && lu_is_gc(o) && !_Py_IsImmortal(o) && !(o->ob_gc_bits & LU_GC_FROZEN)) {
+            u->consts[i] = u->consts[u->ngc];
+            u->consts[u->ngc++] = o;
+        }
+    }
     u->mine = f.mine;
     u->nmine = f.nmine;
     f.consts = NULL;
@@ -2598,7 +2631,22 @@ lu_jit_callee_note(PyCodeObject *code, lu_codeunit *cache, PyObject *callable, P
         if (t->n < LU_CALLEE_WAYS) {
             if (want.kind & LU_CALLEE_CODE) {
                 Py_INCREF(want.globals);        /* weak to the collector (lu_jit_traverse) */
-                jc->ncode_keyed++;
+                int listed = 0;
+                for (int i = 0; i < jc->nkeyed && !listed; i++) {
+                    listed = jc->keyed[i] == pc;
+                }
+                int *keyed = listed ? jc->keyed : realloc(jc->keyed, sizeof(int) * (size_t)(jc->nkeyed + 1));
+                if (keyed == NULL) {
+                    PyMutex_Unlock(&_PyRuntime.pic_lock);
+                    Py_DECREF(want.globals);
+                    return;     /* out of memory: not learned */
+                }
+                if (!listed) {
+                    keyed[jc->nkeyed] = pc;
+                    jc->keyed = keyed;
+                    jc->nkeyed++;
+                }
+                enroll(jc);
             }
             t->e[t->n] = want;
             __atomic_store_n(&t->n, t->n + 1, __ATOMIC_RELEASE);
@@ -2643,7 +2691,6 @@ lu_jit_pic_forget(PyCodeObject *code, int (*dead)(PyObject *))
             }
             else if (t->e[i].kind & LU_CALLEE_CODE) {
                 forgot_add(t->e[i].globals);
-                jc->ncode_keyed--;
             }
         }
         if (t != NULL && k < t->n) {
@@ -2658,24 +2705,23 @@ lu_jit_traverse(visitproc visit, void *arg)
     pthread_mutex_lock(&states.lock);
     for (struct lu_jit_code *jc = states.head; jc != NULL; jc = jc->next) {
         for (struct lu_unit *u = jc->units; u != NULL; u = u->next) {
-            for (int i = 0; i < u->nconsts; i++) {
-                if (u->consts[i] != NULL) {
-                    visit(u->consts[i], arg);
-                }
+            for (int i = 0; i < u->ngc; i++) {
+                visit(u->consts[i], arg);
             }
             for (int i = 0; i < u->nmine; i++) {
                 visit(u->mine[i], arg);
             }
         }
-        for (struct lu_prof *p = jc->profs; p != NULL; p = p->next) {
-            for (int i = 0; i < p->n; i++) {
-                visit(p->met[i], arg);
+        for (int j = 0; j < jc->nheld; j++) {
+            for (int i = 0; i < jc->held[j]->n; i++) {
+                visit(jc->held[j]->met[i], arg);
             }
         }
-        for (int pc = 0; jc->ncode_keyed > 0 && pc < jc->ncode; pc++) {
-            for (int i = 0; jc->callees[pc] != NULL && i < jc->callees[pc]->n; i++) {
-                if (jc->callees[pc]->e[i].kind & LU_CALLEE_CODE) {
-                    visit(jc->callees[pc]->e[i].globals, arg);
+        for (int j = 0; j < jc->nkeyed; j++) {
+            struct lu_callees *t = jc->callees[jc->keyed[j]];
+            for (int i = 0; i < t->n; i++) {
+                if (t->e[i].kind & LU_CALLEE_CODE) {
+                    visit(t->e[i].globals, arg);
                 }
             }
         }
@@ -2722,9 +2768,11 @@ lu_jit_code_free(PyCodeObject *code)
         return;
     }
     pthread_mutex_lock(&states.lock);
-    *jc->pprev = jc->next;
-    if (jc->next != NULL) {
-        jc->next->pprev = jc->pprev;
+    if (jc->pprev != NULL) {
+        *jc->pprev = jc->next;
+        if (jc->next != NULL) {
+            jc->next->pprev = jc->pprev;
+        }
     }
     pthread_mutex_unlock(&states.lock);
     free_units(jc);
@@ -2741,6 +2789,8 @@ lu_jit_code_free(PyCodeObject *code)
         free(jc->callees[i]);
     }
     free(jc->callees);
+    free(jc->keyed);
+    free(jc->held);
     free(jc->scan);
     free(jc->hot);
     for (struct lu_prof *p = jc->profs, *next; p != NULL; p = next) {
