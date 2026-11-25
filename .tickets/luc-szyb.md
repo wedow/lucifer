@@ -852,8 +852,68 @@ Misses on 1q (bar: no row worse than 1% on either figure, cli compile ms not abo
 
 Reading: the quiet rule removes the extra rebuilds (pyflakes builds at master's count), but the cli and regex losses are IR taken in, not rebuilds: compile per build grows with the units the purchases and rides enlarge, and riding at the marginal price takes sites a lone purchase would not have paid for.
 
+## Stage 1 as it lands: sites at protocol, quiet purchases, riding (2026-11-25)
+
+The landing is stage 1 with two corrections the stage 1 and 1q tables called for; together they are Revision 1's stages 1 and 3 (stage 3's "only on evidence" met by the logs below). Commits on luc-site1: lanes d6dca23c, 2fa93b9b; changes 9afb781e, 468a61cc, c1de0377.
+
+What lands:
+- **Sites, not levels.** A look values each site left out of line at its counted calls times CALL_COST (protocol alone) and prices it, once its callee has a unit, at that unit's last build. The densest sites are admitted while their value per instruction covers the marginal build price; the admitted set is bought when its value covers the whole new build and the unit is quiet (the quiet rule learned rebuilds obey, unchanged). Bought sites are kept per entry, keyed by the call's path from the entry (callee and each frame's call, as profile places are keyed); a bought callee goes in with a fresh allowance and its own unit's bought sites. Sites not yet paid are armed for their share of the shortfall (of the price, or of the quiet).
+- **Riding.** When a unit is rebuilt for what it learned or for a mark, the sites whose value covers their marginal price at that build go in line in it, at no rebuild of their own.
+- **Deleted:** budget growth (`grown`, `MAX_GROWN`), `LOOP_CALLS`, the hot-site clauses, `lu_jit_site_key`/`lu_jit_hot_site`, `hots`, `refused`, and the callee-loss valuation: `unit_losses`, `per_entry`, `lost_entries`, the units' loss ledger (`lose`, `lost`) and the exits' and generic paths' charges to it. Generic passes are still counted under -X lucifer_jit_stats.
+
+Why protocol alone (the evidence R6 asked for): stage 0's check 2 showed a callee's own losses stay in its in-line copy; on 1q the rides and purchases that cost pyflakes and the cli rows were valued with those losses (Checker.NAME took handleNodeLoad's 1,722 IR after 2,113 calls).
+
+Prediction before the table (the falsifier method, from the 1q and stage 1 event logs re-valued at 420 a call; ratio = protocol value / price at the time of the decision, so below 1 means later by that factor or never):
+- pyflakes (1q): of 5 decisions, 1 made then (a 7-IR ride); handleNodeLoad's ride 0.02 (dropped), the two purchases 0.23 and 0.47.
+- pygments (stage 1): Pattern.match's purchase 0.93, `_format_lines` taking Pattern.match 0.44.
+- regex_v8 (1q): 11 of 12 rides still made (small callees, ratios 1.25-13); `_new_match` 0.37.
+- deepcopy (stage 1): 4 of 7 purchases still made; `_deepcopy_dict` taking `deepcopy` 0.47, `deepcopy` taking `__reduce_ex__` 0.08.
+- tomli_loads, genshi: the stage 1 falsifier above was already at protocol alone (tomli's sites bought in values 0-1; genshi @116 in xml value 1, @97 in xml value 3), so their gains were predicted to stay.
+
+Lanes Revision 1 names for this change:
+- megaiter (jit_mega_iter.py: str.join, set() and filter called out of line in a hot loop whose callees iterate generically per item): holds, compiled calls 1,746,322 -> 1,747,378 between 20,000 and 40,000 iterations (the lane bounds the growth; master 476,123 -> 496,726, 1q 132,103 -> 132,807). Valued at protocol, its sites are bought later, so the count before the purchases is higher than master's; after them it is flat.
+- sitechain (jit_site_chain.py: a start calling a generic callee at 24 sites): holds, 1 purchase of 9 sites, 65.3M predicted (1q: 18 sites, 146.6M), paid at least its price.
+- All site and ledger lanes hold (sitefinal 109,952 -> 170,752; siteshape 216,698 -> 232,696; sitepath; siteentry; siteshared; churn, classtests, learnprice, typed, grown, dispatch, rare, common).
+
+Gate (c1de0377): focused kernel programs 76/76 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; tools/jitcheck 0 failing; tools/jitcost PASS; the six new kernel programs and the lanes in a fresh worktree built with plain make -j4: 6/6 in all four lanes, lanes PASS.
+
+Table: master (origin/master ae250d27) and this landing interleaved in one session, two runs each alternated, min; method as the stage 1 table. Cli rows: G; compile ms; builds; IR built.
+
+| row | figure | master M (compile) | stage 1p M (compile) | 1p vs master |
+|---|---|---|---|---|
+| django_template | all values, -n 3 | 4,673.6 (650.8) | 4,598.4 (556.6) | -1.6% |
+| django_template | best value, -n 20 | 853.8 (0.0) | 853.0 (0.0) | -0.1% |
+| django_template | best of three, -n 3 (reported) | 932.0 (25.8) | 917.0 (12.0) | -1.6% |
+| genshi | all values, -n 3 | 8,996.4 (1,090.2) | 8,379.2 (971.0) | -6.9% |
+| genshi | best value, -n 20 | 1,862.6 (2.0) | 1,618.8 (3.8) | -13.1% |
+| genshi | best of three, -n 3 (reported) | 1,876.8 (7.2) | 1,739.2 (50.4) | -7.3% |
+| richards | all values, -n 3 | 1,425.8 (283.0) | 1,424.8 (294.0) | -0.1% |
+| richards | best value, -n 20 | 240.0 (0.0) | 240.0 (0.0) | +0.0% |
+| richards | best of three, -n 3 (reported) | 245.8 (0.0) | 240.0 (0.0) | -2.4% |
+| tomli_loads | all values, -n 3 | 103,936.4 (2,758.0) | 93,537.4 (1,461.0) | -10.0% |
+| tomli_loads | best value, -n 20 | 22,509.1 (0.0) | 22,537.1 (0.0) | +0.1% |
+| tomli_loads | best of three, -n 3 (reported) | 25,033.1 (0.0) | 22,695.1 (23.0) | -9.3% |
+| deepcopy | all values, -n 3 | 5,498.4 (575.8) | 5,208.0 (633.2) | -5.3% |
+| deepcopy | best value, -n 20 | 944.6 (0.0) | 929.8 (0.2) | -1.6% |
+| deepcopy | best of three, -n 3 (reported) | 1,140.6 (52.6) | 1,022.0 (58.4) | -10.4% |
+| regex_v8 | all values, -n 3 | 8,062.0 (2,320.0) | 7,921.0 (2,227.0) | -1.7% |
+| regex_v8 | best value, -n 20 | 841.0 (21.0) | 835.0 (8.0) | -0.7% |
+| regex_v8 | best of three, -n 3 (reported) | 1,133.0 (218.0) | 1,089.0 (171.0) | -3.9% |
+| regex_v8 calls 64-128 | total / compile / run G | 54.00 / 3.79 / 50.21 | 51.18 / 0.64 / 50.54 | -5.2% total, -83.0% compile, +0.7% run |
+| regex_v8 calls 128-256 | total / compile / run G | 104.36 / 5.52 / 98.84 | 100.33 / 0.53 / 99.80 | -3.9% total, -90.4% compile, +1.0% run |
+| pyflakes whole | G; compile ms; builds; IR | 8.123; 286 ms; 466 builds; 174,278 IR | 8.063; 279 ms; 466 builds; 172,199 IR | -0.7% |
+| black whole | G; compile ms; builds; IR | 12.762; 517 ms; 880 builds; 262,288 IR | 12.786; 519 ms; 881 builds; 263,614 IR | +0.2% |
+| pygments whole | G; compile ms; builds; IR | 13.654; 368 ms; 516 builds; 160,971 IR | 13.380; 367 ms; 514 builds; 153,713 IR | -2.0% |
+| cli compile ms (sum) | ms | 1171 | 1165 | -0.5% |
+| awfy-Richards per iteration | M | 129.42 | 129.42 | +0.0% |
+| awfy-DeltaBlue per iteration | M | 5.33 | 5.33 | -0.0% |
+| awfy-CD per iteration | M | 249.90 | 246.45 | -1.4% |
+
+Against the landing bar: no row is worse than 1% on either figure (worst: black whole +0.2%, tomli best value at -n 20 +0.1%), and cli compile ms is below master's (1,165 against 1,171). The earlier arms, from the earlier session against their own master runs: stage 1 missed deepcopy all values +1.9%, pyflakes +4.5%, cli compile ms +10.2%; 1q missed pyflakes +7.0%, regex_v8 all values +2.5%, cli compile ms +9.1%.
+
+Compile ms read 1,350 for master in the earlier session and 1,171 here: compile ms is time and moves with the host's load, which is why master and this arm were interleaved.
+
 ## State (2026-11-25)
 
-- Revision 1 is current. Falsifier (check 4 offline): done, no contradiction.
-- Stage 1 (lanes d6dca23c, change 9afb781e) and stage 1q (lanes 2fa93b9b, change 468a61cc) built and gated on luc-site1, tabled alone against master (three-arm table above). Neither meets the landing bar: stage 1 misses deepcopy all values +1.9%, pyflakes +4.5%, cli compile ms +10.2%; stage 1q misses pyflakes +7.0%, regex_v8 all values +2.5%, cli compile ms +9.1%. Gains on both: tomli all values -9%, genshi best value at -n 20 -12.8%, regex windows' compile -73% to -88%.
-- Check 6 not run; stage 2 not built. The gains-against-losses decision goes to the owner with both tables.
+- Revision 1 stages 1 and 3 done on luc-site1 (lanes d6dca23c, 2fa93b9b; changes 9afb781e, 468a61cc, c1de0377), gated, tabled against master: meets the landing bar. For review and landing; not pushed.
+- Next: check 6 (stage 2's gate: recall and miss cost of a zero feedback word), then stage 2 (cold sites out) only if it passes. Ruling 2 (acceptance metric) was applied provisionally as R7.
