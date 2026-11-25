@@ -1023,6 +1023,7 @@ free_unit(struct lu_unit *u)
         free(u->counts);
         free(u->stats_name);
     }
+    memset(u, 0xA5, sizeof *u);         /* a reader after the free (its stale word, its fn) finds garbage */
     free(u);
 }
 

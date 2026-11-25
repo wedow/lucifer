@@ -206,6 +206,8 @@ lu_code_free(void *code, size_t n)
     while ((char *)code < c->rx || (char *)code >= c->rx + c->size) {
         c = c->next;
     }
+    /* Freed code traps if anything still runs it. */
+    memset(c->rw + ((char *)code - c->rx), 0xCC, n);
     *r = (struct range){ .chunk = c, .at = code, .size = n };
     put_free(r);
     pthread_mutex_unlock(&code_pool.lock);
