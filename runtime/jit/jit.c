@@ -212,7 +212,7 @@ static const char *qualname(PyCodeObject *code);
    code's few).
    A call made out of line costs CALL_COST (tools/jitcost: the same small
    function called out of line and in line, its argument and result boxed
-   for the call), and what the callee's unit loses per entry (out_cost); a
+   for the call): taken in line, the callee's own losses stay in its copy. A
    pass through a place built without what it learned since, what a
    generic path of the place's kind loses (below), or for another
    instruction a call for each helper call the build made for it
@@ -220,7 +220,7 @@ static const char *qualname(PyCodeObject *code);
    (a helper that stands where a build for the operands' classes would have
    had a guard and an in-line path: an iterator's step, an attribute's load
    or store, an operator, a call of an unknown callable) costs what the
-   helper path takes beyond that in-line form, by kind (lu_jit_generic). */
+   helper path takes beyond that in-line form, by kind (lu_jit_prof_built). */
 #define BUILD_INS 6500
 #define BUILD_INS2 5
 #define DEOPT_INS 3800
@@ -243,27 +243,6 @@ static uint64_t
 exit_cost(const struct lu_deopt *d)
 {
     return DEOPT_INS + BYTECODE_INS * (uint64_t)d->rest;
-}
-
-/* What unit u lost, for unit_losses: counted while its entries are, until
-   it covers u's own build (enough), past which no decision needs more.
-   Relaxed: a lost update under a race only delays a decision, and a
-   saturated count is not written, so threads do not share its line. */
-static void
-lose(struct lu_unit *u, uint64_t cost)
-{
-    uint64_t lost = __atomic_load_n(&u->lost, __ATOMIC_RELAXED);
-    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
-    if (lost >= u->enough || entries >= ENTRIES_SEEN) {
-        if (!__atomic_load_n(&u->settled, __ATOMIC_RELAXED) && !_PyRuntime.jit.stats) {
-            __atomic_store_n(&u->settled, 1, __ATOMIC_RELAXED);     /* with the counts on, generic passes are counted */
-        }
-        return;
-    }
-    __atomic_store_n(&u->lost, lost + cost, __ATOMIC_RELAXED);
-    if (lost + cost >= u->enough) {
-        __atomic_store_n(&u->lost_entries, entries > 0 ? entries : 1, __ATOMIC_RELAXED);
-    }
 }
 
 /* Sites marked generic (nospec, noinline) so far: a unit built after a
@@ -1352,6 +1331,7 @@ compile(struct lu_jit_code *jc, struct lu_frame *frame, int pc, uint64_t ticket)
     if (ok) {
         keep_outs(u, &f);
         u->enough = (uint64_t)build_cost(f.nins);
+        u->settled = !_PyRuntime.jit.stats;     /* with the counts on, generic passes are counted */
         u->nins = f.nins;
         __atomic_store_n(&jc->built_ins, f.nins, __ATOMIC_RELAXED);
     }
@@ -2043,53 +2023,10 @@ out_calls(const struct lu_out *o)
     return n > 0 ? n : 0;
 }
 
-/* What a unit has lost per entry: what its exits and generic paths lost
-   (lost, over the entries that made it: past `enough` it stops, and
-   lost_entries says after how many) and its calls made out of line. Read
-   only when a caller decides: the loss is valued for that decision, not
-   added to the caller's ledger. Past ENTRIES_SEEN, which the count stops
-   at, the value first made then stands. */
-static double
-unit_losses(struct lu_unit *u)
-{
-    unsigned long entries = __atomic_load_n(&u->entries, __ATOMIC_RELAXED);
-    uint64_t kept = __atomic_load_n(&u->per_entry, __ATOMIC_RELAXED);
-    if (entries == 0 || (entries >= ENTRIES_SEEN && kept != 0)) {
-        return (double)kept;
-    }
-    unsigned long upto = __atomic_load_n(&u->lost_entries, __ATOMIC_RELAXED);
-    double lost = (double)__atomic_load_n(&u->lost, __ATOMIC_RELAXED);
-    double per = lost / (double)(upto != 0 ? upto : entries);
-    for (int i = 0; i < u->nouts; i++) {
-        per += CALL_COST * (double)out_calls(&u->outs[i]) / (double)entries;
-    }
-    /* out_calls is never below 0, so no negative value reaches the cast. A
-       torn read of a site while u's root re-arms it can still count up to
-       about 2-3 times its calls; when that is the first nonzero value made
-       once entries reach ENTRIES_SEEN, it stands in per_entry. */
-    __atomic_store_n(&u->per_entry, (uint64_t)per, __ATOMIC_RELAXED);
-    return per;
-}
-
-/* What a call made out of line at o loses: its own cost, and what the
-   callee's unit then loses per entry for running uncustomized (its exits,
-   generic paths, its own calls out of line). */
-static double
-out_cost(const struct lu_out *o)
-{
-    struct lu_jit_code *cc = state_of(o->callee);
-    double callee = 0;
-    for (struct lu_unit *v = cc != NULL ? __atomic_load_n(&cc->units, __ATOMIC_ACQUIRE) : NULL; v != NULL; v = v->next) {
-        if (!__atomic_load_n(&v->dead, __ATOMIC_RELAXED) && v->entry_pc == cc->call_pc) {
-            callee = unit_losses(v);
-            break;
-        }
-    }
-    return CALL_COST + callee;
-}
-
 /* A look at the sites unit u left out of line for want of budget (under
-   its root's prof_lock): each valued at its calls times out_cost and, once
+   its root's prof_lock): each valued at its calls times CALL_COST (the
+   call's protocol: what taking it in line removes; the callee's own losses
+   stay in its copy) and, once
    its callee has a unit, taking the IR of that unit's last build, which is
    what it takes in line (the callee goes in with the allowance and the
    bought sites its own unit has). The densest are admitted while their
@@ -2098,7 +2035,7 @@ out_cost(const struct lu_out *o)
 struct look {
     int n, priced, admitted;
     int *order;                 /* the priced sites, densest first */
-    double *value, *each, *size;
+    double *value, *size;
     double total, since;        /* all sites' value; what their calls made since the last look */
     double ins, paid;           /* the build with the admitted sites, and their value */
 };
@@ -2108,18 +2045,16 @@ look_at(struct lu_unit *u, struct look *l)
 {
     int n = u->nouts;
     *l = (struct look){ .n = n, .ins = u->nins };
-    l->value = malloc(sizeof(double) * 3 * (size_t)(n > 0 ? n : 1));
-    l->each = l->value + n;
-    l->size = l->each + n;
+    l->value = malloc(sizeof(double) * 2 * (size_t)(n > 0 ? n : 1));
+    l->size = l->value + n;
     l->order = malloc(sizeof(int) * (size_t)(n > 0 ? n : 1));
     for (int i = 0; i < n; i++) {
         struct lu_jit_code *cc = state_of(u->outs[i].callee);
         int64_t made = out_calls(&u->outs[i]);
-        l->each[i] = out_cost(&u->outs[i]);
-        l->value[i] = (double)made * l->each[i];
+        l->value[i] = (double)made * CALL_COST;
         l->size[i] = cc != NULL ? (double)__atomic_load_n(&cc->built_ins, __ATOMIC_RELAXED) : 0;
         l->total += l->value[i];
-        l->since += (double)(made > u->outs[i].before ? made - u->outs[i].before : 0) * l->each[i];
+        l->since += (double)(made > u->outs[i].before ? made - u->outs[i].before : 0) * CALL_COST;
         if (l->size[i] > 0) {
             int j = l->priced++;
             for (; j > 0 && l->value[l->order[j - 1]] * l->size[i] < l->value[i] * l->size[l->order[j - 1]]; j--) {
@@ -2222,7 +2157,7 @@ hot_exit(struct lu_deopt *d)
             struct lu_out *o = &u->outs[i];
             int64_t made = out_calls(o), arm = made;
             if (due >= 0 && l.total > 0) {
-                double share = due * (double)made / l.total, least = DEOPT_INS / l.each[i];
+                double share = due * (double)made / l.total, least = (double)DEOPT_INS / CALL_COST;
                 arm = (int64_t)(share > least ? share : least) + 1;
             }
             o->before = made;
@@ -2243,9 +2178,7 @@ hot_exit(struct lu_deopt *d)
 void
 lu_jit_generic(struct lu_unit *u, enum lu_generic kind)
 {
-    static const uint16_t costs[LU_GENERIC_KINDS] = { ITER_INS, ATTR_INS, OP_INS, ANYCALL_INS };
     count(&stats.generic, 1);
-    lose(u, costs[kind]);
 }
 
 /* The site a guard's exit counts against: the instruction it left at, or
@@ -2278,9 +2211,6 @@ lu_jit_note_exit(struct lu_deopt *d)
     if (d->reason == EXIT_HOT) {
         hot_exit(d);
         return;
-    }
-    if (d->reason != EXIT_POLL) {
-        lose(d->unit, exit_cost(d));    /* a poll's exit is the runtime's, when it asks: no build removes it */
     }
     count(&stats.taken[d->opcode & 0xff], 1);
     if (_PyRuntime.jit.events) {

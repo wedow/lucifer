@@ -206,8 +206,8 @@ h_exc_push(PyObject *exc)
 }
 
 /* A pass of a generic path for unit u (the evaluator passes the unit it
-   builds; NULL: no generic pass), its loss while u's ledger counts (jit.c
-   lu_jit_generic): once it has settled, a load and a test. */
+   builds; NULL: no generic pass), counted under -X lucifer_jit_stats (jit.c
+   lu_jit_generic); else a load and a test. */
 static inline void
 generic(struct lu_unit *u, enum lu_generic kind)
 {

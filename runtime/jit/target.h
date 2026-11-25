@@ -209,17 +209,14 @@ struct lu_unit {
         PyCodeObject *callee;   /* the code called there (a constant of the unit) */
     } *outs;
     int nouts;
-    uint64_t lost;              /* what its exits and generic paths lost while its entries were counted (jit.c lose) */
-    uint64_t enough;            /* what its build cost: lost stops there */
-    unsigned long lost_entries; /* the entries that lost that much, once it has */
-    uint64_t per_entry;         /* its losses per entry when last valued, in instructions (jit.c unit_losses) */
+    uint64_t enough;            /* what its build cost */
     uint64_t unlearned;         /* what its passes lost for want of what its root learned since its build
                                    (jit.c stale_pass) */
     uint64_t quiet;             /* what it paid towards learned rebuilds since a place of its root last
                                    learned (jit.c learning) */
     int nins;                   /* the IR instructions its build made */
-    int settled;                /* lost has stopped counting (covers enough, or the entries are past counting):
-                                   helpers.c looks no further */
+    int settled;                /* generic passes are not counted (-X lucifer_jit_stats off): helpers.c looks
+                                   no further */
     int dead;
     int serial;                 /* stores without locks while serial (facts.c): keeps the task's unlocked_jit */
     /* While dead and not yet freed: the list of such units, and
@@ -553,9 +550,9 @@ int lu_jit_stale_pass(struct lu_prof *p, struct lu_unit *u);
    it loses, the measured loss of a generic path of its kind, else
    CALL_COST a call (jit.c). */
 void lu_jit_prof_built(struct lu_prof *p, int base, int calls);
-/* A helper of a generic path ran for unit u, which called it: a loss of
-   u's by kind (jit.c lu_jit_generic). helpers.c calls it only while u's
-   ledger counts (settled). */
+/* A helper of a generic path ran for unit u, which called it: counted
+   under -X lucifer_jit_stats (jit.c lu_jit_generic); helpers.c calls it
+   only then (u not settled). */
 enum lu_generic { LU_GENERIC_ITER, LU_GENERIC_ATTR, LU_GENERIC_OP, LU_GENERIC_CALL, LU_GENERIC_KINDS };
 void lu_jit_generic(struct lu_unit *u, enum lu_generic kind);
 
