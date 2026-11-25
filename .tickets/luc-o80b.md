@@ -560,3 +560,49 @@ Already true:
 Changed shape: the `_co_monitoring != NULL` tests became `lu_code_watched` (a `watched` byte plus the code's version), not an active-monitors walk.
 
 Remaining (this stage): the hook setter moving the version; the gate emitted once at both entry points; `enter()` shared by `lu_jit_enter` and `lu_jit_run` with `find` before the wait (B7); `lu_jit_finish` for the three C tails; the stage 1 checks.
+
+## Stages 1 and 2 (2026-11-25, branch luc-entry1, not landed)
+
+Stage 1 (d2d8edbd):
+- `gate()` in the emitter, called by the unit's frame entry (before `entered`) and its direct entry: the serial pair (word kept in the caller's record, or the unit's own call record at frame entry), C stack above the floor, poll word equal to `u->version` (a kernel unit masks the visible events). It clobbers RAX and R11 only, since the stub's RCX holds the result word.
+- `unit_for()` (the two frame tests, `find` before the wait, then wait/disabled and `compile_at`) and `enter()` (activation, `fn`, and on a decline the stale-version kill, made before `left` because `left` may free a stale unit) are shared by `lu_jit_enter` and `lu_jit_run`. They are two functions, not one `enter()`: `lu_jit_run` makes the frame ready (marker, the fresh generator's sent value, the cells prologue) between the find and the call until stage 3 moves the cells before the find. A decline after that continues in the interpreter from the RESUME through `lu_jit_finish`. The prologue can collect, so `lu_jit_run` finds the unit again after it.
+- `compile_at` refuses a watched code, a hook other than perf's, or a low C stack (the conditions the gate holds while a unit lives). `lu_jit_direct` refuses a call while `ts->tracing` is set: a C caller inside a tool's callback is legitimate there, so the stub's tracing test could not become fatal for C callers.
+- `lu_jit_finish(ts, frame, r, value, entry)` replaces `lu_jit_run`'s tail, `lu_jit_direct`'s tail and `lu_jit_call_finish`; the emitted site calls it.
+- `_PyInterpreterState_SetEvalFrameFunc` stops the world and moves the version when hook-ness changes (`lu_monitoring_hook_changed`). There is no test: no counting hook can delegate (B3).
+- Defect found by the gate: `prologue()` (C) ran past an INSTRUMENTED_RESUME, making cells of bytecode. On master it never ran on instrumented code, because the C gate refused first. Seen as a collector segfault in test_cprofile under `jit` (an evil timer calls a function with a free variable from C while the profiler is on). Fixed (it stops at INSTRUMENTED_RESUME). Test `entry_prologue_tools` fails without the fix in plain and jit and passes after; master passes.
+- Checks: none fired. That covers the C old-predicate fatal, the stub's monitoring, tracing and hook fatals, and GUARD_ENTRY fatal, over the gate's kernel programs in plain, jit-off, jit, jit-deopt, handoff and handoff:3, full jitcheck, the four floor units in jit and deopt, and all 197 jit_* kernel programs in jit and jit-deopt. The declines where the old gates would have entered were all stale (test_cprofile in `on`: 54), the kill the C gate made before.
+- Question 7: GUARD_ENTRY is never taken. jitcheck sharedcode reads `poll 0` on master and on both stages, and the stage 1 fatal never fired anywhere above.
+- B7: stage 1 put the find before the wait. My probe (two functions of one code, the first's unit made to leave by an int-to-float global) does not reproduce B7 on master: identical counts on master and stage 1. The stage 0 probe is not in the tree. Measured cost of the new order: `-c pass` (JIT on) +0.5% instructions. It makes 27,922 entries that wait walk the unit list first; a profile shows unit_for+find+lu_jit_enter at 2.65% of samples against 1.85% for lu_jit_enter on master. Reverted in a third commit: the wait is tested first again, for interpreter entries only. After that `-c pass` reads +0.11%. B7 stays open (speed only, bounded, not reproduced here).
+
+Stage 2 (ebb64fe5): deleted the stub's dead, monitoring, tracing and hook tests (a serial unit's gate keeps its death test); OP_GUARD_ENTRY (IR kind, emitter, opt.c x2, ssa.c, eval_flow.c; the globals and builtins stay held as constants); the stage 1 C checks and counters; `lu_jit_run`'s quiescent report and disabled test.
+
+Gate, each stage: the gate's kernel programs (entry_*, threads_*, tools_*, trace_*, jit_reclaim*, signals_*, jit_tools_toggle, jit_direct_calls, jit_rebound_frames, jit_calls, jit_class_callables, jit_gen_turns, jit_delegation, jit_namespace_collect, jit_shared_code_hot, jit_shared_code_globals (stage 2), jit_local_events_inlined, return_release) pass in plain, jit-off, jit and jit-deopt, and threads_* in handoff and handoff:3. The one exception is threads_kill_under_calls in jit-off at stage 1: `oracle varies`, the oracle's own output. Full jitcheck: 0 failing; compiled, ccalls, toolsoff, sharedcode, borrowed and entryfails PASS; the usual NOT_BUILT gaps. check-capi-ext PASS. Floor units test_monitoring, test_sys_settrace, test_sys_setprofile and test_cprofile in jit and deopt: 0 lost and 0 gained against master's binary (566 pass).
+
+Numbers (instructions:u, pinned on a core lease, two runs per arm, master's binary against stage 2; the `-c pass` and pyflakes rows are after the wait-order commit):
+
+| row | mode | master | stage 2 | change |
+|---|---|---|---|---|
+| -c pass | on | 128.87M | 129.01M | +0.11% |
+| -c pass | always | 845.16M | 841.98M | -0.38% |
+| pyflakes | on | 8.251G | 8.224G | -0.33% |
+| pyflakes | always | 14.778G | 14.817G | +0.27% |
+| Richards (harness 5 20) | on | 11.330G | 11.204G | -1.1% |
+| Richards | always | 12.449G | 12.302G | -1.2% |
+| DeltaBlue (harness 5 2000) | on | 5.553G | 5.432G | -2.2% (spread 2%) |
+| DeltaBlue | always | 6.340G | 6.276G | -1.0% (spread 1.5%) |
+
+Direct-call slope, tools/bench/ladder (instructions per call, the rec12-rec2 and meth12-meth2 steps):
+
+| row | mode | master | stage 1 | stage 2 |
+|---|---|---|---|---|
+| op.call_positional | on | 181 | 182 | 166 |
+| op.call_method | on | 222 | 222 | 209 |
+| op.call_keyword | on | 182 | 182 | 167 |
+| op.call_positional | always | 181 | 182 | 167 |
+| op.call_method | always | 223 | 222 | 209 |
+
+Stage 1 cost about +1 (not the predicted +5: the fatal branches are not taken). Stage 2 is -13 to -15 below master, inside the predicted -12 to -20. tools/jitcost row call: measured 413 on master and 377 after, against CALL_COST 420 (ratio 1.11), within the factor, so the constant is unchanged. Every jitcost row passes on both binaries.
+
+Wait-order commit gate: the gate's kernel programs in plain, jit and jit-deopt; full jitcheck, 0 failing (sharedcode, compiled, ccalls, toolsoff and entryfails PASS).
+
+State: stages 1 and 2 committed, plus the wait-order commit, on branch luc-entry1, not pushed; waiting for the adversarial reviews. Open: B7 (not reproduced; the find-first order costs `-c pass` +0.5%); B3 has no test (no hook can delegate); pyflakes with the JIT always on reads +0.27%, under the 0.3% bar, cause not looked for. Stages 3-5 not started.

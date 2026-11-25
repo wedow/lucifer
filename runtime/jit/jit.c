@@ -1734,20 +1734,18 @@ poll_word(PyThreadState *ts)
 }
 
 /* The unit to enter frame by at pc: the live one built for its globals
-   and builtins, else (compile) one built now unless the code's entry
-   waits. None while the frame's locals are a mapping or a tool's callback
-   runs on the thread. */
+   and builtins, else (compile) one built now. None while the frame's
+   locals are a mapping or a tool's callback runs on the thread, nor (an
+   interpreter's entry) while the code's entry waits: tested before the
+   find, which costs more on the entries that wait, though a unit another
+   function of the code has live then waits too. */
 static struct lu_unit *
 unit_for(PyThreadState *ts, struct lu_frame *frame, struct lu_jit_code *jc, int pc, int compile)
 {
     if (frame->locals != NULL || ts->tracing) {
         return NULL;
     }
-    struct lu_unit *u = jc != NULL ? find(jc, pc, frame) : NULL;
-    if (u != NULL || !compile) {
-        return u;
-    }
-    if (jc != NULL) {
+    if (compile && jc != NULL) {
         uint32_t wait = __atomic_load_n(&jc->wait[pc], __ATOMIC_RELAXED);
         if (wait != 0 || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED)) {
             if (wait != 0) {
@@ -1760,7 +1758,8 @@ unit_for(PyThreadState *ts, struct lu_frame *frame, struct lu_jit_code *jc, int 
             return NULL;
         }
     }
-    return compile_at(ts, frame, pc);
+    struct lu_unit *u = jc != NULL ? find(jc, pc, frame) : NULL;
+    return u != NULL || !compile ? u : compile_at(ts, frame, pc);
 }
 
 /* Runs u on frame, its activation linked meanwhile (lu_jit_reclaim reads
