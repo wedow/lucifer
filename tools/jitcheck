@@ -176,6 +176,10 @@ require that a count of the tier's does not grow with the iterations:
          return at once, and resumes an await chain that suspended once:
          side exits and entries left to the interpreter. The delegating
          frames' SEND runs in compiled code.
+  awaits tests/kernel/jit_await_hot.py, whose hot code awaits coroutines
+         and delegates to generators that run to their end without
+         suspending: the resumes the interpreter runs (each one starts in
+         its call's compiled code).
   asyncfor tests/kernel/jit_async_for_hot.py, whose hot coroutine runs
          `async for` over an async generator and over a class with
          __anext__, and `async with`: side exits and entries left to the
@@ -421,6 +425,7 @@ GROWTH = {
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
     'gens': ('jit_gen_resumes.py', r'jit: generator resumes interpreted (\d+)', 0),
     'delegation': ('jit_delegation_hot.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
+    'awaits': ('jit_await_hot.py', r'jit: generator resumes interpreted (\d+)', 0),
     'asyncfor': ('jit_async_for_hot.py', r'jit: entries .* side (\d+)|jit: entries waited (\d+)', 0),
     'consumers': ('jit_gen_consumers.py', r'jit: entries .* side (\d+)'
                   r'|jit: entries waited (\d+), units retired (\d+)', 0),
@@ -504,7 +509,7 @@ def qualnames(program):
 # (entries by shape for calls that are not inlined, handlers and generators
 # inside a unit, polymorphic sites). Their programs' output is still checked.
 NOT_BUILT = frozenset("""calls raised userexc shapes objects
-iterators slices guards gens order asyncfor""".split())
+iterators slices guards order asyncfor""".split())
 
 
 def check_growth(args, lane):

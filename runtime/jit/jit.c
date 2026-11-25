@@ -1664,13 +1664,18 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     /* A generator's frame, resumed, goes on in the unit entered after
        the RESUME it was saved at (a yield's, not a delegation's, which
        the interpreter's loop runs), if there is one: with no turn of the
-       interpreter. */
+       interpreter. One not started yet stands at the POP_TOP that drops
+       the value sent, before RESUME 0: it goes on in its call's unit, the
+       value dropped here. */
     int gen = frame->owner == LU_FRAME_GENERATOR;
-    if (gen && !(frame->instr->op.code == RESUME && frame->instr->op.arg != 0
-                 && (frame->instr->op.arg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM)) {
+    lu_codeunit *resume = frame->instr;
+    int fresh = gen && resume->op.code == POP_TOP && resume[1].op.code == RESUME && resume[1].op.arg == 0;
+    resume += fresh;
+    if (gen && !(resume->op.code == RESUME && (fresh || resume->op.arg != 0)
+                 && (resume->op.arg & RESUME_OPARG_LOCATION_MASK) < RESUME_AFTER_YIELD_FROM)) {
         return 0;
     }
-    int at = gen ? (int)(frame->instr - lu_code_start(code)) + 1 + lu_opcode_caches[RESUME] : jc != NULL ? jc->call_pc : 0;
+    int at = gen ? (int)(resume - lu_code_start(code)) + 1 + lu_opcode_caches[RESUME] : jc != NULL ? jc->call_pc : 0;
     if (jc == NULL || at <= 0 || frame->locals != NULL || lu_jit_stack_low()
         || (poll & LU_POLL_EVENTS_MASK)
         || __atomic_load_n(&jc->disabled, __ATOMIC_RELAXED) || code->_co_monitoring != NULL
@@ -1689,6 +1694,9 @@ lu_jit_run(PyThreadState *ts, struct lu_frame *frame, PyObject **result)
     task->jit_act = &act;
     if (_PyRuntime.jit.debug) {
         fprintf(stderr, "jit: call %s\n", PyUnicode_AsUTF8(code->co_qualname));
+    }
+    if (fresh) {
+        Py_DECREF(*--frame->stackpointer);
     }
     int pc = u->entry_pc;
     struct lu_frame entry = { .owner = LU_FRAME_C_ENTRY };
