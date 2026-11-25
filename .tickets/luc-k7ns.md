@@ -30,3 +30,46 @@ The daily of 2026-11-25 failed jit_shared_code_collect in the jit lane (19 of 20
 - Since b20b81a9 the exit is at a place that learned since the build, so it goes to serve@73's own stale ledger and kills only serve@73 (learned-since-build), rebuilt with a generic call. serve@14 survives every request: each entry leaves at the inlined compile frame (compile@414) before the guard, so it never pays a loss there and is never rebuilt; it keeps namespace 0 until it dies (gc referrers: the handler is held only by serve's code, through its units' constants).
 
 The fresh-code case is now skipped wherever every function compiles at its first call (the jit and jit-deopt lanes); the acceptance is unchanged: both cases pass unskipped in every lane.
+
+## 2026-11-25: inventory and design (before code)
+
+### (a) What holds a learned object
+
+Strong references (counted):
+
+- A unit's constants, `u->consts` (runtime/jit/jit.c:1253, taken by lu_ir_const at runtime/jit/ssa.c:392): every object the build folded or guards by identity. The root's own code constants and globals/builtins, and the learned ones: a call site's callee (function, or code + globals + builtins of a code-keyed one), the inlined callees' functions, codes, globals and the values read from them, classes and types guarded on (LOAD_ATTR, isinstance folds, LU_PROF_CLASS values), descriptors, bound selves the build folded. Visited by code_traverse (runtime/interp/code.c:117 -> jit.c:2495), so the collector counts them, and marks through them: a live code's unit marks everything it folded reachable. This is the leak: serve's outer unit's GUARD_IS constant on request 0's handler keeps that handler and its namespace.
+- A root's profiles, `p->met[]` (jit.c:660): types an operand met, LU_PROF_CLASS classes (and LU_PROF_IMMORTAL values, never collected). Not visited at all, so they count as references from outside: a profile keeps a class of a dropped namespace (and through its methods the namespace) alive while the root code lives.
+- Compile-time temporaries (eval_attr.c:134/229, eval_ops.c:65, jit.c:506/517/551, eval_call.c:1455 kwnames, a tuple of str the collector untracks): released or moved into consts by the end of the build.
+
+- Objects a build makes itself and holds only as constants: function_of_code's stand-in function for a code-keyed callee (runtime/jit/eval_call.c:76), which no other path reaches.
+
+Borrowed pointers, valid only while the unit's constants hold their objects: deopt frame records' code/func (runtime/jit/target.h:104), `u->outs[].callee` (target.h:207), the deps' `want.code` (jit.h struct lu_fdep). Identities only, never dereferenced as objects: deps' `want.obj` (runtime/jit/deps.c), callee tables' `globals` (jit.h struct lu_callee), except that speculate_callee (eval_call.c:124) does read a code-keyed entry's globals to make its stand-in function: a dangling pointer once that namespace dies while the code lives (a use after free the leak used to hide). Weak already: callee table entries name only deferred or immortal functions/codes and pic entries deferred descriptors, forgotten by the collector with the world stopped (lu_jit_pic_forget, jit.c:2458).
+
+Semantically needed while the unit lives: nothing of the namespace a running activation does not reach otherwise, except during an activation: a running unit may hold a callee or value only as its constant (a borrowed load guarded by identity, an inlined frame's function rebuilt from the constant at deopt). With no activation in the unit, every constant is droppable: a unit built for a namespace can only be entered by a frame of that namespace's function, which holds it.
+
+### (b) Mechanism: unit constants and profiles are weak to the collector
+
+No new safepoint and nothing on the hot path: the collection's own stop-the-world does it.
+
+1. Counting: update_refs subtracts every unit's constants and every profile's types as references between tracked objects (a registry of codes with JIT state, walked after the heap pass; image and immortal codes included).
+2. Marking never goes through them: code_traverse stops visiting units (as CPython's has nothing to visit), so neither the roots pass nor mark_reachable reaches an object through a unit or profile.
+3. Between marking and the garbage scan (lu_jit_collect, world stopped), for every registered code: a unit some task's activation is in, or any unit or profile of a code that is compiling, keeps its constants (each still unreachable one is marked reachable, with what it reaches); any other unit with an unreachable constant is killed ("collected") and reclaimed in the same stop, as dead units are today; a profile entry naming an unreachable object is dropped, its reference released with the reclaimed units.
+4. What a build made itself (lu_ir_mine: function_of_code's stand-in function) is no reason for its unit to die: the decision reads the unit's other constants, and a unit that lives keeps those objects too.
+5. A code-keyed callee table entry holds its globals by a reference counted the same way (dropped from the table once the globals are garbage), and a build holds the code and globals it reads from an entry while it makes the stand-in function.
+6. The reclaimed units' constants are released after the world restarts and before finalizers run, so handle_resurrected_objects sees no reference from a unit or profile to the garbage: none survive (killed, or their constants made reachable).
+
+Safety: a unit's constant is released only by freeing the unit, which happens only through the existing reclaim (with the world stopped, no activation in it, its code not compiling, off its code's list and direct entry: the argument at jit.c "Freeing dead units"). A thread that can load a unit's constant is in an activation of that unit, and that unit's constants are kept as roots for the collection, so no thread is between "loaded the callee pointer" and "took a reference" when the object is freed: nothing a held unit names is garbage. Compiles may park while holding pointers read from their root's profiles, so a compiling code's profiles and units are kept the same way. Profiles are read without a lock only by code that does not poll (lu_jit_prof_note), and written under prof_lock, which no holder parks under.
+
+Cost: none on the fast path (no new store, no new check in compiled code or the interpreter). Per collection: a walk of the units' constants and profiles of codes with JIT state, twice. A unit dies only when something it holds is otherwise garbage, i.e. when the program dropped it.
+
+## 2026-11-25: built (branch luc-k7ns, not landed)
+
+Commits: bf08436d (tests), 739182ff (units and profiles weak to the collector), bdd69784 (code-keyed callee globals held, weak to the collector), 6402e8df (a unit's own stand-in function no reason to die; JIT state freed first in code_dealloc), 411bf6e0 (a collection reads only JIT state that can hold references).
+
+Tests: jit_shared_code_collect with both cases in every lane; jit_namespace_collect (direct, inlined, method, generator, poly site over three namespaces, a closure site that learned while cold, a finalizer calling the hot caller, a reload loop of 40 fresh modules: no marker survives) and jit_namespace_collect_threads (a namespace swapped and dropped on the main thread while another runs it hot). On the base: jit_namespace_collect and _threads fail in plain, jit and jit-deopt (the threads program: 1 of 13 dropped namespaces dead; the others leak to exit), jit_shared_code_collect in jit and jit-deopt. With the first fix alone, jit_namespace_collect crashed under handoff:3 (dict free list corrupted by a stand-in function made of a freed globals dict from a callee table): fixed by bdd69784. The closure case covers that path but does not fail deterministically without the fix (the freed dict's memory is reused as a dict, and the guards hold).
+
+Review (adversarial, read-only) found the stand-in function (a unit-private constant) killing its unit at every collection, the callee-table use after free, and a qualname read in code_dealloc's window: all fixed above.
+
+Gate (final build): new programs plus 30 call/inline/pic/generator/reclaim/release/gc neighbours in jit-off, plain, jit, jit-deopt: all pass but jit_direct_calls, which fails identically on origin/master (the rebound case's traceback names 'plain' frames: not this change). handoff and handoff:3 (new programs, jit_reclaim_threads, gc_thread_queues): pass. gc:1 on the new programs: pass. tools/jitcheck: 0 failing. A fresh worktree built with plain make -j4 passes the new programs in plain, jit, jit-deopt, handoff:3.
+
+Firing: "collected" kills on jit_namespace_collect 29 (on) / 116 (always), 0 on the base; DeltaBlue 0, with kills and compiles identical to the base in both modes. Instructions, base -> new, min of 3 interleaved: Richards +0.003% / +0.001% (on / always); DeltaBlue +0.43% / -0.49% (its base alone varies by 0.4% between runs; per collection after a warm DeltaBlue 4.28M -> 4.25M on, 4.59M -> 4.43M always); -c pass -0.06% / +0.07%; pyflakes -0.04% / +0.02%.
