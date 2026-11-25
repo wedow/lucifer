@@ -469,3 +469,32 @@ Asserts are in every build, and a race with another thread's kill is legitimate,
 
 ### Files
 runtime/jit/x86_64/emit.c, runtime/jit/jit.c, runtime/interp/ceval.c, runtime/jit/helpers.c, runtime/interp/instrument.c.
+
+## Stage 0 results (2026-11-25)
+
+Run on origin/master 7260c37d. Counts from `-X lucifer_jit=always -X lucifer_jit_stats`; lanes by `tools/kernelcheck`.
+
+| # | Verdict | Evidence |
+|---|---|---|
+| B1 | **Real** | `jit_tools_toggle.py N TOOL`: with no toggle, `entries 7371, ... direct calls 317` at both 20,000 and 40,000. After one settrace, setprofile or monitoring on/off: `entries 67060` at 20,000, `127060` at 40,000 (3 per iteration: the interpreted loops enter the `max`, `sum`, `min` units); no user unit is built after the toggle. `sys.settrace(sys.gettrace())` with nothing on (doctest's restore) does not trigger it. jitcheck `toolsoff`: `GAP toolsoff: settrace: 67614 at 20000 iterations, 127614 at 40000` (same for setprofile, monitoring; restore passes). |
+| B4 | Not real (as probed) | Same runs: `poll 134` exits at both sizes; the kernel units entered after the toggle run to their return (`unit sum@1 entries 19897 ... poll 417837`). |
+| B2 | **Real** for an inlined callee; not for the running loop | `jit_local_events_inlined.py`: oracle `inlined callee 10`, lucifer `2` (plain, jit), `4` (jit-deopt); jit-off matches. Local events on the code of a running loop, armed from a callee, match in every lane. |
+| B3 | Not determined | `_PyEval_EvalFrameDefault` is an unimplemented stub, so a counting hook cannot delegate; no small `tests/capi` case. |
+| B5 | Not shown | `threads_call_code_fresh.py` passes plain, jit-off, jit, jit-deopt, handoff, handoff:3 (no crash in any run). |
+| B6 | Not shown | `return_release.py` extension (finalizer measuring recursion room at a normal return, mid-stack and at the limit) matches in all four lanes. |
+| B7 | Real, bounded, speed only | A probe (two functions of one code, the first's unit killed by a global rebind): the second's unit gets 19,922 of 20,000 calls against 20,013 without the kill; `entries waited` +184. Flat across sizes. |
+| B8 | Not shown | `sorted(range(N), key=f)` with `interrupt_main(SIGUSR1)` at the first key call: `compiled calls 61329` against `61332` without (20,000), `101329` against `101332` (40,000). |
+| B9 | **Real**, statistics only | `jit_compiled_calls.py 20000`: `unit fib@1 entries 10 ... poll 958 helper 954`: about 950 executions of a loop-free unit, 10 counted entries. |
+| B10 | Not determined | No instruction count taken at a datastack chunk boundary. |
+| B11 | Not shown | `trace_midloop_inlined_loop.py` (LINE from another thread while the loop runs inside an inlined callee) matches in all four lanes. |
+
+Size of B1. One process, a loop of a call and an instance method per iteration, best of 5: 2.0 ns per iteration before the toggle, 399.6 after (195x; `lucifer_jit=off` runs it at 362 and 350). Whole run, `perf stat` pinned, two runs per arm: 0.295 G instructions without the toggle, 12.63 G with one settrace on/off before the loop (43x). In the vendored stdlib B1 is reached by deliberate tools: pdb/bdb (`settrace`, or `monitoring` with that backend), `profile` (`setprofile`), cProfile (`monitoring.set_events` in `_lsprof.c`), `trace`, `threading.settrace`/`setprofile`, coverage-style tracers. One `cProfile.run` or `breakpoint()` + continue leaves the rest of the process interpreted. Nothing in unittest, asyncio, warnings, importlib or threading turns a hook on implicitly; doctest's unconditional restore is a `settrace(None)` with nothing on, which does not trigger it.
+
+New programs, all diffed against the oracle in the plain, jit-off, jit and jit-deopt lanes (threads_ also handoff, handoff:3): `entry_recursion_points`, `entry_tools_midcall`, `threads_tools_midcall`, `threads_entry_pending`, `entry_gen_close_throw`, `entry_tracebacks`, `entry_finalizers`, `threads_kill_under_calls`, `threads_call_code_fresh`, `jit_local_events_inlined`, `trace_midloop_inlined_loop`, `jit_tools_toggle`; `return_release` extended; jitcheck lane `toolsoff` (in `NOT_BUILT` until stage 1).
+
+Failing on master, kept and marked in kernelcheck's `XFAIL` (the handoff-only expected-fail rule extended to every lane):
+- `jit_local_events_inlined` (B2, this ticket); XPASS in jit-off.
+- `entry_tracebacks` (luc-mj6t): a frame kept past its return reports `f_lineno` of its last sync, not the return line; plain, jit-off, jit; XPASS in jit-deopt. Not an entry-protocol defect.
+- `threads_kill_under_calls` (luc-33lu): `sys._current_frames()` has no entry for a thread blocked in `Event.wait()`; every lane. Not an entry-protocol defect.
+
+No `tests/capi` `eval_hook_midrun` case (B3 above).
