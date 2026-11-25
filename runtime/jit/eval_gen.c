@@ -803,12 +803,24 @@ adopted_yield(struct ctx *c)
 
 /* --- delegation in the root frame --- */
 
-/* GET_AWAITABLE, GET_YIELD_FROM_ITER: what the delegation's SEND resumes. */
+/* GET_AWAITABLE, GET_YIELD_FROM_ITER, GET_ANEXT: what the delegation's
+   SEND resumes; GET_AITER: what `async for` takes it from (the kernel's). */
 int
 lu_ev_delegate_iter(struct ctx *c)
 {
     if (c->parent != NULL) {
         lu_ev_side_exit(c, EXIT_SIDE);
+        return 0;
+    }
+    if (c->base == GET_AITER || c->base == GET_ANEXT) {
+        /* GET_AITER replaces the iterable; GET_ANEXT pushes the awaitable above the iterator. */
+        lu_v v = lu_ev_peek(c, 1);
+        int aiter = c->base == GET_AITER;
+        lu_v w = lu_ev_helper(c, aiter ? H_get_aiter : H_get_anext, 1, &v, aiter);
+        if (aiter) {
+            lu_ev_pop(c);
+        }
+        lu_ev_push(c, w);
         return 0;
     }
     int awaitable = c->base == GET_AWAITABLE;

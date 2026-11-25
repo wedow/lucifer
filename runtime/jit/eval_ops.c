@@ -124,6 +124,7 @@ lu_ev_op_supported(int base)
     case RAISE_VARARGS: case RERAISE:   /* the interpreter raises: an exit, on a path that is leaving anyway */
     case PUSH_EXC_INFO: case POP_EXCEPT: case CHECK_EXC_MATCH:  /* a handler the unit's raise reached (eval_exc.c) */
     case GET_AWAITABLE: case GET_YIELD_FROM_ITER: case SEND: case END_SEND:     /* in the root frame (eval_gen.c) */
+    case GET_AITER: case GET_ANEXT:
         return 1;
     default:
         return 0;
@@ -135,7 +136,8 @@ lu_ev_op_supported(int base)
 int
 lu_ev_op_root_only(int base)
 {
-    return base == GET_AWAITABLE || base == GET_YIELD_FROM_ITER || base == SEND || base == END_SEND;
+    return base == GET_AWAITABLE || base == GET_YIELD_FROM_ITER || base == SEND || base == END_SEND || base == GET_AITER
+        || base == GET_ANEXT;
 }
 
 /* The record of r when it is a virtual object of the kind that nothing
@@ -600,7 +602,7 @@ lu_ev_instruction(struct ctx *c)
         return 0;
     case GET_ITER:
         return lu_ev_get_iter(c);
-    case GET_AWAITABLE: case GET_YIELD_FROM_ITER:
+    case GET_AWAITABLE: case GET_YIELD_FROM_ITER: case GET_AITER: case GET_ANEXT:
         return lu_ev_delegate_iter(c);
     case SEND:
         return lu_ev_send(c);

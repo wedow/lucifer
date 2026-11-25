@@ -566,8 +566,8 @@ int lu_ev_gen_call(struct ctx *c, lu_v it, int nops);
 int lu_ev_gen_yield(struct ctx *c);
 void lu_ev_gen_finish(struct ctx *c);
 lu_v lu_ev_gen_real(struct ctx *c, struct lu_vobj *o);
-/* Delegation in the root frame: GET_AWAITABLE and GET_YIELD_FROM_ITER
-   make the receiver; SEND resumes it under the unit (a generator or
+/* Delegation in the root frame: GET_AWAITABLE, GET_YIELD_FROM_ITER and
+   GET_ANEXT make the receiver (GET_AITER the async iterator); SEND resumes it under the unit (a generator or
    coroutine as the interpreter resumes one, anything else through the
    kernel's send) and leaves the delegation's loop when it returns. */
 int lu_ev_delegate_iter(struct ctx *c);
