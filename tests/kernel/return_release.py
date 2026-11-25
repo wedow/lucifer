@@ -260,3 +260,40 @@ try:
 except RecursionError:
     pass
 print('deepest finalizers', log)
+
+
+# A finalizer run at a normal return finds the depth the returning frame gave
+# back, from the middle of the stack and at its limit.
+def room(n=0):
+    try:
+        return room(n + 1)
+    except RecursionError:
+        return n
+
+
+class Room:
+    def __del__(self):
+        log.append('del room %d' % room())
+
+
+def returns():
+    r = Room()
+    return 1
+
+
+def at(n):
+    if n:
+        return at(n - 1)
+    log.append('caller room %d' % room())
+    return returns()
+
+
+sys.setrecursionlimit(200)
+top = room()
+for d in (10, top - 4, top - 3, top - 2, top - 1, top):
+    try:
+        at(d)
+    except RecursionError:
+        log.append('RecursionError')
+    print('room', top - d, log)
+    log.clear()
