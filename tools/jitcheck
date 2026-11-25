@@ -91,6 +91,10 @@ require that a count of the tier's does not grow with the iterations:
          classmethods and staticmethods through their class: entries into
          compiled code, direct and compiled calls. The loads bind at
          compile time and every call inlines.
+  classcalls tests/kernel/jit_class_callable_loop.py, whose hot loops
+         call staticmethods and classmethods through their class, a
+         subclass and an instance: the helpers compiled code calls. Each
+         load binds the callable and the class at compile time.
   attrorder tests/kernel/jit_attr_order.py, whose hot loop reads and
          writes attributes of instances of one class that got their names
          in different orders: guard and side exits, and entries left to
@@ -389,6 +393,7 @@ GROWTH = {
     'sharedcode': ('jit_shared_code_hot.py', r'jit: entries .* poll (\d+) side', 0),
     'classtests': ('jit_isinstance_growth.py', r'jit: executed:.* helper (\d+)|jit: C paths .* build_tuple (\d+)', 0),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
+    'classcalls': ('jit_class_callable_loop.py', r'jit: executed:.* helper (\d+)', 0),
     'attrorder': ('jit_attr_order.py', r'jit: entries .* exits guard (\d+) stress \d+ poll \d+ side (\d+)'
                   r'|jit: entries waited (\d+)', 0),
     'inlinedpoly': ('jit_inlined_poly_loads.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)'
