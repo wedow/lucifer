@@ -134,20 +134,6 @@ lu_frame_push(PyThreadState *ts, PyFunctionObject *func, PyObject *locals)
     return f;
 }
 
-int
-lu_frame_reserve(PyThreadState *ts, size_t words)
-{
-    if (ts->datastack_top != NULL && (size_t)(ts->datastack_limit - ts->datastack_top) >= words) {
-        return 0;
-    }
-    PyObject **base = push_chunk(ts, words);
-    if (base == NULL) {
-        return -1;
-    }
-    ts->datastack_top = base;
-    return 0;
-}
-
 /* lu_frame_release_refs for a frame object's own frame, whose locals its
    finalizers may still read (f_locals): each word is cleared before its
    release. */

@@ -399,10 +399,6 @@ PyObject *lu_inline_get(PyObject *obj, PyObject **word);
    lets nothing run before it is done with the value: this thread owns it,
    so only this thread frees it. NULL when it is not so. */
 PyObject *lu_inline_peek(PyObject *obj, PyObject **word);
-/* An exit's box of the value compiled code stored raw in word: installed
-   while the word still holds that value unboxed, so that the box the
-   exit's frame names and the attribute are one object. */
-void lu_inline_install(PyObject *obj, PyObject **word, PyObject *box);
 /* The object of obj's inline value at byte `offset` (as lu_inline_get makes it) if it is the exact float
    (int) with these bits; else NULL, with no exception. A new reference. */
 PyObject *lu_inline_number(PyObject *obj, Py_ssize_t offset, uint64_t bits, int is_float);
@@ -1632,9 +1628,6 @@ void lu_fh_thread_enter(PyThreadState *ts);
 void lu_fh_thread_exit(PyThreadState *ts);
 void lu_fh_fatal(const char *func, const char *msg) __attribute__((noreturn));
 PyObject *lu_function_new(PyObject *code, PyObject *globals);
-/* A function of code in globals that no watcher hears of: what compiled
-   code names the frames of an inlined closure by (runtime/jit/eval_call.c). */
-PyObject *lu_function_template(PyObject *code, PyObject *globals);
 /* The function exec, eval and PyEval_EvalCode run code in: its frame
    holds it alone, so it is freed by its count, not left to a collection
    (cp314t's _PyFunction_FromConstructor). */

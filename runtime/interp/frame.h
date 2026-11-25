@@ -419,10 +419,6 @@ lu_frame_pop(PyThreadState *ts, struct lu_frame *f)
     lu_frame_drop(ts, f);
 }
 
-/* Room for `words` more datastack words in the current chunk, which a new
-   one gives when it has none: -1 when out of memory. */
-int lu_frame_reserve(PyThreadState *ts, size_t words);
-
 /* Pushes a frame for `func` and binds the call arguments to it
    (initialize_locals): args[0..nargs) are positional, then one value per
    name in `kwnames` (a tuple of str, or NULL). Takes the references in

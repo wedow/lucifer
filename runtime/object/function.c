@@ -144,7 +144,7 @@ builtins_of(PyObject *globals)
 }
 
 static PyObject *
-make_function(PyObject *code, PyObject *globals, int notify, int defer)
+make_function(PyObject *code, PyObject *globals, int defer)
 {
     PyCodeObject *co = (PyCodeObject *)code;
     PyFunctionObject *op = (PyFunctionObject *)lu_object_new(&PyFunction_Type,
@@ -168,28 +168,20 @@ make_function(PyObject *code, PyObject *globals, int notify, int defer)
            only, which lets inline caches name them (specialize.c). */
         lu_set_deferred((PyObject *)op);
     }
-    if (notify) {
-        lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
-    }
+    lu_func_notify(PyFunction_EVENT_CREATE, op, NULL);
     return (PyObject *)op;
 }
 
 PyObject *
 lu_function_new(PyObject *code, PyObject *globals)
 {
-    return make_function(code, globals, 1, 1);
-}
-
-PyObject *
-lu_function_template(PyObject *code, PyObject *globals)
-{
-    return make_function(code, globals, 0, 1);
+    return make_function(code, globals, 1);
 }
 
 PyObject *
 lu_function_for_frame(PyObject *code, PyObject *globals)
 {
-    return make_function(code, globals, 1, 0);
+    return make_function(code, globals, 0);
 }
 
 PyObject *

@@ -358,7 +358,6 @@ enum {
     FX_RAISE = 1,               /* a NULL (or -1 for REP_I64/BIT) result raised */
     FX_PY = 2,                  /* may run Python: frames are observable and anything reachable may change */
     FX_SEEN = 4,                /* may release a value of any type, or park: frames are observable */
-    FX_ALLOC = 8,               /* allocates */
     FX_DECLINES = 16,           /* may answer LU_JIT_DECLINED with nothing done: the interpreter runs the instruction */
 };
 
