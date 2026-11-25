@@ -522,7 +522,167 @@ Follow-ups:
 4. Remove the dead class tables.
 5. The review follow-ups listed in the earlier final note still stand.
 
+**2026-11-25 diagnosis: the pyperformance rows that got slower in the 11-25 daily (master 6d7a386e)**
+
+Method. Each program the way the daily runs it: one fresh `run_benchmark.py --worker -l LOOPS -w 1 -n 3` with the CPython reference's loops (django_template and richards 2, the rest 1); the daily keeps the best of the three values (genshi sums its two benchmarks' bests). One run at a time, pinned to a reserved core, under `perf record -e instructions:u --call-graph fp -k CLOCK_MONOTONIC`; a sitecustomize wraps pyperf's task function to stamp each value's window on the same clock, so every value's instructions are counted and split into compile (compile() in the chain) and run. Arms: master 6d7a386e, the ledger's parent f626ea38 ("pre"), and f0136a06 (the commit the 11-24 status was recorded on). Two runs per arm; an arm repeats within 0.1-0.3%. Times below come from the same runs and are inflated by perf.
+
+Best value, M instructions (compile in it), master / pre / f0136a06:
+
+| program | master | pre | f0136a06 | master vs pre | reproduced? |
+|---|---|---|---|---|---|
+| django_template | 954 (13) | 866 (25) | 863 (12) | +10.2% | yes, the ledger |
+| genshi text + xml | 493 + 1438 | 547 + 1291 | 583 + 1327 | +5.1% (xml +11.4%, text -9.9%) | yes, the ledger |
+| richards | 249.2 (0) | 242.6 (0) | 240.6 (0) | +2.7% | yes, the ledger (known loss) |
+| tomli_loads | 25,212 (50) | 25,014 (0) | 22,307 (0) | +0.8% | yes, an earlier landing: +12% at c684ad72 |
+| float | 384-390 | 358-391 | 380 | none | no: timing noise |
+| docutils | 40,886 (2,794) | 42,364 (4,010) | 53,534 (12,796) | -3.5% | no |
+
+Convergence (one longer run per arm, -n 20 / 12 / 20): django master reaches 894M at values 18-19 against pre's 890M (the same speed, different units); richards reaches 243.0 at value 9 against pre's 242.6-244.4; genshi_xml stays at 1,407-1,418M through values 8-12 against pre's 1,180-1,213 (+18%) with no purchase after value 7, so its final units differ.
+
+django_template: the gap is all run (master 941 run + 13 compile, pre 841 + 25). Two causes.
+- Node.render_annotated@1: master's 1,760-IR unit went stale when its place @3 (`self.render` on Node subclasses) learned a class, and exited there on 6,458 of its 6,481 entries before the learned rebuild was bought (paid 26.93M, its own full build: the 01a16669 price plus the quiet rule; pre rebuilt after 538 entries). Those diverted exits also paid @3's mark ledger (96a2a7b5); the rebuilt 1,070-IR unit failed once more at @3 (a class first met after it) and the mark was bought after 61 entries, paid 26.47M against a price of 12.68M. The unit is then 25 and 57 IR with `self.render` a generic call, and can no longer grow. Pre never marked @3 (779 exits in the whole run) and grew the unit four times at the fixed 4,096 entries to 8,792 IR, the render dispatch in line.
+- Growth not bought: pre grows render_value_in_context to grown 2 (4,128 IR) and getattr to grown 2; master never in 20 values. Master grows VariableNode.render instead, at value 12 (paid 362M, price 267M) and relearns it at values 17 and 20 (6.0k and 5.9k IR, 31 and 42 ms each), after which it matches pre.
+
+genshi: text is better on master (pre still compiles 98 and 85M in values 2-3); xml is worse by run. Marks at Template._flatten@69 and @267 are bought in values 1 and 3 at prices of 62.6M and 64.4M, the sum of EmptyTagFilter.__call__'s four live units (entries @3, @7, @76, @97), after 5,171 exits at @69 (pre marked @69 before xml value 0). Late builds at values 3 and 7 (XMLSerializer.__call__@97 relearned at 5,055 IR, @116 at 5,715 IR; 270-310M compile in each value). In the steady state master never buys pre's hot sites (XMLSerializer.__call__@97 at NamespaceFlattener.__call__@209, @116 at WhitespaceFilter.__call__@262, TextSerializer.__call__@128, Template._include@274) nor its growth of _search and _state_init (grown 1 at 4,096 entries), and buys 69 marks against 101. Leaf samples per xml value, values 8-12, master minus pre: compiled code +81M, lu_jit_direct +26M, call_argv +23M, call_function +9M, lu_frame_call +8.5M, h_call_any +6.9M (0 in pre), lu_frame_push +6.3M: calls left out of line.
+
+richards: pre grows all four task fns (WorkTask, HandlerTask, DeviceTask, IdleTask .fn) at 4,096 entries; master grows only HandlerTask.fn, at 65,536 entries in value 8 (paid 59.4M, price 38.8M = build of 2 x 1,105 IR), then matches pre. Value 0 is 756M against 557M (compile 323 against 227).
+
+float: the benchmark's units are the same in both arms (Point.__init__ 133 IR, normalize 106, maximize 62, maximize@19 87, benchmark@22 360). The one difference: pre marks Point.maximize@137 in maximize@19 after 96 entries and rebuilds it; master keeps the unit, whose guards at Point.maximize@25 and @137 exit 143 times a run (pre 96), well under 1M instructions. No growth, no learned rebuild at full price. Values of one process vary 0.045-0.085 s at the same instruction count, and the warm row did not move (0.367 to 0.364): the daily's +20% is noise.
+
+tomli_loads: the ledger costs +0.8% in the best value (value 1 compiles 1.21G against 0.10G; growth went to loads@62 and Pattern.match instead of parse_value and create_dict_rule). The loss is earlier: bisected over the landings between f0136a06 and f626ea38 on value 3 (f0136a06 22,307M; 9772b9f9 22,268; ad1eb461 22,542; c684ad72 24,934; 72ee02e2 25,025; f626ea38 25,014): c684ad72 (a C type's generic attribute slots run directly) adds 10.6%. Its getattr_hook, lookup_attr and setattr_hook gained branches (type, module, generic_wrapper); key_value_rule@3, grown four times, ends at 15,738 IR against 10,389 at ad1eb461 with the 16,000 budget nearly used, and calls fall out of line in the hot loop (value 3, master minus f0136a06: lu_frame_push +131M, call_function +125M, lu_frame_call +106M, eval_frame +65M; jit.c functions +268M). Not a plain few-line defect: the inlined kernel attribute path is what grew; it goes to the attribute-protocol consolidation (luc-ia92 item 4), not to the ledger.
+
+docutils: not reproduced in instructions (master's best value and whole run, 196.5G against 230.0G, are the lowest of the three arms).
+
+Rule changes, in order (none built):
+1. Value a call left out of line by what it costs and what taking it in line removes (follow-up 1). Hot sites and growth both price an out-of-line call at CALL_COST 420 (one small plain function) plus the callee unit's counted losses; generator, method and keyword calls cost more, and the callee's specialization in its caller's context is not counted at all. One cause behind django's growth (render_value_in_context, getattr), genshi's steady state (four hot sites, two growths), and richards (65,536 entries against 4,096). Measure the out-of-line cost per call shape in tools/jitcost. It does not bring back churn: a hot site is bought once per site, and growth stops at MAX_GROWN per entry.
+2. Look when the ledger can pay, not at doublings. hot_exit re-arms each out-of-line site for as many calls again as it has made, so a purchase lands up to twice past break-even: paid/price 1.53 (richards HandlerTask.fn), 1.36 (django VariableNode.render), 1.55 (genshi XMLSerializer.__call__@116), 1.22 (EmptyTagFilter grown). Arm for the calls still needed at the current value per call.
+3. A diverted exit does not prepay the mark of a site whose own place learned since the build: those losses are the learned rebuild's (django render_annotated@3, marked 61 entries after the rebuild). Keep 96a2a7b5's prepayment where the place learned nothing (whether deltablue's add_propagate case is of this kind: unverified).
+4. Price and kill a mark by the units that speculate at the marked site, not every live unit of the root: generators with several resume entries pay three to four builds for one site (EmptyTagFilter.__call__ 62.6M). How many of its four units hold _flatten@69: unverified.
+5. Lower: the build price overestimates large single-entry growth (VariableNode.render's 5.9-6.1k-IR builds measured about 140-150M against 212-226M predicted, the growth price 267M) and underestimates generator units (XMLSerializer.__call__@97, 5,055 IR: about 220M against 161M); this belongs with follow-up 2.
+
+Cold django needs 1 and 3; the steady genshi, django and richards gaps need 1, sharpened by 2. tomli is c684ad72's, and float and docutils are not losses.
+
+**2026-11-25 stage B on luc-1kz0-b (from 48ef26dd): changes 1 and 4 landed on the branch, 1b gated with two lane failures, 2 written, 3 and the table not started**
+
+Built and gated (focused kernel programs 77/77 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; full tools/jitcheck 0 failing; tools/jitcost PASS):
+- Change 1, a call left out of line is valued by its shape (cfcd035e lanes, a625ac30). tools/jitcost measures the out-of-line path against the same callee in line: plain 438-443, method 436-481, keyword and default binding 502-514, a generator made and stepped 1,468-1,478, a kernel function (getattr) 209-211 instructions. Constants CALL_COST_PLAIN 440, _METHOD 480, _BIND 500, _GEN 1480, _KERNEL 210. Only generator calls change materially (3.5x the old 420): the django and richards growth gaps are not closed by it, because what a doubling buys (the callee specialized in its caller) is no counted loss. Lanes: methodgrow (growth bought once; on master and stage 1 after 12,224 entries) and genhot (the hot site of a generator-driven loop: master never buys it in 40,000 turns, stage 1 after 39,296, paid 29.1M for a 15.5M price).
+- Change 4, a guard's mark is priced at and kills only the units that speculate at its site (4a620543 lane, 0e1a8fbb). Speculating: a unit with an EXIT_GUARD exit whose guard site is the marked pc; marks of other kinds still kill every unit of the root; a speculating unit built before the mark still dies on its first exit there (rule A). Lane genmark: a generator with three resume entries and one branch guard that starts failing; before, one mark killed and rebuilt all three units; now one.
+
+Change 1b (coordinator's ruling): a doubling is also bought when the work the unit ran since its build covers the doubled build's predicted cost (ratio 1, the ski-rental point; MAX_GROWN bounds the steps). Work = (entries - entries that left through an exit) x the unit's IR x PASS_INS. tools/jitcost measures PASS_INS on a 300-statement straight line of int arithmetic (no helper calls; 242 IR): 21.6 instructions per IR instruction per compiled call; PASS_INS 20, held at or below the measured. A unit with two arms of half that each, one run a call: 3,882 instructions measured against 4,821 counted (the estimate overstates it 1.24x). Lanes committed (8cf5b002): specgrow (a callee that loses nothing in its own unit) and growchain (tests/kernel/jit_grown_generic.py: at most MAX_GROWN doublings, each paid at least its price); methodgrow re-bounded to twice the entries the price takes as work. Before 1b: methodgrow FAIL (12,224 entries against a bound of 3,592), specgrow FAIL (no growth), growchain PASS (2 doublings). With 1b: methodgrow after 2,295 entries, specgrow after 2,268, growchain 2 doublings (178.8M predicted), the ledger lanes unchanged; but two failures, so 1b is not committed (the diff is in the worktree, uncommitted, together with change 2):
+- genhot: no hot-site purchase: the serializer's unit now grows out of its work before the hot site comes due, which takes the call in line another way. The lane should accept the call taken in line by either purchase, once.
+- tools/jitcost call shapes: the measuring caller now grows within the measured window (about 650 + n entries for an n-IR unit, far below CALL_N), so its out-of-line call goes in line (compiled calls 0.51 an iteration; kernel shape 2,280). The measurement needs a caller that does not grow in the window: either normalize by the out-of-line calls actually made (counted shapes), or a caller whose entries all leave through an exit (then its work is 0).
+
+Change 2 (written, not built): hot_exit re-arms each out-of-line site for the calls after which, at the rates its calls have had, the first purchase comes due (the site's hot price; the growth's share of losses; the work the unit runs meanwhile), never more than the doubling did and at least one. It needs its own lane (a purchase at most about 1.25x past its price; genhot was 1.87x) and the gate.
+
+Not started: change 3 (diverted exits prepaying the mark: first check deltablue's add_propagate/satisfy/incremental_add guards' places in its event log), and the acceptance table (instructions on core leases, two runs per arm, stamped values: django_template, genshi, richards, deltablue, json_loads, deepcopy, regex_v8 with windows 64-128 and 128-256 split compile/run, tomli_loads; pyflakes, pygments, black, stdlib imports whole runs; AWFY Json, CD 10, DeltaBlue, Richards per iteration). Acceptance: django_template, genshi, richards at or better than the pre-ledger arm's best value; nothing else worse than master by more than 1%; CLI compile ms not above master's. Units whose work point lies past ENTRIES_SEEN (65,536) are to be named in the table, the cap left alone.
+
+
+**2026-11-25 stage B, continued: 1b and 2 rebuilt on the rulings; genhot needs a ruling; change 3 has no basis**
+
+Worktree (uncommitted): 1b alone separated from 2; tools/jitcost's call shapes measure over a window of iterations before the caller's first rebuild (the event log's entries at its kill, a quarter to a half of them; CALL_N to 2 CALL_N when it is never rebuilt), normalized by the out-of-line calls made in it, failing under CALL_MIN 1000; genhot accepts a hot-site or a growth purchase of serialize, once, at most 2x.
+- 1b gate: focused kernel programs 80/80 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; jitcheck 1 failing (genhot); jitcost PASS (pass 21.61 against PASS_INS 20; plain 388, method 545, bind 572, gen 1,456, kernel 188 per call over about 2,515 calls; caller rebuilt at about 10,000 entries).
+- genhot fails the ruling's "exactly once": serialize is a generator whose loop has two entries, @5 (the loop head, entered from the interpreter while the resume entry has no unit) and @5088 (the resume after the yield). Growth is per entry, so each buys its own doubling out of its work: @5 after 2,450 entries (paid 59.95M, price 45.94M), then @5088 after 2,456 (paid 60.29M, price 46.12M); @5 then runs 126 more entries. Before 1b the root bought the hot site once. With change 2, @5 pays exactly its price (45.94M) but @5088 still pays 1.31x: its first look is the initial arm (the unit's IR count, 1,228 calls), and a resume entry makes one call per two entries, so its work passed the price before the first look; change 2 only re-arms after a look.
+- Change 2 lane: the purchase lanes' bound is PAST = 1.25x the price (was 2x). 1b alone: methodgrow 1.275x, specgrow 1.27x FAIL; 1b+2: both 1.00x PASS (after 1,801 and 1,786 entries); genhot FAIL in both (above).
+- Change 3: deltablue (-l 16, 1b+2 build, units log): no learn event at any marked guard's own place (Planner.add_propagate@63, @113, @140, Constraint.satisfy@2, @19, @85, @102, Planner.incremental_add@18) in any root over the whole run; the places that learned near them are add_propagate@38 (int) and satisfy@33 (bool). By the ruling the change has no basis: skipped.
+
+**2026-11-25 stage B: 1b and 2 committed (8137d83f, b300c4d4) on the coordinator's rulings**
+
+- genhot: once per entry (growth is per entry by design). Observation, not for this branch: the generator's two entries each buy a doubling for the same call; @5 (the loop head, entered while the resume entry has no unit) grew after 2,450 entries (paid 59.95M, price 45.94M; 1,879 entries at its price with change 2) and then ran 126 more. Carrying growth across a root's entries would be a design change.
+- jitcost constants under the new window (calls before the caller's rebuild): plain 388, method 545, bind 572, gen 1,456, kernel 188 against 440, 480, 500, 1,480, 210 (model/measured 1.14, 0.88, 0.87, 1.02, 1.11): all within the tool's 0.5-2 tolerance, kept. Plain moved from 438 and method from 481 under the old window.
+- First look: arming it by work needs the entry's calls per entry before any look (a new count or a new check on the entry paths), so it is not built. The purchase lanes hold a purchase at a unit's first look to 2x its price (the stated guarantee) and at later looks to PAST = 1.25x; the kill event prints the unit's looks.
+- Lanes. 1b (before: the branch at b1b16251; after: 8137d83f): methodgrow FAIL (12,224 entries against a bound of 3,592) -> PASS (2,295); specgrow FAIL (no growth) -> PASS (2,268); genhot PASS (hot site after 39,296 turns, 1.87x) -> PASS (@5 and @5088, one each, 1.30x and 1.31x). Change 2 (before: 1b with the looks count): methodgrow FAIL (look 5, 1.28x) -> PASS (1.00x); specgrow FAIL (look 2, 1.27x) -> PASS (1.00x); genhot FAIL (@5 look 3, 1.30x) -> PASS (@5 look 4 at 1.00x; @5088 look 1 at 1.31x).
+- Change 3 closed: deltablue (-l 16, units log, 1b+2) shows no learn event at any marked guard's own place (Planner.add_propagate@63, @113, @140; Constraint.satisfy@2, @19, @85, @102; Planner.incremental_add@18) in any root over the whole run; the places near them that learned are add_propagate@38 (int) and satisfy@33 (bool). The diverted exits' prepayment keeps its basis; no change.
+
+**2026-11-25 stage B: rebased, gated, acceptance table (branch on origin/master 95598ad9)**
+
+- jitcost harness (fd1628aa): under change 2 the measuring caller is rebuilt after about 5,700 entries, so its window is about 1,420 calls, and two whole runs differ by about 1M instructions (kernel read 81-188). perf now counts only the window's iterations (control fifo), main thread, least of three runs: plain 435, method 503, bind 541, gen 1,449, kernel 216; constants 440, 480, 500, 1,480, 210 kept (0.92-1.02).
+- Gate, before the rebase and after it: focused kernel programs 80/80 in jit-off, plain, jit, jit-deopt; threads 7/7 in handoff; jitcheck 0 failing; jitcost PASS after fd1628aa (it failed on kernel alone, 2.60x, with the old harness after the rebase).
+- Table: instructions:u, one core lease per run, two runs per arm alternated, min of the two; pyperf best of three values (-w 1 -n 3, reference loops); arms pre f626ea38, master 95598ad9, branch.
+
+| row | pre | master | branch | vs pre | vs master |
+|---|---|---|---|---|---|
+| django_template best value (M) | 862.8 | 949.4 | 945.6 | +9.6% | -0.4% |
+| genshi text + xml (M) | 1,828.4 | 1,927.6 | 1,799.4 | -1.6% | -6.7% |
+| richards (M) | 242.6 | 249.2 | 242.4 | -0.1% | -2.7% |
+| tomli_loads (M) | 24,749 | 24,953 | 22,046 | -10.9% | -11.6% |
+| deepcopy (M, 218 loops) | 1,192.8 | 1,139.8 | 1,112.0 | -6.8% | -2.4% |
+| AWFY Richards per it. (M) | 141.01 | 131.37 | 131.38 | -6.8% | +0.0% |
+| AWFY DeltaBlue per it. (M) | 6.00 | 5.42 | 5.46 | -9.0% | +0.7% |
+| AWFY CD per it. (M) | 283.19 | 252.84 | 249.73 | -11.8% | -1.2% |
+| pyflakes whole (G) | 11.750 | 10.173 | 12.804 | +9.0% | +25.9% |
+| black whole (G) | 13.662 | 12.915 | 13.386 | -2.0% | +3.6% |
+| pygments whole (G) | 13.630 | 13.585 | 17.964 | +31.8% | +32.2% |
+| cli compile ms (pyflakes + black + pygments) | 1,755 | 1,313 | 2,158 | +22.9% | +64.3% |
+| regex_v8 calls 64-128: total / compile / run (G) | 100.5 / 1.78 / 98.7 | 103.7 / 4.44 / 99.3 | 94.5 / 1.59 / 92.9 | -6.0% | -8.9% |
+| regex_v8 calls 128-256: total / compile / run (G) | 198.5 / 3.01 / 195.5 | 206.1 / 10.20 / 195.9 | 197.6 / 12.44 / 185.2 | -0.5% | -4.1% |
+
+- Misses: django_template +9.6% against pre (no better than master); pyflakes +25.9%, pygments +32.2%, black +3.6% whole runs against master; cli compile ms +64% against master; regex_v8's compile in calls 128-256 +22% against master (its total is -4.1%).
+- Measured check, regex_v8 (branch, units log, -X perf, leaf samples in each grown unit's own code from its build to the growth kill, in the last value's window of -l 128 and -l 256): growth bought 41,371 IR on an estimated 3,514M of work and 79,752 IR on 5,684M; the units' own code ran 1,978M and 1,599M. Per purchase the estimate overstates by 9-30x on the large branchy units (block0@807: 788M estimated, 25M run; block1@879: 1,521M, 85M; block0@1179: 448M, 39M), and understates a loop unit 23x (_entry@1: 57M, 1,300M). Leaf samples miss helpers the units call: a lower bound. The work rule (entries x whole IR x PASS_INS) prices every entry as running the whole unit; the cold programs' losses fit that (unverified there).
+
+**2026-11-25 stage B: arm A (no 1b), B (work by the least way), table (A daa47b9e on a scratch branch; B 3881c5c8)**
+
+- Arm A: b437eb84 reverted; change 2 keeps its hot-price and losses terms (its work term goes with 1b); tools/jitcost loses the pass measurement; jitcheck's work bound uses a local yardstick of 20. Gate: focused kernel programs 80/80 in jit-off, plain, jit, jit-deopt; threads 7/7; jitcheck 2 failing: methodgrow (grown after 10,571 entries, bound 3,592) and specgrow (no growth), both written for 1b; jitcost FAIL on call bind (-235) and kernel (650 against 210): the call-shape window harness (fd1628aa) is not stable once the caller grows differently.
+- B: work per completed entry = PASS_INS x the least IR of any way from the entry to a return or yield of the root (least_ins: shortest path over the built blocks, relaxed to a fixed point; exits are no destination). Build events print `least`, kills `work` and `least`. A kernel root's raised return (eval_exc.c raised_out) is a return, so it is a destination. Gate: kernel 80/80 in all four lanes; threads 7/7; jitcheck 2 failing: grown (2,013 IR at 20,000, 3,143 at 40,000: entry@1 grows at 6,539 entries, 1b grew it at 1,656) and methodgrow (grown after 26,022 entries against a bound of 5,914 at least 696 of 1,146 IR). specgrow PASS (after 2,948 entries, look 3, 1.00x), genhot PASS (hot site of serialize@5088 after 20,976 entries; no growth), growchain PASS (2 doublings).
+- Looks starve the work. A look is an EXIT_HOT exit, so the entry it cuts counts as exited and earns no work; change 2 arms every site at about one call as the work nears the price, so near the due point most entries exit at a look: methodgrow 23,065 looks in 26,022 entries (2,957 completed entries were enough), grown entry@1 4,251 looks in 6,539 entries.
+- PASS_INS is mismeasured. 1b's jitcost divided a call's instructions by the run's average unit (about 259 builds, the kernel's included: 240 IR), not f's unit (1,513 IR, least 909). Measured per instruction of f's least way: 5.75 (straight line), 8.40 (two arms, least 462 of 1,221); per instruction of the whole unit about 3.5. PASS_INS 20 overstates 2.4-3.5x per least instruction (5.8x per whole-unit instruction, part of 1b's 9-30x on regex_v8). jitcost now measures per least instruction of f's own build and fails: the constant is left at 20 as instructed.
+- Regex check (B, -l 128 and 256, last value's window; rxcheck.py now reads symbols with spaces, which earlier dropped frozen-module units such as match@1): 17 growth purchases; work under measured own-code samples on 16; over on one: match@1 (9,232 entries, least 233: work 42.96M against 14.7M +-2.4M, 2.9x), bought by work. Leaf samples miss the helpers a unit calls, so the measured side is low too. The large branchy units (block0@807, block1@879, block0@1179, block2@12, block0@1124) now carry work 0.0-0.5M (their entries leave through exits) and are grown by their losses (paid = price).
+- Table (instructions:u, core leases, two rounds alternated, min; arms pre f626ea38, master 95598ad9, 1b, A, B):
+
+| row | pre | master | 1b | A | B | A vs master | B vs master | B vs pre |
+|---|---|---|---|---|---|---|---|---|
+| django_template best value (M) | 862.8 | 949.4 | 945.6 | 945.6 | 1,072.0 | -0.4% | +12.9% | +24.2% |
+| genshi text + xml (M) | 1,828.4 | 1,927.6 | 1,799.4 | 1,907.0 | 1,869.8 | -1.1% | -3.0% | +2.3% |
+| richards (M) | 242.6 | 249.2 | 242.4 | 250.8 | 244.8 | +0.6% | -1.8% | +0.9% |
+| tomli_loads (M) | 24,749 | 24,953 | 22,046 | 24,913 | 24,829 | -0.2% | -0.5% | +0.3% |
+| deepcopy (M, 218 loops) | 1,192.8 | 1,139.8 | 1,112.0 | 1,250.0 | 1,230.6 | +9.7% | +8.0% | +3.2% |
+| AWFY Richards per it. (M) | 141.01 | 131.37 | 131.38 | 131.38 | 131.38 | +0.0% | +0.0% | -6.8% |
+| AWFY DeltaBlue per it. (M) | 6.00 | 5.42 | 5.46 | 5.46 | 5.46 | +0.6% | +0.6% | -9.0% |
+| AWFY CD per it. (M) | 283.19 | 252.84 | 249.73 | 249.71 | 249.70 | -1.2% | -1.2% | -11.8% |
+| pyflakes whole (G) | 11.750 | 10.173 | 12.804 | 10.166 | 10.168 | -0.1% | -0.0% | -13.5% |
+| black whole (G) | 13.662 | 12.915 | 13.386 | 13.066 | 13.100 | +1.2% | +1.4% | -4.1% |
+| pygments whole (G) | 13.630 | 13.585 | 17.964 | 14.220 | 14.985 | +4.7% | +10.3% | +9.9% |
+| cli compile ms | 1,755 | 1,313 | 2,158 | 1,293 | 1,373 | -1.6% | +4.5% | -21.8% |
+| regex_v8 64-128 total (G) | 100.5 | 103.7 | 94.5 | 96.0 | 94.8 | -7.4% | -8.6% | -5.7% |
+| regex_v8 128-256 total / compile (G) | 198.5 / 3.0 | 206.1 / 10.2 | 197.6 / 12.4 | 195.9 / 11.6 | 193.5 / 9.2 | -4.9% | -6.1% | -2.5% |
+
+- Misses. A: deepcopy +9.7%, pygments +4.7%, black +1.2% against master; django_template +9.6% against pre. B: django_template +12.9% against master (+24.2% against pre), deepcopy +8.0%, pygments +10.3%, black +1.4%, cli compile ms +4.5% against master. Neither meets the landing bar. deepcopy's gain (1b -2.4%) came from 1b's early growth (A and B compile 119M in the best value against master's 47M).
+- django_template under B (event logs at -l 2, 3 values). Pre grows by the fixed 4,096 entries: getattr_hook once, getattr twice (2,146 and 3,000 IR, 0.84-0.97 s), render_value_in_context twice (3,774 and 4,128 IR, 13 ms), Node.render_annotated four times to 8,792 IR (27-38 ms a build, 1.09-1.34 s), the render dispatch in line. B buys none of them: its least ways are a few percent of the units (getattr 64 of 1,087 IR, render_value_in_context 95 of 1,252, VariableNode.render 99-105 of 1,400-1,568), so their work at the learned kills is 3-8M against prices of 13-38M; Node.render_annotated is marked nospec at @3 after 61 entries (paid 26.3M, price 12.7M) as on master and cannot grow. B's one growth is escape_filter by losses at 4,790 entries, as master. A also grows VariableNode.render by losses at 33,249 entries (look 24, paid 36.36M = price); B never does in 3 values, and has more exits and interpreted instructions per value (exit 17-24M, ceval 50-68M against A's 7M and 25-30M). Why B misses that loss purchase is not established: B differs from A only in the work terms of the growth test and of the look arming, and no django unit reached its price by work.
+
+**2026-11-25 stage B: the committed changes one at a time (prefix arms on origin/master 21eae616)**
+
+P1 = change 1 (a call left out of line valued by its shape) with its lanes; P2 = P1 + change 4 (a mark priced at and killing only the units that speculate at its site) with its lane. Gate: kernel programs 77/77 (P1) and 78/78 (P2) in jit-off, plain, jit, jit-deopt; threads 7/7; jitcheck 0 failing for both (methodgrow after 12,224 entries, genhot hot site after 39,296 turns at 1.87x, genmark one unit). jitcost (the whole-run call-shape measurement, before the window harness): P1 PASS (plain 441, method 476, bind 503, gen 1,478, kernel 215); P2 FAIL once (method 67), PASS on a second run (449, 470, 518, 1,465, 217): one unstable reading, no constant set from it.
+
+| row | master | P1 | P2 | A | P1 vs master | P2 vs master |
+|---|---|---|---|---|---|---|
+| django_template (M) | 949.4 | 945.4 | 945.4 | 945.6 | -0.4% | -0.4% |
+| genshi text + xml (M) | 1,927.6 | 2,055.8 | 1,885.0 | 1,907.0 | +6.7% | -2.2% |
+| richards (M) | 249.2 | 249.4 | 250.8 | 250.8 | +0.1% | +0.6% |
+| tomli_loads (M) | 24,953 | 24,885 | 24,885 | 24,913 | -0.3% | -0.3% |
+| deepcopy (M, 218 loops) | 1,139.8 | 1,251.0 | 1,251.6 | 1,250.0 | +9.8% | +9.8% |
+| AWFY Richards / DeltaBlue / CD per it. (M) | 131.37 / 5.42 / 252.84 | 131.37 / 5.43 / 252.78 | 131.37 / 5.46 / 252.84 | 131.38 / 5.46 / 249.71 | 0 / +0.1% / 0 | 0 / +0.6% / 0 |
+| pyflakes whole (G) | 10.173 | 10.172 | 10.179 | 10.166 | -0.0% | +0.1% |
+| black whole (G) | 12.915 | 12.904 | 13.097 | 13.066 | -0.1% | +1.4% |
+| pygments whole (G) | 13.585 | 13.882 | 14.209 | 14.220 | +2.2% | +4.6% |
+| cli compile ms | 1,313 | 1,222 | 1,224 | 1,293 | -6.9% | -6.8% |
+| regex_v8 64-128 total (G) | 103.7 | 103.3 | 97.1 | 96.0 | -0.5% | -6.3% |
+| regex_v8 128-256 total (G) | 206.1 | 208.5 | 195.5 | 195.9 | +1.2% | -5.1% |
+
+Neither prefix meets the landing bar. Change 1 alone costs deepcopy +9.8% (arm A's +9.7% is change 1's), genshi +6.7%, pygments +2.2%, regex_v8 128-256 +1.2%; change 4 on top recovers genshi and regex_v8 and adds pygments (+4.6% in all) and black (+1.4%). Neither change 1 nor 4 lands. Kept from the branch: the growchain lane (passes on master: 2 doublings, each paid at least its price) and the findings below. Not kept: methodgrow (reads change 1's CALL_COST_METHOD), genhot and genmark (fail on master: no hot-site purchase; one mark kills three units), specgrow (no growth on master).
+
+## Findings: growth bought out of work (withdrawn 2026-11-25)
+
+The work clause (1b, b437eb84, and its repair B) and change 2 (looks armed for when a purchase comes due) are withdrawn from this ticket. Growth goes back to design with these findings.
+
+- Two mismeasurements. (1) 1b priced every completed entry as running its unit's whole IR; measured on regex_v8 that overstates large branchy units 9-30x (block0@807: 788M estimated, 25M run). (2) PASS_INS 20 came from tools/jitcost dividing a call's instructions by the run's average unit (about 259 builds, the kernel's included: 240 IR), not the measured function's own unit (1,513 IR). Per IR instruction of that unit a compiled pass is about 3.5 instructions; per instruction of its least way to a return, 5.75 (straight line) and 8.40 (two arms). PASS_INS was 2.4-5.8x over.
+- Looks starve work. A look at a unit's out-of-line sites is an exit, so the entry it cuts counts as exited and earns no work; change 2 armed each site at about one call as the work neared the price, so near the due point most entries ended at a look: methodgrow 23,065 looks in 26,022 entries (2,957 completed entries would have paid), the grown lane's entry@1 4,251 in 6,539.
+- A sound lower bound buys nothing on the programs that need growth. Work as PASS_INS x the least IR of any way from the entry to a return or yield is a few percent of the unit on django's hot units (getattr 64 of 1,087 IR, render_value_in_context 95 of 1,252, VariableNode.render 99-105 of about 1,500): their work at their learned rebuilds is 3-8M against prices of 13-38M.
+- What the fixed-entries rule (pre-ledger, every 4,096 entries) built on django_template and the ledger does not: getattr_hook grown once; getattr twice (2,146 and 3,000 IR); render_value_in_context twice (3,774 and 4,128 IR); Node.render_annotated four times to 8,792 IR (27-38 ms a build), the render dispatch in line (pre 862.8M a value, master 949.4M). What those builds earn is specialization of the callees in their caller, which no loss counter sees: no deterministic estimate available today values it. (Node.render_annotated is also marked nospec at @3 after 61 entries, paid 26.3M against 12.7M, and then cannot grow: the diverted-exit prepayment noted under rule changes, item 3.)
+
 ## State
+
+Stage B closed without a landing. luc-1kz0-c (on origin/master, not pushed) carries the growchain lane and this ticket's notes and findings. The work clause (1b, B) and change 2 are withdrawn; changes 1 and 4 measured one at a time (last stage B note) do not meet the landing bar. Growth goes back to design (Findings). Scratch branches: luc-1kz0-b (all stages), luc-1kz0-a (arm A), luc-1kz0-p1, luc-1kz0-p2.
+
+Stage A (earlier):
 
 Stage A done, for review and landing. Branch luc-1kz0-land, on origin/master dbb9b594; code as gated at e4982587, plus ticket commits.
 
