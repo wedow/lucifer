@@ -794,3 +794,19 @@ Cost per iteration of jit_worker_returns (seven direct returns), from the 400,00
 - worker: 1,491.1 (master, C ends) and 1,351.1 (branch).
 
 So a return through the locked path costs about 5 instructions more than the owner's and about 20 fewer than the C end. Cycles were not measured.
+
+## Regression: a coroutine whose code lacks the generator flag (2026-11-25, branch luc-genflags)
+
+Master red since stage 4: jit_gen_flags failed in jit and jit-deopt ("coroutine already executing"), passed in plain and jit-off. Its fourth case (`looping` with CO_GENERATOR cleared: a coroutine by `lu_gen_new`'s rule) got its return value back from `send` as if yielded, then the next `send` found it executing.
+
+Cause: the emitter chose the generator end by the code's flags (`co_flags & LU_CO_GENERATORS`) in OP_UNLINK and OP_RETURN, while the frame is a generator's whenever the code starts with RETURN_GENERATOR, whatever the flags say. Before stage 4 that mismatch was harmless: the C callers (`return_frame`, `unwound`, `lu_jit_finish`) tested the frame's owner and ran `lu_gen_finish`. Since stage 4 the flag-cleared coroutine took `frame_end`: the state stayed EXECUTING, `exc_info` was not restored, the function and code references were dropped while the generator still named them (by reading), and `datastack_top` was set to the generator's own frame (a raise out of the same code segfaulted).
+
+Fix: `lu_code_gen_start` (gen.h), the scan `lu_jit_new_gen` already made, now shared; OP_UNLINK and OP_RETURN ask it. A root's RETURN_GENERATOR side-exits, so a unit's root frame of such a code is always a generator's. The reverse mismatch (the flag on a plain function, where OP_UNLINK would have written a generator's state below a datastack frame) is now plain as well. Left alone: the same flag test in eval_exc.c (`catcher`, `leaves_root`) and jit.c (`kernel_handler`, `all_kernel`), where a mismatch only loses or keeps a compiled handler, not a frame's end.
+
+Tests: jit_gen_flags gains a raise out of the flag-cleared code, the same coroutine awaited from a compiled coroutine, and the generator flag on a plain function.
+
+Why the stage 4 gate missed it: its 94 programs were picked by the entry, tools, trace, threads and reclaim names; the generator programs in it were jit_gen_turns, jit_delegation, entry_gen_close_throw and entry_frame_end, all with flags that match their bytecode. A gate over the names matching gen, coro, async, yield, await, delegat, send, close and throw (39 programs) catches it in jit and jit-deopt.
+
+Gate (c788350c): the 39 programs matching those names pass in jit-off, plain, jit, jit-deopt and gc:1 (capi_generic_getattr XFAIL); the 7 entry_ and 56 threads_ programs (64 checks) pass in jit and handoff (entry_tracebacks, threads_kill_under_calls XFAIL); jitcheck 0 failing, 10 GAP. The whole kernel set in the jit lane: master's binary fails jit_gen_flags alone (besides the three XFAILs); the fix passes all. Later stages of this ticket gate with that 39-program list as well.
+
+Numbers, instructions:u, pinned, two runs per arm alternating: Richards (AWFY, 60) on 6.83610G -> 6.83612G (+0.00%), always 7.81509G -> 7.81510G (+0.00%); pyperformance generators always 5.2213G -> 5.2255G (+0.08%), on 1.3990G in every master run and in 2 of 4 fix runs (+0.01%), the other two 1.3885G (-0.75%), a mode master did not show here.
