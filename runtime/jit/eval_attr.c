@@ -497,12 +497,22 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
         }
         break;
     }
-    case LOAD_ATTR_WITH_HINT:
+    case LOAD_ATTR_WITH_HINT: {
+        /* Where the class of the version keeps the dict (lu_hinted_dict). */
+        PyTypeObject *t = owner_class(c, owner, version);
+        int64_t at = t == NULL || !LU_DICT_HINTED(t) ? 0
+            : (t->tp_flags & Py_TPFLAGS_MANAGED_DICT) ? LU_MANAGED_DICT_OFFSET : t->tp_dictoffset;
+        Py_XDECREF(t);
+        if (at == 0) {
+            load_generic(c, pic);       /* a version no class has now */
+            break;
+        }
         v = lu_ev_emit(c, OP_ATTR_LOAD, REP_OBJ, owner, LU_NOV, lu_ev_konst(c, name), version);
-        I(c, v)->imm2 = index;
+        I(c, v)->imm2 = (int64_t)((uint64_t)at << 32) | index;
         I(c, v)->fs = lu_ev_exit_fs(c);
         replace_owner(c, lu_ev_own(c, v), LU_NOV);
         break;
+    }
     case LOAD_ATTR_SLOT: {
         lu_ev_guard_version(c, owner, version);
         v = lu_ev_emit(c, OP_SLOT_LOAD, REP_OBJ, lu_ev_val(c, owner), LU_NOV, LU_NOV, index);

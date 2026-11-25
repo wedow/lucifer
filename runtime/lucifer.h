@@ -275,6 +275,19 @@ enum lu_kernel_id {
 /* The dict pointer a Py_TPFLAGS_MANAGED_DICT instance carries before its header. */
 #define LU_MANAGED_DICT_OFFSET (-(Py_ssize_t)sizeof(PyObject *))
 #define LU_MANAGED_DICT(obj) (*(PyObject **)((char *)(obj) + LU_MANAGED_DICT_OFFSET))
+/* Where an instance whose type has a dict hint (LU_DICT_HINTED) keeps its
+   dict: managed, or at tp_dictoffset (not a class's: type's to change). The
+   dict hint forms read it after their version guard, which fixes the type
+   and so the layout. */
+#define LU_DICT_HINTED(tp) (((tp)->tp_flags & Py_TPFLAGS_MANAGED_DICT) \
+                            || ((tp)->tp_dictoffset > 0 && !((tp)->tp_flags & Py_TPFLAGS_TYPE_SUBCLASS)))
+static inline PyObject *
+lu_hinted_dict(PyObject *obj)
+{
+    PyTypeObject *tp = Py_TYPE(obj);
+    return (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT) ? LU_MANAGED_DICT(obj)
+        : *(PyObject **)((char *)obj + tp->tp_dictoffset);
+}
 
 /* Instance attributes (runtime/object/attrs.c): inline values after
    tp_basicsize while LU_ATTRS_IN_DICT is clear, else the instance dict. */

@@ -437,29 +437,6 @@ h_cell_store(PyObject *cell, PyObject *v)
 
 /* --- attributes --- */
 
-/* LOAD_ATTR_WITH_HINT: the instance dict's entry `index`, while the type
-   has `version` and the entry's key is `name`; NULL otherwise. */
-PyObject *
-lu_jit_attr_load(PyObject *owner, int64_t version, int64_t index, PyObject *name)
-{
-    if (Py_TYPE(owner)->tp_version_tag != (uint32_t)version) {
-        return NULL;
-    }
-    PyObject *dict = LU_MANAGED_DICT(owner);
-    if (dict == NULL || !PyDict_CheckExact(dict)) {
-        return NULL;
-    }
-    PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)dict)->ma_keys, __ATOMIC_ACQUIRE);
-    if (!lu_dk_is_unicode(dk) || index >= dk->dk_nentries || lu_dk_key(dk, index) != name) {
-        return NULL;
-    }
-    PyObject *v = lu_try_xget_ref(lu_dk_value_slot(dk, index));
-    if (v != NULL && dk != __atomic_load_n(&((PyDictObject *)dict)->ma_keys, __ATOMIC_ACQUIRE)) {
-        Py_CLEAR(v);
-    }
-    return v;
-}
-
 /* STORE_ATTR_WITH_HINT: 1 stored, 0 when the type or dict is not what was
    compiled (the interpreter then stores). An instance without its dict
    (one whose values are inline, as a site specialized before its class
@@ -471,7 +448,7 @@ h_attr_store(PyObject *owner, PyObject *v, PyObject *name, int64_t version)
     if (Py_TYPE(owner)->tp_version_tag != (uint32_t)version) {
         return 0;
     }
-    PyObject *dict = LU_MANAGED_DICT(owner);
+    PyObject *dict = lu_hinted_dict(owner);
     if (dict == NULL && lu_inline_live(owner)) {
         int r = lu_attr_store(owner, name, v);
         PyErr_Clear();

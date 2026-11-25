@@ -2881,7 +2881,6 @@ extern PyObject *lu_jit_list_item(PyObject *list, int64_t i);
 extern PyObject *lu_jit_tuple_item(PyObject *t, int64_t i);
 extern PyObject *lu_jit_slot_load(PyObject **slot);
 extern int lu_jit_list_store(PyObject *list, int64_t i, PyObject *v);
-extern PyObject *lu_jit_attr_load(PyObject *owner, int64_t version, int64_t index, PyObject *name);
 extern int lu_jit_truth(PyObject *v);
 
 static void
@@ -4930,14 +4929,14 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            Anything else leaves: another thread's object is not taken here
            (biased counting lets only the owner skip the atomic try). */
         int fail = guard_exit(a, in);
-        int64_t entry = 16 * in->imm2;
+        int64_t index = in->imm2 & 0xffffffff, entry = 16 * index;
         r = gpr_of(a, in->a, RDX);
         test_rr(a, r, r);
         jcc(a, CC_E, fail);
         load(a, RAX, r, offsetof(PyObject, ob_type));
         cmp_mi(a, 0, RAX, offsetof(PyTypeObject, tp_version_tag), (int32_t)in->imm);
         jcc(a, CC_NE, fail);
-        load(a, R11, r, LU_MANAGED_DICT_OFFSET);
+        load(a, R11, r, (int32_t)(in->imm2 >> 32));     /* the dict, where the version's class keeps it */
         test_rr(a, R11, R11);
         jcc(a, CC_E, fail);
         mov_ri(a, RAX, (int64_t)(intptr_t)&PyDict_Type);
@@ -4949,7 +4948,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
         modrm_mem(a, ALU_CMP, R11, offsetof(PyDictKeysObject, dk_kind));
         b1(a, DICT_KEYS_GENERAL);               /* cmp byte [r11+kind], GENERAL */
         jcc(a, CC_E, fail);
-        cmp_mi(a, 1, R11, offsetof(PyDictKeysObject, dk_nentries), (int32_t)in->imm2);
+        cmp_mi(a, 1, R11, offsetof(PyDictKeysObject, dk_nentries), (int32_t)index);
         jcc(a, CC_LE, fail);
         rex(a, 0, RCX, 0, R11);
         b1(a, 0x0F);

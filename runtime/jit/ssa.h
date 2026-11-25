@@ -115,7 +115,7 @@ enum lu_rep { REP_NONE, REP_OBJ, REP_I64, REP_F64, REP_BIT };
                                            range, past 2**63, or when another thread holds a's lock */ \
     X(TYPED_STORE, REP_NONE, IF_GUARD | IF_EFFECT)     /* a[b] = c (i64, f64) as typecode imm; deopts as TYPED_LOAD \
                                                           and for a c out of the typecode's range */ \
-    X(ATTR_LOAD, REP_OBJ, IF_GUARD)   /* a.name from its managed dict: imm version, imm2 entry; c: the name */ \
+    X(ATTR_LOAD, REP_OBJ, IF_GUARD)   /* a.name from its dict: imm version, imm2 entry | the dict's offset << 32; c: the name */ \
     X(INLINE_STORE, REP_NONE, IF_GUARD | IF_EFFECT | IF_CALL | IF_SEEN) /* a's inline word at byte imm = b, borrowing b;   \
                                                        imm2: 1 + the words after it in the class's room (0: unknown), \
                                                        LU_STORE_BY_C when the name's kind does not take it */ \

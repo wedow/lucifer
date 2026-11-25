@@ -288,12 +288,12 @@ is_slot_member(PyObject *descr, PyTypeObject *tp)
     return m->type == Py_T_OBJECT_EX && m->offset >= 0 && m->offset <= UINT16_MAX;
 }
 
-/* The index of name's entry in owner's managed dict, whose key is this
-   very str, or -1. */
+/* The index of name's entry in owner's dict (managed or at a positive
+   tp_dictoffset), whose key is this very str, or -1. */
 static Py_ssize_t
-dict_hint(PyObject *owner, int managed, PyObject *name)
+dict_hint(PyObject *owner, PyObject *name)
 {
-    PyObject *dict = managed && owner != NULL ? LU_MANAGED_DICT(owner) : NULL;
+    PyObject *dict = owner != NULL && LU_DICT_HINTED(Py_TYPE(owner)) ? lu_hinted_dict(owner) : NULL;
     Py_ssize_t index = dict != NULL && unicode_dict(dict) ? lu_ns_index(dict, name) : -1;
     return index >= 0 && index <= UINT16_MAX && lu_dk_key(((PyDictObject *)dict)->ma_keys, index) == name ? index : -1;
 }
@@ -315,13 +315,23 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
        names before the version changes. */
     Py_ssize_t inline_index = (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) ? lu_inline_index(tp, name) : -1;
     int op = LOAD_ATTR;
-    if (*version == 0 || !generic_read(way) || (!managed && tp->tp_dictoffset != 0)) {
+    if (*version == 0 || !generic_read(way)) {
         op = LOAD_ATTR;
     }
     else if (is_slot_member(*descr, tp)) {
         *second = (uint32_t)((PyMemberDescrObject *)*descr)->d_member->offset;
         Py_CLEAR(*descr);
         op = LOAD_ATTR_SLOT;
+    }
+    else if (!managed && tp->tp_dictoffset != 0) {
+        /* A dict at tp_dictoffset: the names it holds, by their hint (none
+           for a class, LU_DICT_HINTED). */
+        Py_ssize_t index = kind == DESCR_ABSENT || (kind == DESCR_NON_DESCRIPTOR && !method) ? dict_hint(owner, name) : -1;
+        if (index >= 0) {
+            *second = (uint32_t)index;
+            op = LOAD_ATTR_WITH_HINT;
+        }
+        Py_CLEAR(*descr);
     }
     else if (inline_index >= 0 && kind != DESCR_OTHER) {
         /* An inline value, which shadows a non-data attribute of the class:
@@ -343,18 +353,18 @@ instance_shape(PyTypeObject *tp, PyObject *owner, PyObject *name, int method, ui
                instance that has none of its own (an _IOBase's __closed) */
         }
         else {
-            if ((hint = dict_hint(owner, managed, name)) >= 0) {
+            if ((hint = dict_hint(owner, name)) >= 0) {
                 *second = (uint32_t)hint;
                 op = LOAD_ATTR_WITH_HINT;
             }
             Py_CLEAR(*descr);
         }
     }
-    else if (kind == DESCR_ABSENT || (kind == DESCR_NON_DESCRIPTOR && !method && dict_hint(owner, managed, name) >= 0)) {
+    else if (kind == DESCR_ABSENT || (kind == DESCR_NON_DESCRIPTOR && !method && dict_hint(owner, name) >= 0)) {
         /* In the instance's dict, at an entry whose key is this very str;
            also where that entry shadows a class attribute that is no
            descriptor (BytesIO's _buffer). */
-        Py_ssize_t index = dict_hint(owner, managed, name);
+        Py_ssize_t index = dict_hint(owner, name);
         if (index >= 0) {
             *second = (uint32_t)index;
             op = LOAD_ATTR_WITH_HINT;
@@ -562,7 +572,7 @@ lu_specialize_store_attr(PyObject *owner, lu_codeunit *site, PyObject *name)
             end(site, STORE_ATTR_INSTANCE_VALUE);
         }
     }
-    else if (descr == NULL && (tp->tp_flags & Py_TPFLAGS_MANAGED_DICT)) {
+    else if (descr == NULL && LU_DICT_HINTED(tp)) {
         if (begin(site)) {
             lu_cache_store32(c + LA_VERSION, version);
             end(site, STORE_ATTR_WITH_HINT);

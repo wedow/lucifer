@@ -3180,7 +3180,7 @@ op_LOAD_ATTR_WITH_HINT: {
     uint32_t version = lu_cache_load32(next_instr + LA_VERSION);
     PyObject *v = NULL;
     if (version != 0 && Py_TYPE(owner)->tp_version_tag == version) {
-        PyObject *dict = LU_MANAGED_DICT(owner);
+        PyObject *dict = lu_hinted_dict(owner);
         if (dict != NULL && PyDict_CheckExact(dict)) {
             PyDictKeysObject *dk = __atomic_load_n(&((PyDictObject *)dict)->ma_keys, __ATOMIC_ACQUIRE);
             Py_ssize_t index = lu_cache_load(next_instr + LA_INDEX);
@@ -3385,7 +3385,7 @@ op_STORE_ATTR_FAST: {
         goto op_STORE_ATTR;
     }
     if (opcode == STORE_ATTR_WITH_HINT) {
-        dict = LU_MANAGED_DICT(owner);
+        dict = lu_hinted_dict(owner);
         if (dict == NULL || !PyDict_CheckExact(dict)) {
             goto op_STORE_ATTR;     /* the generic form makes the dict */
         }
