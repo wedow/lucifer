@@ -915,7 +915,60 @@ Compile ms read 1,350 for master in the earlier session and 1,171 here: compile 
 
 Rides a whole-build purchase would refuse (event logs of this arm): pyflakes makes no purchase and 4 rides (232 IR: isinstance into Checker.handleChildren three times at 8,009-25,503 calls, 75 IR each; one 7-IR site); regex_v8 (-n 3) no purchase and 10 rides (325 IR, the largest _text_of, 80 IR at 10,254 calls). Each covers its marginal price; none would pay a whole rebuild alone (for example _getslice, 30 IR at 1,941 calls: 0.8M against a build of about 84M). They are what riding is for; no second threshold was added.
 
+## Review fixes and rebase (2026-11-25)
+
+Fixes on top of the landing commits (after the rebase: lanes, change and stress program are the last three commits before this note):
+1. **Rides never park inside a walk of a code's units.** `rides()` takes the root's prof_lock before walking its units and calls the locked `ride()` for each; the kill walk follows with no lock (kill takes none). relearn's ride is under the lock too. Program `tests/kernel/jit_site_ride_threads.py`: three threads drive one function whose place meets a new class per round (learned rebuilds, marks, rides) while a fourth makes and drops classes and collects; it passes in handoff, gc:1 and jit. It was not run against the code before the fix and is a stress check, not a lane shown failing first.
+2. **A lost re-arm overstates by at most the calls made.** No site is armed for more than `max(calls made, a look's cost)`. The counter stays a plain increment; a racing increment that overwrites a re-arm overstates by the arm, now at most the calls already made, as the doubling did. Effect on timing: a site whose share of the shortfall was larger than its calls so far now looks again sooner (more looks, each an exit); the purchases are the same, since each is still decided on the counted value at a look.
+3. **Only bought frames bring their own units' purchases.** A ctx carries `bought` (set when the frame went in through a bought site); `lu_ev_room` consults the root entry's set and those frames' sets only. Generator frames carry none. Lane siteown (`jit_site_own.py`, 16N): FAIL before (the caller, which bought nothing, was built at 1,910 IR with the helper's bought 1,260-IR callee) -> PASS (1,263 IR).
+4. **Copies priced.** `lu_out.copies` counts the refusals of one path in the build (arms, a peeled turn); a site's size is its callee's unit times its copies.
+5. **One purchase per look race.** hot_exit re-tests the unit's death under the lock.
+6. **Arming.** The floor is `exit_cost(d) / CALL_COST` (the exit's own rest included); the shortfall is spread over the priced sites' calls only; unpriced sites are armed for the calls they made.
+7. **The quiet (answer).** Intended: the quiet is a clock of the unit's work since a place last learned, counted in what the unit lost; out-of-line calls count as stale passes and exits do. A learned rebuild and a purchase are both rebuilds of one unit, and riding puts the paid sites into the learned rebuild, so they share it. Said in the comment at hot_exit.
+8. **sitepath** allowed half a copy of leaf over the bought units even when the start bought leaf itself; that half is now allowed only when leaf comes inside a bought callee (one copy in line, 348 IR, is under leaf's own unit, 514; two are not). **megaiter** has AT_MOST 2 x 1,747,620 (twice its count at protocol valuation, the lanes' usual margin). What the lane protects now: its megamorphic iteration sites are bought at protocol alone, later than the callee-loss valuation bought them (master 476k compiled calls at 20,000 iterations, this 1.75M); the lane bounds the count after the purchases (flat between N and 2N) and, with AT_MOST, when they come.
+10. **Leftovers:** the out_calls comment; `settled` deleted (helpers read the stats flag); `lu_jit_generic` takes no arguments; no realloc when nothing was admitted.
+
+**Unit size without MAX_GROWN (by reading).** IR values are `int32_t` indices (`lu_v`, ssa.h), blocks `int32_t`; the only 16-bit field of an instruction is its flag word. Branches and calls are emitted as rel32 (`rel32_to`, x86_64/emit.c); no rel8 short form is chosen by distance. The fixed array in jit.c (`head[1024]`) is a hash table of debug tallies, not sized by IR. I found no limit at 50-100k IR. The binding limit is the price: `B(n) = n(6500 + 5n)` is 12.8G at 50k IR and 50.7G at 100k, so a purchase taking a unit there needs that much counted loss. The largest unit in this work's event logs is 10,350 IR (pygments `_format_lines` under stage 1q); master's grown builds reached 15,733 (tomli).
+
+**Rebase.** onto origin/master (11 commits: entry protocol stages 3-4, frame ending, poisoned frees): clean. The exit path calls `lu_jit_deopt` from inside the unit's machine frame (x86_64/emit.c `exits`), and `lu_jit_deopt` calls `lu_jit_note_exit` first; the activation is unlinked only in the epilogue the exit jumps to afterwards. So while hot_exit parks on prof_lock, the unit's activation is linked and the unit cannot be freed.
+
+**Gate after the rebase:** kernel programs 77/77 in jit-off and plain, 76/77 in jit and jit-deopt: `jit_gen_flags` fails ("coroutine already executing"). It fails the same way on origin/master; bisected over master's 11 new commits to c4f00007 ("jit: the unit ends its own frame"), so it is a red on master, not this branch's. Threads 7/7 in handoff; the ride stress program and siteown pass in handoff, gc:1 and jit; tools/jitcheck 0 failing; tools/jitcost PASS.
+
+**Re-table** against current origin/master, interleaved in one session, two runs each alternated, min; method as before.
+
+| row | figure | master M (compile) | branch M (compile) | branch vs master |
+|---|---|---|---|---|
+| django_template | all values, -n 3 | 4,610.8 (643.2) | 4,533.4 (549.8) | -1.7% |
+| django_template | best value, -n 20 | 843.6 (0.0) | 843.0 (0.0) | -0.1% |
+| django_template | best of three, -n 3 (reported) | 920.4 (25.8) | 905.0 (12.0) | -1.7% |
+| genshi | all values, -n 3 | 8,845.4 (1,081.4) | 8,453.2 (994.2) | -4.4% |
+| genshi | best value, -n 20 | 1,824.4 (2.0) | 1,658.6 (0.0) | -9.1% |
+| genshi | best of three, -n 3 (reported) | 1,843.0 (7.2) | 1,779.0 (36.4) | -3.5% |
+| richards | all values, -n 3 | 1,420.8 (280.6) | 1,419.8 (290.4) | -0.1% |
+| richards | best value, -n 20 | 240.0 (0.0) | 239.8 (0.0) | -0.1% |
+| richards | best of three, -n 3 (reported) | 245.6 (0.0) | 240.0 (0.0) | -2.3% |
+| tomli_loads | all values, -n 3 | 103,574.4 (2,738.0) | 93,401.4 (1,463.0) | -9.8% |
+| tomli_loads | best value, -n 20 | 22,497.1 (0.0) | 22,530.1 (0.0) | +0.1% |
+| tomli_loads | best of three, -n 3 (reported) | 24,944.1 (0.0) | 22,684.1 (24.0) | -9.1% |
+| deepcopy | all values, -n 3 | 5,411.6 (569.6) | 5,056.4 (565.0) | -6.6% |
+| deepcopy | best value, -n 20 | 935.0 (0.0) | 919.0 (0.0) | -1.7% |
+| deepcopy | best of three, -n 3 (reported) | 1,125.0 (52.0) | 1,008.4 (57.6) | -10.4% |
+| regex_v8 | all values, -n 3 | 8,047.0 (2,305.0) | 7,872.0 (2,158.0) | -2.2% |
+| regex_v8 | best value, -n 20 | 837.0 (20.0) | 832.0 (8.0) | -0.6% |
+| regex_v8 | best of three, -n 3 (reported) | 1,129.0 (214.0) | 1,088.0 (161.0) | -3.6% |
+| regex_v8 calls 64-128 | total / compile / run G | 53.80 / 3.96 / 49.84 | 51.09 / 0.67 / 50.41 | -5.0% total, -83.1% compile, +1.2% run |
+| regex_v8 calls 128-256 | total / compile / run G | 103.95 / 5.31 / 98.63 | 100.15 / 0.64 / 99.52 | -3.7% total, -88.0% compile, +0.9% run |
+| pyflakes whole | G; compile ms; builds; IR | 8.065; 285 ms; 466 builds; 174,278 IR | 7.986; 274 ms; 464 builds; 172,100 IR | -1.0% |
+| black whole | G; compile ms; builds; IR | 12.697; 515 ms; 880 builds; 262,289 IR | 12.717; 517 ms; 881 builds; 263,614 IR | +0.2% |
+| pygments whole | G; compile ms; builds; IR | 13.547; 360 ms; 516 builds; 160,971 IR | 13.537; 398 ms; 517 builds; 157,668 IR | -0.1% |
+| cli compile ms (sum) | ms | 1160 | 1190 | +2.6% |
+| awfy-Richards per iteration | M | 129.25 | 129.24 | -0.0% |
+| awfy-DeltaBlue per iteration | M | 5.29 | 5.29 | -0.0% |
+| awfy-CD per iteration | M | 249.67 | 246.47 | -1.3% |
+
+Against the bar: no instruction row is worse than 1% on either figure (worst: tomli best value at -n 20 +0.1%, black whole +0.2%). **cli compile ms is above master: 1,190 against 1,160 (+2.6%)**, all of it pygments (398 and 428 ms against 360 and 399 in the two runs). The same pygments runs build less IR than master (157,668 against 160,971) and run fewer instructions (13.537G against 13.547G, compile included), and the event logs show the same nine purchases and rides as the 1p arm, which read 367 ms against master's 368 in the earlier session. Compile ms is wall time; by the deterministic counts the compile did not grow. Reported as a miss by the letter of the bar.
+
 ## State (2026-11-25)
 
-- Revision 1 stages 1 and 3 done on luc-site1 (lanes d6dca23c, 2fa93b9b; changes 9afb781e, 468a61cc, c1de0377), gated, tabled against master: meets the landing bar. For review and landing; not pushed.
-- Next: check 6 (stage 2's gate: recall and miss cost of a zero feedback word), then stage 2 (cold sites out) only if it passes. Ruling 2 (acceptance metric) was applied provisionally as R7.
+- Revision 1 stages 1 and 3 on luc-site1, rebased on origin/master, with the review's fixes; gated (jit_gen_flags red is master's, c4f00007). Re-tabled against current master: every instruction row within the bar; cli compile ms +2.6% (pygments, wall time, with IR built and instructions below master's). For the coordinator's decision on that row; not pushed.
+- Next after landing: check 6, then stage 2 only if it passes.
