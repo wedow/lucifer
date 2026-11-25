@@ -60,6 +60,12 @@ require that a count of the tier's does not grow with the iterations:
          direct calls (compiled code entered through the eval loop's C
          entry). C enters the callee's unit itself, the kernel's
          call_special (which the comparison reaches) too.
+  toolsoff tests/kernel/jit_tools_toggle.py, whose functions and kernel
+         builtins run hot after a tool was switched on and off once
+         (settrace, setprofile, sys.monitoring events, or a settrace that
+         restores none): entries into compiled code, direct calls and
+         poll exits. User code is compiled again and runs its callees in
+         line, and kernel units do not leave at their polls.
   sharedcode tests/kernel/jit_shared_code_hot.py, two functions of one code
          with different globals, the second's loop growing with the size:
          exits at a unit's entry (another function's frame), which stay
@@ -390,6 +396,8 @@ GROWTH = {
     'kwcalls': ('jit_kw_calls.py', r'jit: executed:.* call_kw (\d+)', 0),
     'cells': ('jit_cell_reads.py', r'jit: executed:.* helper (\d+)', 0, ('-X', 'lucifer_jit=on')),
     'bound': ('jit_bound_calls.py', r'jit: executed:.* call_kw (\d+)', 0, ('-X', 'lucifer_jit=on')),
+    'toolsoff': ('jit_tools_toggle.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), .* poll (\d+) side', 0,
+                 (), (['settrace'], ['setprofile'], ['monitoring'], ['restore'])),
     'sharedcode': ('jit_shared_code_hot.py', r'jit: entries .* poll (\d+) side', 0),
     'classtests': ('jit_isinstance_growth.py', r'jit: executed:.* helper (\d+)|jit: C paths .* build_tuple (\d+)', 0),
     'cmethods': ('jit_class_methods.py', r'jit: entries (\d+), returns \d+, direct calls (\d+), compiled calls (\d+)', 0),
@@ -513,8 +521,10 @@ def qualnames(program):
 # stage docs/design/jit-architecture.md section 11 lists as not built
 # (entries by shape for calls that are not inlined, handlers and generators
 # inside a unit, polymorphic sites). Their programs' output is still checked.
+# toolsoff waits for luc-o80b (after a tool was on once, user code is never
+# compiled again).
 NOT_BUILT = frozenset("""calls raised userexc shapes objects
-iterators slices guards order asyncfor""".split())
+iterators slices guards order asyncfor toolsoff""".split())
 
 
 def check_growth(args, lane):
