@@ -22,8 +22,10 @@ class DailyScorecard(unittest.TestCase):
         gates.write_text("program,status,score,counts,date,detail\ncheck-jit,fail,,,,exit 7\n")
         rows = []
         for runtime in ("lucifer", "cpython", "pypy", "go"):
-            for name in ("a", "b"):
-                ok = name == "a" or runtime != "lucifer"
+            for name in ("Bounce", "CD"):
+                if runtime == "go" and name == "CD":
+                    continue
+                ok = name == "Bounce" or runtime != "lucifer"
                 rows.append(dict(card=1, program="awfy." + name, runtime=runtime,
                                  status="ok" if ok else "unsettled", seconds=1 if ok else None, final_s=1))
                 rows.append(dict(card=5, program="awfy." + name, runtime=runtime,
@@ -35,11 +37,22 @@ class DailyScorecard(unittest.TestCase):
             dict(card=2, program="flask.1.profile", runtime="lucifer", status="ok", profile_status="ok",
                  compiled_pct=4),
         ])
+        # One candidate verifies two tasks, whose stock and candidate sums give 2x stock time.
+        # A second manifest appears only in a third runtime and still belongs in the denominator.
+        for runtime, values in (("cpython", (1, 3)), ("lucifer", (6, 2))):
+            for task, seconds in enumerate(values):
+                rows.append(dict(card=1, program=f"pyperformance.measured/{task}", manifest="measured",
+                                 group="held out", runtime=runtime, status="ok", seconds=seconds))
+        rows.append(dict(card=1, program="pyperformance.missing", manifest="missing", group="held out",
+                         runtime="pypy", status="ok", seconds=1))
+
         def render(date):
-            (work / "samples.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+            (work / "samples.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows) + '{"card"')
             out = work / ("scorecard-" + date)
-            subprocess.run([sys.executable, str(ROOT / "tools/scorecard"), "--summarize", str(work),
-                            "--output", str(out), "--gates", str(gates)], check=False, capture_output=True)
+            done = subprocess.run([sys.executable, str(ROOT / "tools/scorecard"), "--summarize", str(work),
+                            "--output", str(out), "--gates", str(gates)], capture_output=True, text=True)
+            self.assertEqual(done.returncode, 1, done.stderr)
+            self.assertTrue((out / "summary.csv").is_file(), done.stderr)
             with (out / "summary.csv").open() as f:
                 data = list(csv.DictReader(f))
             return (out / "summary.md").read_text(), data
@@ -47,8 +60,12 @@ class DailyScorecard(unittest.TestCase):
         md, data = render("2026-01-02")
         heads = {r["program"]: r for r in data if r["kind"] == "headline"}
         self.assertEqual(set(heads), {"compute", "held-out", "web", "short", "native", "steady"})
-        self.assertIn("1/2", heads["compute"]["counts"])
-        self.assertIn("1/2", heads["steady"]["score"])
+        self.assertIn("Go 1/14", heads["compute"]["counts"])
+        self.assertIn("2×", heads["held-out"]["score"])
+        self.assertIn("1/2", heads["held-out"]["counts"])
+        self.assertTrue(any(r["kind"] == "detail" and r["program"] == "awfy.Mandelbrot"
+                            and r["runtime"] == "go" and r["status"] != "ok" for r in data))
+        self.assertIn("1/14", heads["steady"]["score"])
         self.assertNotIn("2×", heads["web"]["score"])  # A shared client cannot qualify the disjoint layout.
         self.assertIn("insufficient disjoint CPUs", md)
         self.assertIn("compiled_pct", md)
@@ -59,6 +76,7 @@ class DailyScorecard(unittest.TestCase):
         self.assertEqual(sorted(positions), positions)
         self.assertIn("check-jit", md[md.index("## Problems"):])
         self.assertIn("worker exited 7", md[md.index("## Problems"):])
+        self.assertIn("samples.jsonl", md[md.index("## Problems"):])
         self.assertTrue(any(r["kind"] == "gate" and r["program"] == "check-jit" for r in data))
 
         rows[0]["seconds"] = 2

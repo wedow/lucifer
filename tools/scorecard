@@ -1314,7 +1314,51 @@ def markdown_table(rows, columns):
     return header + ["| " + " | ".join(cell(row.get(key)) for key in columns) + " |" for row in rows] + [""]
 
 
-def write_summary(out, rows, issues, source, elapsed, gates_path=None):
+def missing_rows(rows, runtimes):
+    """Expose an interrupted worker's omissions using the panel and its peers."""
+    expected = {}
+    for name in bench_tool("awfy").INNER:
+        for card in (1, 5):
+            expected[card, "awfy." + name] = {}
+    for name in json.loads(REFERENCE.read_text()):
+        if name.startswith(("cli.", "startup.")):
+            expected[3, name] = {}
+    observed = set()
+    manifests = set()
+    for row in rows:
+        card, name, runtime = row["card"], row["program"], row["runtime"]
+        observed.add((card, name, runtime))
+        manifests.add((card, name.partition("/")[0], runtime))
+        expected[card, name] = {k: row[k] for k in ("manifest", "group") if k in row}
+    for (card, name), meta in expected.items():
+        manifest = name.partition("/")[0]
+        for runtime in runtimes:
+            if runtime == "go" and not name.startswith("awfy."):
+                continue
+            if (card, name, runtime) in observed:
+                continue
+            # A manifest-level failure already accounts for its missing tasks.
+            # Conversely a worker with task results needs no manifest placeholder.
+            if (card, manifest, runtime) in observed or (name == manifest and (card, name, runtime) in manifests):
+                continue
+            yield dict(meta, card=card, program=name, runtime=runtime, status="missing measurement")
+
+
+def read_receipt(path, issues):
+    """Keep flushed observations even if a terminated worker left an incomplete line."""
+    with path.open("rb") as stream:
+        for number, line in enumerate(stream, 1):
+            try:
+                yield json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                issue = f"{path.name} has an invalid measurement on line {number}"
+                if issue not in issues:
+                    issues.append(issue)
+
+
+def write_summary(out, rows, issues, source, elapsed, gates_path=None, runtimes=()):
+    selected = runtimes or {r["runtime"] for r in rows}
+    rows = rows + list(missing_rows(rows, selected))
     public = bench_tool("awfy").public_data
     rows = sorted((public(row) for row in rows), key=lambda row: (row["card"], row["program"], row["runtime"]))
     add_ratios(rows)
@@ -1431,14 +1475,15 @@ def main():
             subprocess.run(shlex.split(os.environ["TIMING_PREFIX"]) + cmd, stdout=log, stderr=subprocess.STDOUT, check=True)
     if args.summarize:
         meta = json.loads((args.summarize / "run.json").read_text())
-        rows = [json.loads(line) for f in sorted(args.summarize.glob("*.jsonl"))
-                for line in f.read_text().splitlines()]
+        issues = meta["issues"]
+        rows = [row for f in sorted(args.summarize.glob("*.jsonl")) for row in read_receipt(f, issues)]
         receipt = args.summarize / "repeatability/samples.jsonl"
         if receipt.is_file():
-            repeat_fields(rows, [json.loads(line) for line in receipt.read_text().splitlines()])
+            repeat_fields(rows, list(read_receipt(receipt, issues)))
         args.output.mkdir(parents=True, exist_ok=True)
-        write_summary(args.output, rows, meta["issues"], meta["revision"], meta["elapsed_s"], args.gates)
-        return int(bool(meta["issues"]))
+        write_summary(args.output, rows, issues, meta["revision"], meta["elapsed_s"], args.gates,
+                      meta.get("runtimes", meta.get("runtime_sha256", {})))
+        return int(bool(issues))
     if args.section:
         if args.receipt is None:
             p.error("a worker needs --receipt")
@@ -1477,7 +1522,7 @@ def main():
         receipt = scratch / (label + ".jsonl")
         cmd = [sys.executable, __file__, "--section", section, "--runtimes", ",".join(labels),
                "--site", str(args.site.resolve()), "--scratch", str(scratch), "--receipt", str(receipt)]
-        prefix = os.environ["TEST_PREFIX" if section == "web" else "TIMING_PREFIX"]
+        prefix = os.environ["TEST_PREFIX" if section in ("web", "profile") else "TIMING_PREFIX"]
         print(label, flush=True)
         started = time.monotonic()
         with (scratch / (label + ".log")).open("w") as log:
@@ -1485,10 +1530,12 @@ def main():
         if done.returncode:
             issues.append(f"{label} exited {done.returncode}")
         if receipt.exists():
-            rows.extend(json.loads(line) for line in receipt.read_text().splitlines())
+            rows.extend(read_receipt(receipt, issues))
+        elif not done.returncode:
+            issues.append(f"{label} produced no measurements")
         elapsed[label] = round(time.monotonic() - started, 3)
-        (scratch / "run.json").write_text(json.dumps(dict(revision=source, runtime_sha256=runtime_sha256, issues=issues, elapsed_s=elapsed), indent=2))
-    write_summary(args.output, rows, issues, source, elapsed, args.gates)
+        (scratch / "run.json").write_text(json.dumps(dict(revision=source, runtimes=runtimes, runtime_sha256=runtime_sha256, issues=issues, elapsed_s=elapsed), indent=2))
+    write_summary(args.output, rows, issues, source, elapsed, args.gates, runtimes)
     return int(bool(issues))
 
 
