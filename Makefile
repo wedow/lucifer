@@ -326,6 +326,7 @@ regen-abi:
 	python3 tools/abi/stubs.py $(EXPORTS) include > runtime/capi/stubs.c
 
 check-harness:
+	python3 -m unittest discover -s tests/harness
 	python3 tools/oracle/test_harness.py
 	python3 tools/libtest/check.py
 	python3 tools/numpytest/check.py

@@ -17,6 +17,7 @@ Suites:
 Every program runs as `COMMAND ARGS` with PYTHONPATH=SITE and nothing else changed.
 
   corpus prepare SITE              install corpus.lock.json into SITE (hash-checked downloads, cached)
+  corpus refresh SITE FILE --run COMMAND   refresh the oracle checks and calibrated loop counts
   corpus list SITE                 JSON list of program ids in measurement order
   corpus time SITE --run COMMAND   one JSON object, {program: result}, on the last stdout line
       --reference FILE             measure against a reference produced without it: the same
@@ -270,6 +271,19 @@ def measure(site, command, reference, only):
     return results
 
 
+def refresh(site, command, path):
+    """Replace the pinned checks only when stock completes the whole corpus."""
+    results = measure(site, command, None, None)
+    missing = [name for name, row in results.items() if not row["check"] or row["status"] != "ok"]
+    if not results or missing:
+        raise SystemExit("incomplete oracle reference: " + ", ".join(missing))
+    checks = {name: {key: row[key] for key in ("loops", "check")} for name, row in results.items()}
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as temp:
+        json.dump(checks, temp, indent=1, sort_keys=True)
+        temp.write("\n")
+    Path(temp.name).replace(path)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="action", required=True)
@@ -277,6 +291,10 @@ def main():
     prep.add_argument("site", type=Path)
     prep.add_argument("--cache", type=Path, default=CACHE)
     sub.add_parser("list").add_argument("site", type=Path)
+    update = sub.add_parser("refresh")
+    update.add_argument("site", type=Path)
+    update.add_argument("output", type=Path)
+    update.add_argument("--run", required=True)
     t = sub.add_parser("time")
     t.add_argument("site", type=Path)
     t.add_argument("--run", required=True, help="the interpreter command, as shell words")
@@ -288,11 +306,13 @@ def main():
     if args.action == "list":
         print(json.dumps(list(programs(args.site.resolve()))))
         return
-    reference = json.loads(args.reference.read_text()) if args.reference else None
-    only = set(filter(None, args.programs.split(",")))
     command = shlex.split(args.run)
     if "/" in command[0]:  # programs run in a scratch directory
         command[0] = str(Path(command[0]).resolve())
+    if args.action == "refresh":
+        return refresh(args.site.resolve(), command, args.output)
+    reference = json.loads(args.reference.read_text()) if args.reference else None
+    only = set(filter(None, args.programs.split(",")))
     print(json.dumps(measure(args.site.resolve(), command, reference, only)))
 
 

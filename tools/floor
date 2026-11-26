@@ -26,7 +26,7 @@ fuzzdiff process's deadline is MARGIN times those seconds when that is over the 
 With --runs N each corpus runs N times; a test is PASS only if every run passed it, and a
 test whose status changed between runs is listed as flaky in the summary.
 
-Run from the repository root on a built tree. Environment, as tools/status takes it:
+Run from the repository root on a built tree. Environment:
   LUCIFER        the executable under test (default bin/lucifer)
   ORACLE_T       the CPython 3.14t reference interpreter
   HOST_PYTHON    CPython 3.14 for kernelcheck and compilercheck, and for make
@@ -367,7 +367,7 @@ def workloads(mode, flags, work, log):
     """tools/bench/corpus programs against the CPython reference's checks: their output must match."""
     site = ROOT / "build/corpus/site"
     run(["python3", "tools/bench/corpus", "prepare", str(site)], log, prefixed=False)
-    reference = json.loads((ROOT / "results/status-reference.json").read_text())["corpus"]
+    reference = json.loads((ROOT / "results/corpus-reference.json").read_text())
     ref = work / "corpus-reference.json"
     ref.write_text(json.dumps(reference))
     named = {"ok": "PASS", "fail": "FAIL", "wrong": "FAIL", "crash": "CRASH", "timeout": "TIMEOUT",

@@ -24,7 +24,6 @@ import math
 import os
 from pathlib import Path
 import re
-import runpy
 import select
 import shlex
 import signal
@@ -38,7 +37,20 @@ import tomllib
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
-bench_tool = runpy.run_path(str(ROOT / "tools/status"))["bench_tool"]
+BENCH = ROOT / "tools/bench"
+sys.path.insert(0, str(BENCH))
+REFERENCE = ROOT / "results/corpus-reference.json"
+
+
+def bench_tool(name):
+    """Load a benchmark driver with its own globals (cold timing overrides execute)."""
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+
+    loader = SourceFileLoader(name, str(BENCH / name))
+    module = module_from_spec(spec_from_loader(name, loader))
+    loader.exec_module(module)
+    return module
 
 
 def settling(samples):
@@ -276,7 +288,7 @@ def cold_rows(runtime, command, site, scratch, names=None):
     corpus = bench_tool("corpus")
     if runtime == "lucifer" and os.environ.get("LUCIFER_PREFIX"):
         corpus.execute = scoped_cold(shlex.split(os.environ["LUCIFER_PREFIX"]), scratch)
-    reference = json.loads((ROOT / "results/status-reference.json").read_text())["corpus"]
+    reference = json.loads(REFERENCE.read_text())
     for program, (kind, argv) in corpus.programs(site).items():
         if program.partition(".")[0] not in ("startup", "cli"):
             continue
@@ -752,7 +764,7 @@ runpy.run_path(sys.argv[0], init_globals={"__builtins__": builtins}, run_name="_
 @functools.lru_cache(maxsize=4)
 def corpus_inputs(site):
     corpus = bench_tool("corpus")
-    return corpus, corpus.pyperformance(site), json.loads((ROOT / "results/status-reference.json").read_text())["corpus"]
+    return corpus, corpus.pyperformance(site), json.loads(REFERENCE.read_text())
 
 
 @functools.lru_cache(maxsize=None)
