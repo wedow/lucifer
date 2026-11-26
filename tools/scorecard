@@ -170,6 +170,16 @@ import harness
 """
 
 
+def failure_reason(exc):
+    # Subprocess exceptions include the invocation, which can contain the
+    # resource-control command, environment, or a whole generated program.
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"timed out after {exc.timeout:g} s"
+    if isinstance(exc, subprocess.CalledProcessError):
+        return f"command exited {exc.returncode}"
+    return str(exc)
+
+
 def awfy_samples(argv, source, name, driver):
     """Observe the verified worker's flushed result boundaries in the parent."""
     import threading
@@ -241,7 +251,7 @@ def awfy_rows(runtime, command, scratch, names):
             (directory / "series.json").write_text(json.dumps(raw) + "\n")
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             for card in (1, 5):
-                yield dict(card=card, program=program, runtime=runtime, status=str(exc))
+                yield dict(card=card, program=program, runtime=runtime, status=failure_reason(exc))
             continue
 
         timing, warmup = warm_rows(program, runtime, seconds)
@@ -256,7 +266,7 @@ def awfy_rows(runtime, command, scratch, names):
                 warmup.update(awfy_telemetry(runtime, command, source, args, directory, start, driver))
                 warmup["telemetry"] = "ok"
             except (KeyError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
-                warmup["telemetry"] = str(exc)
+                warmup["telemetry"] = failure_reason(exc)
         yield timing
         yield warmup
 
@@ -635,7 +645,7 @@ def flask_rows(runtime, command, site, scratch):
                        concurrent_check='ok' if not problems else ', '.join(problems),
                        cpus=len(cpus), repeats=len(rates), p99_ms=statistics.median(p['p99_ms'] for p in points))
         except (OSError, ValueError, RuntimeError) as exc:
-            yield dict(base, card=2, status=str(exc))
+            yield dict(base, card=2, status=failure_reason(exc))
         try:
             windows = flask_windows(web, args, server_command, cpus, client)
             (out / 'warmup.json').write_text(json.dumps(windows))
@@ -673,7 +683,7 @@ def flask_rows(runtime, command, site, scratch):
                     row['telemetry'] = str(exc)
             yield row
         except (OSError, ValueError, RuntimeError) as exc:
-            yield dict(base, card=5, status=str(exc))
+            yield dict(base, card=5, status=failure_reason(exc))
 
 
 def flask_profile_rows(runtime, command, site, scratch):
@@ -866,7 +876,7 @@ def native_window(pid, sample, scratch):
         samples.update(native_cycles_per_unit=native / completed, user_cycles_per_unit=total / completed,
                        stock_samples=count)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        samples["classification_error"] = str(exc)
+        samples["classification_error"] = failure_reason(exc)
     finally:
         data.unlink(missing_ok=True)
     return samples
@@ -991,9 +1001,9 @@ def corpus_rows(runtime, command, site, scratch, names, classification_root=None
                 classification.write_text(json.dumps(meta))
             raw.update(meta, card=card, group=group)
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
-            yield dict(raw, **meta, status=str(exc))
+            yield dict(raw, **meta, status=failure_reason(exc))
             if card in (1, 2):
-                yield dict(raw, **meta, card=5, status=str(exc))
+                yield dict(raw, **meta, card=5, status=failure_reason(exc))
             continue
         replay, replay_error = {}, ""
         if runtime in ("lucifer", "pypy") and card in (1, 2):
@@ -1003,7 +1013,7 @@ def corpus_rows(runtime, command, site, scratch, names, classification_root=None
                 if sorted(replay) != sorted(tasks):
                     raise ValueError("incomplete event replay")
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
-                replay_error = str(exc)
+                replay_error = failure_reason(exc)
         for task, event in tasks.items():
             ident = program if len(tasks) == 1 else program + "/" + task
             ops = event["ops"]
@@ -1285,7 +1295,8 @@ def arm(section, runtime, site, scratch):
 
 def worker(args):
     site, scratch = args.site.resolve(), args.scratch.resolve()
-    temp = scratch / "tmp"
+    # A caller can supply a shorter scratch path for Unix-domain socket names.
+    temp = Path(os.environ.get("TMPDIR", scratch / "tmp")).resolve()
     temp.mkdir(exist_ok=True)
     os.environ["TMPDIR"] = tempfile.tempdir = str(temp)
     os.environ["PYTHONHASHSEED"] = "0"
