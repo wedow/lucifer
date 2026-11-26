@@ -1037,83 +1037,140 @@ def corpus_rows(runtime, command, site, scratch, names, classification_root=None
                 yield warm
 
 
-def classification_table(rows):
-    inventory = {}
-    startup = bench_tool("corpus").STARTUP
-    for r in rows:
-        if r["runtime"] != "cpython" or r["card"] == 5:
-            continue
-        name = r.get("manifest")
-        if r["program"].removeprefix("startup.") in startup:
-            name = r["program"].split(".")[1]
-        if name:
-            inventory[name] = (r["card"], r.get("group", "fresh process"),
-                               r.get("stock_native_pct"), r.get("stock_samples"), r.get("classification_error"))
-    return inventory
-
-
 def suite_name(row):
-    family = row["program"].partition(".")[0]
-    return row.get("group", family)
+    return row.get("group") or row["program"].partition(".")[0]
 
 
-def summaries(rows, runtime, denominator):
-    """Give each manifest one vote. All of its tasks must have valid matched values."""
-    refs = {r["program"]: r for r in rows if r["card"] != 5 and r["runtime"] == denominator}
-    data = {r["program"]: r for r in rows if r["card"] != 5 and r["runtime"] == runtime}
-    paired = {}
-    for key in data.keys() | refs.keys():
-        row, ref = data.get(key, {}), refs.get(key, {})
-        exemplar = row or ref
-        group = suite_name(exemplar)
-        if group in ("application", "flask", "unmeasured guard") or (
-                "go" in (runtime, denominator) and group != "awfy"):
+def paired_times(rows, reference):
+    """Sum tasks before dividing. An incomplete manifest gets no vote."""
+    suites = {}
+    for row in rows:
+        if int(row["card"]) == 5 or row["runtime"] not in ("lucifer", reference):
             continue
-        ident = exemplar.get("manifest", key)
-        bag = paired.setdefault(group, {}).setdefault(ident, [])
-        bag.append((row.get("seconds") if row.get("status") == "ok" else None,
-                    ref.get("seconds") if ref.get("status") == "ok" else None))
-    result = {}
-    for group, manifests in paired.items():
-        ratios = []
-        for pairs in manifests.values():
-            if all(a and b for a, b in pairs):
-                ratios.append(sum(a for a, _ in pairs) / sum(b for _, b in pairs))
-        result[group] = (statistics.geometric_mean(ratios) if ratios else None, len(ratios), len(manifests))
+        tasks = suites.setdefault(suite_name(row), {}).setdefault(row.get("manifest") or row["program"], {})
+        measurements = tasks.setdefault(row["program"], {})
+        if row["status"] == "ok" and row.get("seconds"):
+            measurements[row["runtime"]] = float(row["seconds"])
+
+    scores = {}
+    for suite, manifests in suites.items():
+        ratios = {}
+        for manifest, tasks in manifests.items():
+            if all("lucifer" in pair and reference in pair for pair in tasks.values()):
+                ratios[manifest] = (sum(p["lucifer"] for p in tasks.values())
+                                    / sum(p[reference] for p in tasks.values()))
+        scores[suite] = (statistics.geometric_mean(ratios.values()) if ratios else None,
+                         set(ratios), set(manifests))
+    return scores
+
+
+def daily_metrics(rows):
+    """Keep the score and the identities behind its numerator and denominator."""
+    stock = paired_times(rows, "cpython")
+    missing = (None, set(), set())
+    scores = {
+        "compute": {label: paired_times(rows, label.lower()).get("awfy", missing) for label in ("Go", "PyPy")},
+        "held-out": {"stock": stock.get("held out", missing)},
+        "web": {},
+        "short": {"CLI": stock.get("cli", missing), "startup": stock.get("startup", missing)},
+        "native": {"majority": stock.get("native majority", missing), "mixed": stock.get("mixed", missing)},
+        "steady": {},
+    }
+    candidate = {r["program"]: r for r in rows if int(r["card"]) == 2 and r["runtime"] == "lucifer"}
+    for name, label in (("flask.1", "1 CPU"), ("flask.8", "8 CPUs")):
+        value = candidate.get(name, {}).get("rps_over_cpython")
+        scores["web"][label] = (float(value) if value else None, {name} if value else set(), {name})
+    series = [r for r in rows if int(r["card"]) == 5]
+    names = {r["program"] for r in series}
+    # A failed multi-task worker can only name the manifest. Other workers provide
+    # its task inventory, so the placeholder must not add an extra series.
+    names -= {n.split("/")[0] for n in names if "/" in n}
+    states = {r["program"]: r["status"] for r in series if r["runtime"] == "lucifer"}
+    settled = {n for n in names if states.get(n) == "ok"}
+    scores["steady"]["settled"] = (len(settled) if names else None, settled, names)
+    unsettled = sum(states.get(n) == "unsettled" for n in names)
+    return scores, f"{unsettled} unsettled, {len(names) - len(settled) - unsettled} unavailable"
+
+
+HEADLINES = {
+    "compute": (1, "Pure-Python compute", "AWFY ≤2× Go and ≤1× PyPy time on all 14"),
+    "held-out": (1, "Held-out real Python programs", "Warm-suite bar ≤0.35× stock and ≤0.72× PyPy"),
+    "web": (2, "Flask throughput vs stock", "≥1.5× stock at both counts, ≥4× scaling, zero errors, p99 ≤stock"),
+    "short": (3, "Short programs vs stock", "Each CLI and startup program ≤1× stock time"),
+    "native": (4, "Native-heavy programs vs stock", "≥10% gain on a second wheel, no bulk regression; "
+               "warm-suite bar ≤0.35× stock"),
+    "steady": (5, "Time to steady state", "Track onset and compile cost; PLAN2 sets no numeric settling target"),
+}
+
+
+def yesterday_metrics(out):
+    try:
+        day = datetime.date.fromisoformat(out.name.removeprefix("scorecard-"))
+    except ValueError:
+        return "", None
+    yesterday = day - datetime.timedelta(days=1)
+    previous = out.parent / f"scorecard-{yesterday}" / "summary.csv"
+    if not previous.is_file():
+        return day.isoformat(), None
+    with previous.open(newline="") as stream:
+        rows = [row for row in csv.DictReader(stream) if row.get("kind", "detail") == "detail"]
+    return day.isoformat(), daily_metrics(rows)[0]
+
+
+def daily_headlines(rows, out):
+    today, settling_counts = daily_metrics(rows)
+    date, yesterday = yesterday_metrics(out)
+    result = []
+    for key, (card, title, target) in HEADLINES.items():
+        scores, counts, changes = [], [], []
+        for label, (value, paired, total) in today[key].items():
+            coverage = f"{len(paired)}/{len(total)}"
+            if key == "steady":
+                scores.append(f"{coverage} settled" if total else "—")
+                counts.append(settling_counts)
+            else:
+                number = "—" if value is None else f"{value:.3g}×"
+                scores.append(f"{label} {number}")
+                counts.append(f"{label} {coverage}")
+            if yesterday is None:
+                continue
+            old, old_pairs, old_total = yesterday[key][label]
+            if value is None or old is None:
+                delta = "—"
+            elif total != old_total or (key != "steady" and paired != old_pairs):
+                delta = "coverage changed"
+            elif key == "steady":
+                delta = f"{value - old:+d} settled"
+            else:
+                delta = f"{100 * (value / old - 1):+.3g}%"
+            changes.append(f"{label} {delta}" if key != "steady" else delta)
+        result.append(dict(kind="headline", card=card, program=key, title=title, target=target, date=date,
+                           score=", ".join(scores), counts=", ".join(counts), change=", ".join(changes) or "—"))
     return result
 
 
-def summary_overview(rows):
-    md = ["## Paired performance", "",
-          "Each program has one vote. For a multi-task program, sum task times before dividing. "
-          "A partial row count limits the ratio to the matched subset.", "",
-          "| Runtime | Reference | Suite | Time ratio | Programs paired / observed |", "|---|---|---|---:|---:|"]
-    present = {r["runtime"] for r in rows}
-    for runtime in sorted(present - {"cpython"}):
-        for label in ("cpython", "pypy", "go"):
-            if runtime == label or label not in present:
-                continue
-            for group, (ratio, passed, total) in sorted(summaries(rows, runtime, label).items()):
-                md.append(f"| {runtime} | {label} | {group} | {cell(ratio)} | {passed}/{total} |")
-    md.extend(["", "## Settling coverage", "", "Each row is a measured AWFY iteration series, "
-               "pyperf task or Flask layout. An unsettled series fails the five-value stability requirement.", "",
-               "| Runtime | Card 5 | Settled | Unsettled | Unavailable or incorrect |",
-               "|---|---|---:|---:|---:|"])
-    for runtime in sorted(present):
-        states = [r["status"] for r in rows if r["runtime"] == runtime and r["card"] == 5]
-        ok, unsettled = states.count("ok"), states.count("unsettled")
-        missing = len(states) - ok - unsettled
-        verdict = "FAIL" if unsettled else "INCOMPLETE" if missing or not states else "PASS"
-        md.append(f"| {runtime} | {verdict} | {ok} | {unsettled} | {missing} |")
-    inventory = classification_table(rows)
-    md.extend(["", "## Pinned pyperformance manifest", "",
-               "A fresh command per operation goes on card 3. In-process programs tagged apps or template "
-               "go on card 2. Of the rest, a stock warm native-operation share below 5% goes on card 1 "
-               "and is held out prospectively. Card 4 separates native-majority (>50%), mixed, and unmeasured rows.", "",
-               "| Program | Card | Group | Native cycles (%) | Samples |", "|---|---:|---|---:|---:|"])
-    for name, (card, group, pct, samples, _) in sorted(inventory.items()):
-        md.append(f"| {name} | {card} | {group} | {cell(pct)} | {cell(samples)} |")
-    return md + [""]
+def headline_table(headlines):
+    lines = ["## Scorecards", "", "Stock is CPython 3.14t. Ratios compare Lucifer time except for Flask, "
+             "which compares requests/s on disjoint server and client CPUs. Each paired manifest has one vote. "
+             "Change compares the same programs with yesterday's ratios; a dash means no comparable measurement.", "",
+             "| Card | Lucifer | Paired / observed | Target | Change since yesterday |", "|---|---|---|---|---|"]
+    for card in range(1, 6):
+        group = [h for h in headlines if h["card"] == card]
+        cells = [" / ".join(h["title"] for h in group)]
+        for field in ("score", "counts", "target", "change"):
+            cells.append("<br>".join(h[field] for h in group))
+        lines.append("| " + " | ".join([f"{card}. {cells[0]}", *cells[1:]]) + " |")
+    return lines + [""]
+
+
+def read_gates(path):
+    if path is None:
+        return []
+    with path.open(newline="") as stream:
+        reader = csv.DictReader(stream)
+        if not {"program", "status"} <= set(reader.fieldnames or []):
+            raise ValueError("gate CSV needs program and status columns")
+        return [dict(row, kind="gate") for row in reader]
 
 
 def repeatability(site, scratch):
@@ -1257,25 +1314,21 @@ def markdown_table(rows, columns):
     return header + ["| " + " | ".join(cell(row.get(key)) for key in columns) + " |" for row in rows] + [""]
 
 
-def write_summary(out, rows, issues, source, elapsed):
+def write_summary(out, rows, issues, source, elapsed, gates_path=None):
     public = bench_tool("awfy").public_data
     rows = sorted((public(row) for row in rows), key=lambda row: (row["card"], row["program"], row["runtime"]))
     add_ratios(rows)
-    first = ["card", "program", "runtime", "status", "seconds", "over_cpython", "over_pypy", "over_go"]
-    fields = first + sorted(set().union(*(r.keys() for r in rows)) - set(first))
+    headlines = daily_headlines(rows, out)
+    gates = public(read_gates(gates_path))
+    records = headlines + [dict(r, kind="detail") for r in rows] + gates
+    first = ["kind", "card", "program", "runtime", "status", "score", "counts", "date"]
+    fields = first + sorted(set().union(*(r.keys() for r in records)) - set(first))
     with (out / "summary.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fields)
         writer.writeheader()
-        writer.writerows(rows)
-    lines = ["# Runtime scorecards", "", f"Source revision `{source}`.", "",
-             "Time ratios use matched successful rows. Blanks denote missing observations. "
-             "The CSV retains diagnostics, including the final five values’ median when a run fails to settle.", ""]
-    if elapsed:
-        lines.extend([f"The {len(elapsed)} daily arms took {sum(elapsed.values()) / 60:.1f} minutes "
-                      "including queue waits. Paired repeats are a separate run.", ""])
-    if issues:
-        lines.extend(["## Incomplete arms", "", *["- " + issue for issue in issues], ""])
-    lines.extend(summary_overview(rows))
+        writer.writerows(records)
+    lines = ["# Runtime scorecards", "", f"Source revision `{source}`.", ""]
+    lines.extend(headline_table(headlines))
     titles = ["Pure Python", "Application paths", "Short programs", "Native and mixed workloads", "Time to steady state"]
     descriptions = [
         "Seconds per verified AWFY iteration or pyperf operation in the steady suffix. "
@@ -1283,7 +1336,7 @@ def write_summary(out, rows, issues, source, elapsed):
         "Flask reports the median of three fresh servers at each layout. Its profiling row uses a separate warm server. "
         "Counts are per completed request or pyperf operation. The six percentages partition leaf cycle samples. "
         "Shared-client layouts are diagnostic, and failed requests disqualify a gate.",
-        "Whole-process wall time at the status suite's fixed work and output checks. "
+        "Whole-process wall time at the corpus's fixed work and output checks. "
         "The CLI, startup and additional fresh-process workers have separate denominators.",
         "Median time over the final five values. The stock native share includes callees up to Python re-entry. "
         "Score native-majority, mixed and boxed boundary calls separately.",
@@ -1294,8 +1347,8 @@ def write_summary(out, rows, issues, source, elapsed):
     for card, title in enumerate(titles, 1):
         group = [r for r in rows if r["card"] == card]
         columns = ["program", "runtime", "status"]
-        columns += {1: ["seconds","over_cpython","over_pypy","over_go","final_s"],
-                    2: ["ops_per_s","final_ops_per_s","rps","rps_min","rps_max","rps_over_cpython","scaling","p99_ms","errors"],
+        columns += {1: ["group","seconds","over_cpython","over_pypy","over_go","final_s"],
+                    2: ["ops_per_s","over_cpython","final_ops_per_s","rps","rps_min","rps_max","rps_over_cpython","scaling","p99_ms","errors"],
                     3: ["seconds","over_cpython"], 4: ["seconds","over_cpython","group","stock_native_pct"],
                     5: ["first_steady_op","warmup_s","compile_ms","post_compile_ms","post_rebuilds","post_kills"]}[card]
         lines.extend([f"## {card}. {title}", "", descriptions[card-1], ""])
@@ -1318,6 +1371,29 @@ def write_summary(out, rows, issues, source, elapsed):
         lines.extend(["## Paired repeatability", "", "Low and high are the observed Lucifer/stock ratios "
                       "in five interleaved pairs. Spread is 100 × (high/low − 1). A final_s range is diagnostic.", ""])
         lines.extend(markdown_table(repeats, ["card", "program", "metric", "pairs", "low", "high", "spread_pct"]))
+    lines.extend(["## Gates", ""])
+    if gates:
+        lines.extend(markdown_table(gates, ["program", "status", "score", "counts", "date", "detail"]))
+    else:
+        lines.extend(["Correctness gates were not supplied.", ""])
+    lines.extend(["## Problems", ""])
+    problems = list(public(issues))
+    for gate in gates:
+        if gate["status"] not in ("pass", "measured"):
+            problems.append(f"{gate['program']}: {gate['status']} {gate.get('detail', '')}".rstrip())
+    # List every affected observation once per reason; detailed values remain in the card tables.
+    affected = {}
+    for row in rows:
+        for field in ("status", "profile_status", "classification_error", "telemetry"):
+            reason = row.get(field)
+            if reason and reason != "ok":
+                affected.setdefault((row["card"], row["runtime"], reason), set()).add(row["program"])
+    for (card, runtime, reason), names in sorted(affected.items()):
+        problems.append(f"Card {card}, {runtime}, {reason}: {', '.join(sorted(names))}")
+    lines.extend(["- " + cell(problem) for problem in problems] or ["None recorded."])
+    if elapsed:
+        lines.extend(["", f"The {len(elapsed)} measurement arms took {sum(elapsed.values()) / 60:.1f} "
+                      "minutes including queue waits."])
     (out / "summary.md").write_text("\n".join(lines) + "\n")
 
 
@@ -1333,6 +1409,7 @@ def main():
     p.add_argument("--scratch", type=Path, default=ROOT / "build/scorecard")
     p.add_argument("--repeatability", type=Path, metavar="RUN",
                    help="measure five paired repeats on representative rows of a previous run, then render it")
+    p.add_argument("--gates", type=Path, metavar="CSV", help="include the daily correctness gate results")
     p.add_argument("--summarize", type=Path, metavar="RUN", help="render a completed scratch run again")
     p.add_argument("--section", choices=["awfy","corpus","web","profile","repeat"], help=argparse.SUPPRESS)
     p.add_argument("--receipt", type=Path, help=argparse.SUPPRESS)
@@ -1360,7 +1437,7 @@ def main():
         if receipt.is_file():
             repeat_fields(rows, [json.loads(line) for line in receipt.read_text().splitlines()])
         args.output.mkdir(parents=True, exist_ok=True)
-        write_summary(args.output, rows, meta["issues"], meta["revision"], meta["elapsed_s"])
+        write_summary(args.output, rows, meta["issues"], meta["revision"], meta["elapsed_s"], args.gates)
         return int(bool(meta["issues"]))
     if args.section:
         if args.receipt is None:
@@ -1411,7 +1488,7 @@ def main():
             rows.extend(json.loads(line) for line in receipt.read_text().splitlines())
         elapsed[label] = round(time.monotonic() - started, 3)
         (scratch / "run.json").write_text(json.dumps(dict(revision=source, runtime_sha256=runtime_sha256, issues=issues, elapsed_s=elapsed), indent=2))
-    write_summary(args.output, rows, issues, source, elapsed)
+    write_summary(args.output, rows, issues, source, elapsed, args.gates)
     return int(bool(issues))
 
 
