@@ -87,7 +87,9 @@ EXPORTS = results/abi/cp314t-exports.tsv
 # TMO bounds one program, STEP_TMO a whole tool run; override on the command line.
 TMO = 120
 STEP_TMO = 3600
-RUN = timeout -k 10 $(TMO)
+# Gate drivers take a single executable, which can be a resource-control wrapper.
+CHECK_PYTHON ?= bin/lucifer
+RUN ?= timeout -k 10 $(TMO)
 STEP = timeout -k 10 $(STEP_TMO)
 
 .PHONY: all oracle-exts fuzzdiff abi-audit check check-jit check-kernel-jit check-blocking check-globals check-capi check-capi-ext check-capi-so check-kernel check-embed regen-abi check-harness check-compiler check-timing
@@ -342,24 +344,24 @@ check-harness:
 
 check-kernel: bin/lucifer build/lib/stamp oracle-exts $(STDLIB_EXT_FILES)
 	$(STEP) $(HOST_PYTHON) tools/kernelcheck --opcodes
-	$(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer \
+	$(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer $(CHECK_PYTHON) \
 	  --programs "$(PROGRAMS)" $(if $(LANE),--lane $(LANE))
 
 # tests/kernel with every function compiled at its first call, then with every
 # 7th guard failing as well: the lanes every landing runs.
 check-kernel-jit: bin/lucifer build/lib/stamp oracle-exts $(STDLIB_EXT_FILES)
 	for lane in jit jit-deopt; do \
-	  $(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer bin/lucifer --lane $$lane || exit 1; \
+	  $(STEP) $(HOST_PYTHON) tools/kernelcheck --oracle $(ORACLE_T) --lucifer $(CHECK_PYTHON) --lane $$lane || exit 1; \
 	done
 
 # The optimizing tier on AWFY in every JIT mode, then the difftest corpus with
 # every function compiled at its first call, without and with failing guards.
 DIFFTEST_JIT = always:'-X lucifer_jit=always' deopt:'-X lucifer_jit=always -X lucifer_stress=deopt:7'
 check-jit: bin/lucifer build/lib/stamp $(STDLIB_EXT_FILES)
-	$(STEP) python3 tools/jitcheck --lucifer bin/lucifer --oracle $(ORACLE_T)
+	$(STEP) python3 tools/jitcheck --lucifer $(CHECK_PYTHON) --oracle $(ORACLE_T)
 	@for m in $(DIFFTEST_JIT); do \
 	  name=$${m%%:*}; flags=$${m#*:}; \
-	  $(STEP) python3 tools/difftest run --oracle $(ORACLE_T) --python "bin/lucifer $$flags" --runtime lucifer \
+	  $(STEP) python3 tools/difftest run --oracle $(ORACLE_T) --python "$(CHECK_PYTHON) $$flags" --runtime lucifer \
 	    --results build/difftest/$$name --work build/difftest/$$name/work || { echo "FAIL difftest $$name"; exit 1; }; \
 	  echo "PASS difftest $$name"; \
 	done
