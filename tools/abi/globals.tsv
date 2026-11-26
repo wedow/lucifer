@@ -245,3 +245,5 @@ whys.*	runtime/jit/deps.c	const table of the dependency kinds' names, for LUCIFE
 tallies	runtime/jit/jit.c	LUCIFER_JIT_DEBUG's counts of exits and kept entries by site, printed at exit; process-wide like the units, under its lock
 clocks.*	runtime/jit/jit.c	whether LUCIFER_JIT_DEBUG's event log has printed its realtime and monotonic pair; set once per process, a race only prints the pair twice
 plain_lock	runtime/prim/type.c	serializes refreshes of a type's plain-allocation bit, so the last refresh reads every slot write before it; one lock for all types
+attr_lock	runtime/types/slots.c	serializes deciding a type's attribute slots with storing its protocol word, for every type; process-wide because static types are, and unlocked between its short sections, so a new interpreter finds it free
+states	runtime/jit/jit.c	the codes whose JIT state holds references, for the collector; process-wide like the units, under its own mutex; a code leaves in its dealloc, so after Py_Finalize the list still holds only live codes
