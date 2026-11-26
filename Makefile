@@ -307,7 +307,9 @@ EMBED_PROGRAMS = 'import os; x = 1; print("first", x)' \
 	'print("second", globals().get("x"))' \
 	'import atexit; atexit.register(print, "exit"); d = type("D", (), {"__del__": lambda s: print("del")})()' \
 	'1 / 0' \
-	'print("after error")'
+	'print("after error")' \
+	'import types; m = types.ModuleType("m"); m.__getattr__ = str.upper; C = type("C", (), {"__getattr__": lambda s, n: n}); print(int.real, m.x, C().y, getattr(m, "z"))' \
+	'import gc; f = lambda n: sum(i * i for i in range(n)); print([f(200) for _ in range(3000)][-1], gc.collect() >= 0)'
 
 build/tests/embed/run: tests/embed/run.c build/liblucifer.a
 	@mkdir -p $(@D)

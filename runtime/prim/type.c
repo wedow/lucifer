@@ -1166,7 +1166,10 @@ lu_types_init(PyInterpreterState *interp)
         if (state->tp_dict != NULL) {
             continue;
         }
-        /* Kernel Python fills most; a type written in C has its methods and doc. */
+        /* Kernel Python fills most; a type written in C has its methods and doc.
+           The attribute word read the last interpreter's dict: undecided
+           until this one's boot ends (lu_attr_boot). */
+        __atomic_fetch_and(&(*t)->tp_flags, ~LU_TPFLAGS_ATTR, __ATOMIC_RELAXED);
         PyObject *doc = (*t)->tp_doc != NULL ? PyUnicode_FromString((*t)->tp_doc) : Py_NewRef(Py_None);
         int err = doc == NULL || (state->tp_dict = PyDict_New()) == NULL
             || lu_ns_insert(state->tp_dict, LU_ID(__doc__), doc) < 0
