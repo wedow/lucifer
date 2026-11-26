@@ -1324,7 +1324,7 @@ def write_summary(out, rows, issues, source, elapsed, gates_path=None):
     first = ["kind", "card", "program", "runtime", "status", "score", "counts", "date"]
     fields = first + sorted(set().union(*(r.keys() for r in records)) - set(first))
     with (out / "summary.csv").open("w", newline="") as f:
-        writer = csv.DictWriter(f, fields)
+        writer = csv.DictWriter(f, fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(records)
     lines = ["# Runtime scorecards", "", f"Source revision `{source}`.", ""]
