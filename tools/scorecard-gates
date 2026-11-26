@@ -19,7 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKS = ('check-fast-float', 'check-blocking', 'check-globals', 'check-capi',
           'check-kernel', 'check-kernel-jit', 'check-embed', 'check-jit')
 FIELDS = ('program', 'status', 'score', 'counts', 'date', 'detail')
-KERNEL_COUNT = re.compile(r'^(\d+)/(\d+) checks pass \((plain|jit|jit-deopt)\)$', re.M)
+KERNEL_COUNT = re.compile(r'^(\d+)/(\d+) checks pass \(([\w-]+)\)$', re.M)
+FAILURE_ID = re.compile(r'^(?:FAIL |unexplained writable global: )([A-Za-z_][A-Za-z0-9_.-]*)(?=[:\s]|$)', re.M)
+
+
+def all_notrun(log):
+    # The suite drivers return zero when their startup probe marks every case NOTRUN.
+    return re.search(r"^(?:numpytest )?lucifer \{'NOTRUN': \d+\}$", log.read_text(errors='replace'), re.M)
 
 
 def result(name, code, detail=''):
@@ -38,32 +44,34 @@ def incomplete(name, detail):
 
 def lanes(name, found, expected, measured):
     missing = [lane for lane in expected if lane not in found]
+    details = [f'{k} {passed}/{total}' for k, (passed, total) in found.items()]
     if missing:
-        return incomplete(name, 'missing ' + ', '.join(missing))
+        return incomplete(name, ', '.join(details + ['missing ' + ', '.join(missing)]))
     if any(not total for _, total in found.values()):
         return incomplete(name, 'empty lane')
     passed, total = min(found.values(), key=lambda pair: pair[0] / pair[1])
-    counts = f'{passed:,} of {total:,}, {len(expected)} modes (worst lane)'
+    counts = f'{passed:,} of {total:,}, {len(found)} modes (worst lane)'
     row = share(name, passed, total, counts, measured)
-    row['detail'] = ', '.join(f'{k} {found[k][0]}/{found[k][1]}' for k in expected)
+    row['detail'] = ', '.join(details)
     return row
 
 
 def weekly_counts(board):
-    suites = {r['suite']: {} for r in board}
-    for row in board:
-        suites[row['suite']][row['runtime']] = row
+    suites = {(r['suite'], r['runtime']): r for r in board}
     for name, suite in [('libtest', 'libtest'), ('numpy', 'numpytest')]:
         folder = ROOT / 'results' / suite
         try:
-            rows = suites[suite]
-            passed = int(rows['lucifer']['PASS'])
+            row = suites[suite, 'lucifer']
+            if int(row['NOTRUN']) == int(row['total']):
+                yield incomplete(name, 'no cases ran')
+                continue
+            passed = int(row['PASS'])
             if name == 'libtest':
-                total = int(rows['cpython-3.14.10t']['PASS'])
+                total = int(suites[suite, 'cpython-3.14.10t']['PASS'])
                 counts = f"{passed:,} of CPython's {total:,}"
                 sources = [folder / 'lucifer.json']
             else:
-                total = int(rows['lucifer']['total'])
+                total = int(row['total'])
                 counts = f'{passed:,} of {total:,} collected'
                 sources = folder.glob('lucifer-*.json')
             # The numpy manifest merges shards. Its date is the most recent shard update.
@@ -93,20 +101,25 @@ def run_gates(day, logs):
     kernel = {}
     for name in CHECKS:
         code = run(name, ['make', name, *flags])
-        detail = ''
-        if name.startswith('check-kernel'):
-            output = (logs / f'{name}.log').read_text(errors='replace')
-            for passed, total, lane in KERNEL_COUNT.findall(output):
-                kernel[lane] = (int(passed), int(total))
-            if name == 'check-kernel-jit' and code and 'jit' in kernel and 'jit-deopt' not in kernel:
-                # make stops at the first red lane. Still measure the other one for the record.
-                rc = run('jit-deopt', [os.environ['HOST_PYTHON'], 'tools/kernelcheck', '--oracle',
-                                        os.environ['ORACLE_T'], '--lucifer', runtime, '--lane', 'jit-deopt'])
-                output = (logs / 'jit-deopt.log').read_text(errors='replace')
-                for passed, total, lane in KERNEL_COUNT.findall(output):
-                    kernel[lane] = (int(passed), int(total))
-                detail = f'exit {code}, remaining jit-deopt lane exited {rc}'
-        yield result(name, code, detail)
+        output = (logs / f'{name}.log').read_text(errors='replace')
+        detail = []
+        counts = KERNEL_COUNT.findall(output) if name.startswith('check-kernel') else []
+        reported = {lane for _, _, lane in counts}
+        if name == 'check-kernel-jit' and code and 'jit' in reported and 'jit-deopt' not in reported:
+            # make stops at the first red lane. Still measure the other one for the record.
+            rc = run('jit-deopt', [os.environ['HOST_PYTHON'], 'tools/kernelcheck', '--oracle',
+                                    os.environ['ORACLE_T'], '--lucifer', runtime, '--lane', 'jit-deopt'])
+            rest = (logs / 'jit-deopt.log').read_text(errors='replace')
+            output += '\n' + rest
+            counts.extend(KERNEL_COUNT.findall(rest))
+            detail.append(f'remaining jit-deopt lane exited {rc}')
+        for passed, total, lane in counts:
+            kernel[lane] = (int(passed), int(total))
+        if code:
+            detail.insert(0, f'exit {code}')
+            # Publish just the test or symbol names. Raw output can contain local paths.
+            detail.extend(dict.fromkeys(FAILURE_ID.findall(output)))
+        yield result(name, code, ', '.join(detail))
     yield lanes('kernel', kernel, ('plain', 'jit', 'jit-deopt'), day.isoformat())
 
     diff = {}
@@ -125,7 +138,8 @@ def run_gates(day, logs):
                                    runtime, '--runtime', 'lucifer', '--source', 'installed',
                                    '--raw-dir', str(logs / 'libtest'), '--jobs', os.getenv('LIBTEST_JOBS', '6')],
                    os.getenv('LIBTEST_PREFIX', prefix))
-        yield result('run-libtest', code)
+        no_cases = all_notrun(logs / 'run-libtest.log')
+        yield result('run-libtest', code or no_cases, 'no cases ran' if no_cases else '')
     elif day.isoweekday() == 7:
         args = {k: os.getenv('NUMPY_' + k.upper()) for k in ('site', 'cache', 'work')}
         if all(args.values()):
@@ -138,7 +152,9 @@ def run_gates(day, logs):
                 code = run(f'numpy-{index}', [sys.executable, 'tools/numpytest/run.py', 'run', '--python',
                                               runtime, '--runtime', 'lucifer', '--site', args['site'],
                                               '--cache', args['cache'], '--work', args['work'], '--shard', shard])
-                if code:
+                if all_notrun(logs / f'numpy-{index}.log'):
+                    failed.append(f'{shard} (no cases ran)')
+                elif code:
                     failed.append(f'{shard} (exit {code})')
             yield result('run-numpy', len(failed), f'{len(shards)} shards, {len(failed)} failed' +
                          (': ' + ', '.join(failed) if failed else ''))
@@ -148,7 +164,9 @@ def run_gates(day, logs):
     code = run('scoreboard', [sys.executable, 'tools/scoreboard'])
     yield result('scoreboard', code)
     with (logs / 'scoreboard.log').open(errors='replace') as file:
-        yield from weekly_counts(list(csv.DictReader(file, delimiter='\t')) if not code else [])
+        lines = (line for line in file if line.startswith(('suite\t', 'libtest\t', 'numpytest\t')))
+        board = csv.DictReader(lines, delimiter='\t')
+        yield from weekly_counts(board if not code and 'suite' in (board.fieldnames or []) else [])
 
     code = run('abi-audit', ['make', 'abi-audit', *flags])
     yield result('abi-audit', code)

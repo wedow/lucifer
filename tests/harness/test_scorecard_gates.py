@@ -31,7 +31,7 @@ class ScorecardGatesTest(unittest.TestCase):
             (folder / metadata).write_text(json.dumps({'recorded_at': '2026-11-15T04:05:06+00:00'}))
         self.prefix = self.root / 'prefix'
         self.prefix.write_text('''#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 from pathlib import Path
 call = sys.argv[1:]
 with open('calls.jsonl', 'a') as log:
@@ -43,28 +43,39 @@ if call[0] == 'make':
     if target == 'check-kernel':
         print('10/10 checks pass (plain)')
     if target == 'check-kernel-jit':
+        print('FAIL sample_case: exit 1 at /private/example')
         print('9/10 checks pass (jit)')
-        print('10/10 checks pass (jit-deopt)')
+        if not os.getenv('SKIP_DEOPT'):
+            print('10/10 checks pass (jit-deopt)')
         sys.exit(2)
     if target == 'check-jit':
         for name in ('always', 'deopt'):
             folder = Path('build/difftest') / name
             folder.mkdir(parents=True, exist_ok=True)
             (folder / 'lucifer.tsv').write_text('id\\tstatus\\tseconds\\na\\tPASS\\t0\\n')
+elif 'tools/kernelcheck' in call:
+    print('8/10 checks pass (jit-deopt)')
 elif '--shard' in call:
+    if os.getenv('STARTUP_REFUSED'):
+        print("numpytest lucifer {'NOTRUN': 2}")
+        sys.exit(0)
     sys.exit(int(call[-1] == 'alpha'))
 elif 'tools/libtest/run.py' in call:
+    if os.getenv('STARTUP_REFUSED'):
+        print("lucifer {'NOTRUN': 2}")
+        sys.exit(0)
     sys.exit(3)
 else:
-    import os
+    if os.getenv('PREFIX_BANNER'):
+        print('command started by test wrapper', flush=True)
     os.execvp(call[0], call)
 ''')
         self.prefix.chmod(0o755)
 
-    def record(self, date):
+    def record(self, date, **extra_env):
         path = self.root / 'build' / 'gates.csv'
         env = dict(os.environ, TEST_PREFIX=str(self.prefix), ORACLE_T='oracle',
-                   HOST_PYTHON='host-python', NUMPY_SITE='site', NUMPY_CACHE='cache', NUMPY_WORK='raw')
+                   HOST_PYTHON='host-python', NUMPY_SITE='site', NUMPY_CACHE='cache', NUMPY_WORK='raw', **extra_env)
         done = subprocess.run([sys.executable, self.root / 'tools/scorecard-gates',
                                '--date', date, '--output', path], cwd=self.root, env=env,
                               capture_output=True, text=True)
@@ -81,6 +92,8 @@ else:
             self.assertTrue(any(call[:2] == ['make', target] and 'ORACLE_T=oracle' in call
                                 and 'HOST_PYTHON=host-python' in call for call in calls), target)
         self.assertEqual(rows['check-kernel-jit']['status'], 'fail')
+        self.assertIn('sample_case', rows['check-kernel-jit']['detail'])
+        self.assertNotIn('private', rows['check-kernel-jit']['detail'])
         self.assertEqual(rows['kernel']['score'], '90.0%')
         self.assertIn('3 modes', rows['kernel']['counts'])
         self.assertEqual(rows['differential']['score'], '100.0%')
@@ -89,6 +102,23 @@ else:
             self.assertEqual(rows[suite]['date'], '2026-11-15')
             self.assertEqual(rows[suite]['score'], '50.0%')
         self.assertFalse(any('--shard' in call or '--source' in call for call in calls))
+
+    def test_remaining_kernel_lane_runs_after_first_failure(self):
+        rows, calls = self.record('2026-11-25', SKIP_DEOPT='1')
+        self.assertTrue(any('tools/kernelcheck' in c and 'jit-deopt' in c for c in calls))
+        self.assertEqual(rows['check-kernel-jit']['status'], 'fail')
+        self.assertEqual(rows['kernel']['score'], '80.0%')
+
+    def test_prefixed_scoreboard_accepts_banner(self):
+        rows, _ = self.record('2026-11-25', PREFIX_BANNER='1')
+        self.assertEqual(rows['numpy']['score'], '50.0%')
+
+    def test_weekend_startup_refusal_is_visible_even_when_driver_exits_zero(self):
+        for day, gate in [('2026-11-21', 'run-libtest'), ('2026-11-22', 'run-numpy')]:
+            with self.subTest(gate=gate):
+                rows, _ = self.record(day, STARTUP_REFUSED='1')
+                self.assertEqual(rows[gate]['status'], 'fail')
+                self.assertIn('no cases ran', rows[gate]['detail'])
 
     def test_saturday_runs_installed_libtest_and_reports_failure(self):
         rows, calls = self.record('2026-11-21')
