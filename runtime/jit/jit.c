@@ -62,11 +62,9 @@
 #include <unistd.h>
 
 /* nospec bits. */
-#define NOSPEC 1
 #define NOHOIST 2
 #define CATCH 4                 /* at a kernel handler: what a call raises under it is taken in the unit */
 #define RAISES 8                /* at an instruction: what it raises leaves the unit, which returns it */
-#define NOBORROW 16             /* at an OSR entry: its entry values are counted (opt.c borrow_items) */
 /* What a rebuild is worth. A unit is built again to give up a guard that
    keeps failing, to take in what its root learned since its build, or to
    take calls in line; each is made once what the unit loses meanwhile
@@ -434,14 +432,21 @@ int
 lu_jit_noborrow(PyCodeObject *code, int pc)
 {
     struct lu_jit_code *jc = state_of(code);
-    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & NOBORROW);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & LU_MARK_NOBORROW);
 }
 
 int
 lu_jit_nospec(PyCodeObject *code, int pc)
 {
     struct lu_jit_code *jc = state_of(code);
-    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & NOSPEC);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & LU_MARK_NOSPEC);
+}
+
+int
+lu_jit_nofield(PyCodeObject *code, int pc)
+{
+    struct lu_jit_code *jc = state_of(code);
+    return jc != NULL && pc >= 0 && pc < jc->ncode && (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & LU_MARK_NOFIELD);
 }
 
 int
@@ -2222,7 +2227,7 @@ guard_site(struct lu_deopt *d, int *pc)
 static int
 marked_since(struct lu_jit_code *jc, int pc, struct lu_deopt *d)
 {
-    return (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & (d->borrow ? NOBORROW : NOSPEC))
+    return (__atomic_load_n(&jc->nospec[pc], __ATOMIC_RELAXED) & d->guard_mark)
         && d->unit->built < __atomic_load_n(&jc->marked, __ATOMIC_RELAXED);
 }
 
@@ -2332,28 +2337,28 @@ lu_jit_note_exit(struct lu_deopt *d)
     int marked = d->reason == EXIT_GUARD && marked_since(jc, site_pc, d);
     double price = marked ? 0 : kills_cost(root);
     if (marked || n >= price) {
-        int again;
+        int again, reason;
         if (caught >= 0) {
             /* A kernel handler keeps taking what a call raises: the unit is
                built to take it there itself. */
             struct lu_jit_code *hc = state_for(inner->code);
+            reason = 0;
             again = __atomic_fetch_or(&hc->nospec[caught], CATCH, __ATOMIC_RELAXED) & CATCH;
         }
         else if (out) {
             /* What it raises keeps leaving the unit: the unit returns it. */
+            reason = 1;
             again = __atomic_fetch_or(&jc->nospec[site_pc], RAISES, __ATOMIC_RELAXED) & RAISES;
         }
         else if (d->reason != EXIT_GUARD) {
             /* The inlined copy keeps leaving here: it is called instead from
                now on (and if that call leaves its caller's copy, the caller next). */
+            reason = 2;
             again = __atomic_exchange_n(&jc->noinline, 1, __ATOMIC_RELAXED);
         }
-        else if (d->borrow) {
-            /* An entry value keeps not being its holder's item: the loop counts it. */
-            again = __atomic_fetch_or(&jc->nospec[site_pc], NOBORROW, __ATOMIC_RELAXED) & NOBORROW;
-        }
         else {
-            again = __atomic_fetch_or(&jc->nospec[site_pc], NOSPEC, __ATOMIC_RELAXED) & NOSPEC;
+            reason = d->guard_mark == LU_MARK_NOBORROW ? 3 : d->guard_mark == LU_MARK_NOFIELD ? 5 : 4;
+            again = __atomic_fetch_or(&jc->nospec[site_pc], d->guard_mark, __ATOMIC_RELAXED) & d->guard_mark;
         }
         /* Every unit of the root code dies and recompiles after its wait.
            A dead unit still running (a recursion's older activations) that
@@ -2376,10 +2381,10 @@ lu_jit_note_exit(struct lu_deopt *d)
             return;
         }
         say_recompile(code, d->reason != EXIT_GUARD ? "inlined copy leaves" : "guard fails", site, site_pc);
-        static const char *const whys[2][5] = {
-            { "mark-catch", "mark-raises", "mark-noinline", "mark-noborrow", "mark-nospec" },
-            { "old-unit-catch", "old-unit-raises", "old-unit-noinline", "old-unit-noborrow", "old-unit-nospec" } };
-        const char *why = whys[again != 0][caught >= 0 ? 0 : out ? 1 : d->reason != EXIT_GUARD ? 2 : d->borrow ? 3 : 4];
+        static const char *const whys[2][6] = {
+            { "mark-catch", "mark-raises", "mark-noinline", "mark-noborrow", "mark-nospec", "mark-nofield" },
+            { "old-unit-catch", "old-unit-raises", "old-unit-noinline", "old-unit-noborrow", "old-unit-nospec", "old-unit-nofield" } };
+        const char *why = whys[again != 0][reason];
         rides(root, 1);
         for (struct lu_unit *u = __atomic_load_n(&root->units, __ATOMIC_ACQUIRE); u != NULL; u = u->next) {
             /* An old unit's death buys nothing: the mark was bought. */

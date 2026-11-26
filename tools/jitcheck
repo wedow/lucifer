@@ -181,6 +181,8 @@ require that a count of the tier's does not grow with the iterations:
   slices tests/kernel/jit_slices.py, whose hot loop slices strs, bytes,
          lists and tuples by bounds it computes: the ints compiled code
          allocates. The bounds stay unboxed (luc-14n0).
+  sharedfield tests/kernel/jit_shared_field.py, whose loop reads a slot
+         and an inline field holding another thread's values: guard exits.
   guards tests/kernel/jit_guards.py, whose hot loop's guards check what a
          writer can change (a global, a function's code, a class
          attribute) or what never changes (the range iterator's type):
@@ -475,6 +477,7 @@ GROWTH = {
     'forward': ('jit_forward_calls.py', r'jit: allocations by kind: .*tuple (\d+), list (\d+), dict (\d+)', 0),
     'literalmethods': ('jit_literal_methods.py', r'jit: executed:.* helper (\d+)', 2),
     'slices': ('jit_slices.py', r'jit: allocations by kind: int (\d+)', 0),
+    'sharedfield': ('jit_shared_field.py', r'exits guard (\d+)', 0),
     'guards': ('jit_guards.py', r'jit: unit hot@\d+ entries \d+ guards (\d+)', 0),
     'inlined': ('jit_inlined_frames.py', r'direct calls (\d+), compiled calls (\d+)', 1),
     'gens': ('jit_gen_resumes.py', r'jit: generator resumes interpreted (\d+)', 0),
@@ -600,7 +603,7 @@ def check_growth(args, lane):
                 problems.append(f'{tag}compiled code did {done[0]} at {GROWTH_N} iterations, {done[1]} at {2 * GROWTH_N}')
         own = qualnames(program)
         given_up = own & {name for pair in small[3] for name in pair if name}
-        if lane in ('calls', 'super', 'rebind', 'phases', 'bitexc', 'imports') and given_up:
+        if lane in ('calls', 'super', 'rebind', 'phases', 'bitexc', 'imports', 'sharedfield') and given_up:
             problems.append(f"{tag}disabled or retired: {' '.join(sorted(given_up))}")
         seen.append(f'{small[2]}, {large[2]}')
     if lane in NOT_BUILT and not any('output differs' in p or 'no stats' in p for p in problems):

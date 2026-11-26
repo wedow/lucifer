@@ -126,6 +126,13 @@ enum lu_exit_reason {
     EXIT_REASONS
 };
 
+/* The site policy bought by an ordinary guard's failures. */
+enum lu_guard_mark {
+    LU_MARK_NOSPEC = 1,
+    LU_MARK_NOBORROW = 16,      /* count the OSR entry value */
+    LU_MARK_NOFIELD = 32,       /* read a slot or inline field through generic lookup */
+};
+
 struct lu_deopt {
     struct lu_unit *unit;       /* the unit it leaves */
     PyCodeObject *blame_code;   /* a guard that speculates for another site: the site */
@@ -146,7 +153,7 @@ struct lu_deopt {
     uint8_t reason;             /* enum lu_exit_reason */
     uint8_t opcode;             /* the base opcode at the exit, for the counts */
     uint8_t tier;
-    uint8_t borrow;             /* an entry value is not its holder's item (ENTRY_BORROW): counts as NOBORROW */
+    uint8_t guard_mark;         /* enum lu_guard_mark for EXIT_GUARD */
     uint8_t regs;               /* published by a slow path that saved every register at the frame's jit_regs */
     uint8_t visible;            /* an inlined frame is a user's: a walker makes the frames real */
     uint8_t catchable;          /* error: a helper's failure, which a rebuild can take in the unit (eval_exc.c) */
@@ -293,6 +300,7 @@ void lu_jit_nohoist_set(PyCodeObject *code, int pc);
 int lu_jit_nohoist(PyCodeObject *code, int pc);
 int lu_jit_nospec(PyCodeObject *code, int pc);
 int lu_jit_noborrow(PyCodeObject *code, int pc);
+int lu_jit_nofield(PyCodeObject *code, int pc);
 
 /* Executable memory (runtime/jit/codemem.c): n bytes to run code from,
    and through *rw the same bytes to write it in; NULL without memory.

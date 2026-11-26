@@ -1479,6 +1479,7 @@ make_deopt(struct asm_ *a, struct lu_fs *fs, int reason, int error, int drop)
         }
     }
     d->reason = (uint8_t)reason;
+    d->guard_mark = LU_MARK_NOSPEC;
     d->error = (uint8_t)error;
     d->drop = drop;
     d->opcode = (uint8_t)lu_base_opcode(fs->code, fs->pc);
@@ -1590,8 +1591,12 @@ guard_exit(struct asm_ *a, struct lu_ins *in)
         a->exits[a->nexits - 1].d->blame_code = in->blame;
         a->exits[a->nexits - 1].d->blame_pc = in->blame_pc;
     }
-    a->exits[a->nexits - 1].d->prof = in->prof;
-    a->exits[a->nexits - 1].d->tier = in->op == OP_GUARD_BIT;
+    struct lu_deopt *d = a->exits[a->nexits - 1].d;
+    if (in->blame == NULL && d->opcode == LOAD_ATTR && (in->op == OP_SLOT_LOAD || in->op == OP_INLINE_LOAD)) {
+        d->guard_mark = LU_MARK_NOFIELD;
+    }
+    d->prof = in->prof;
+    d->tier = in->op == OP_GUARD_BIT;
     return label;
 }
 
@@ -4919,7 +4924,7 @@ emit_ins(struct asm_ *a, lu_v v, int next_block_label, int *block_labels)
            byte imm2. Anything else is a failed guard whose failures make
            the entry count the value (jit.c NOBORROW). */
         int fail = guard_exit(a, in);
-        a->exits[a->nexits - 1].d->borrow = 1;
+        a->exits[a->nexits - 1].d->guard_mark = LU_MARK_NOBORROW;
         store_locks(a, in);
         int e = gpr_of(a, in->a, RDX), done = new_label(a);
         alu_rr(a, ALU_XOR, RAX, RAX);

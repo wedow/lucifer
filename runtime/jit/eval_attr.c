@@ -473,6 +473,12 @@ load_as(struct ctx *c, int op, uint32_t version, uint16_t index, PyObject *descr
     lu_v owner = lu_ev_peek(c, 1), v;
     int method = c->oparg & 1;
     PyObject *name = name_at(c, c->oparg >> 1);
+    /* Even on a matching shape the field may be empty or its reference
+       unavailable to this thread. A shape cache cannot resolve that miss. */
+    if ((op == LOAD_ATTR_SLOT || op == LOAD_ATTR_INSTANCE_VALUE) && lu_jit_nofield(c->code, c->pc)) {
+        load_generic(c, NULL);
+        return 0;
+    }
     switch (op) {
     case LOAD_ATTR_METHOD_NO_DICT: case LOAD_ATTR_METHOD_WITH_VALUES:
     case LOAD_ATTR_NONDESCRIPTOR_NO_DICT: case LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES: {
