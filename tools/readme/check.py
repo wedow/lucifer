@@ -1,56 +1,28 @@
 #!/usr/bin/env python3
-"""Binary-level checks for tools/readme/stats on fixture status records."""
+"""Exercise the README stats command on daily scorecard records."""
+import csv
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 
-STATS = Path(__file__).resolve().parent / "stats"
-
-RECORD = """metric,value,previous
-awfy.A.on_over_cpython,0.5,0.6
-awfy.A.pypy_over_cpython,0.125,
-awfy.B.on_over_cpython,2.0,2.1
-awfy.B.pypy_over_cpython,0.5,
-awfy.geomean_on_over_cpython,1.0,1.1
-web.cpython-3.14t.8.rps,8000.0,
-web.lucifer.8.rps,1000.0,
-web.flask.on_over_cpython,8.0,
-conformance.kernel.plain.pass,593,580
-conformance.kernel.plain.total,593,583
-conformance.kernel.jit.pass,590,580
-conformance.kernel.jit.total,593,583
-conformance.difftest.total,164,164
-conformance.difftest.lucifer.pass,153,153
-conformance.difftest.always.pass,164,
-conformance.difftest.always.total,164,
-conformance.difftest.deopt.pass,164,
-conformance.difftest.deopt.total,164,
-conformance.libtest.total,50816,50816
-conformance.libtest.oracle.pass,40143,
-conformance.libtest.lucifer.pass,30107,
-conformance.libtest.date,2025-12-01,
-conformance.numpytest.total,52273,52273
-conformance.numpytest.lucifer.pass,50299,50299
-conformance.numpytest.date,2025-12-28,
-capi.implemented,1083,968
-capi.total,1628,1628
-"""
-
-README = "# Title\n\nIntro.\n\n<!-- stats:begin -->\nold\n<!-- stats:end -->\n\nLicense.\n"
-
-TABLE = """<!-- stats:begin -->
-| Metric | Score | Counts |
-|---|---|---|
-| Speed vs CPython 3.14t, composite across benchmark suites | 0.50x CPython's speed | geomean of 3 programs, 0 fail, 2026-01-02 |
-| Speed vs PyPy 3.11, same composite | 0.25x PyPy's speed | geomean of the 2 programs both run, 2026-01-02 |
-| C-API functions implemented | 66.5% | 1,083 of 1,628 |
-| numpy test suite passing | 96.2% | 50,299 of 52,273 collected, run 2025-12-28 |
-| `Lib/test` passing, relative to CPython | 75.0% | 30,107 of CPython's 40,143, run 2025-12-01 |
-| Kernel programs passing in every mode | 99.5% | 590 of 593, 2 modes |
-| Differential programs matching CPython in every JIT mode | 100.0% | 164 of 164, 2 modes |
-<!-- stats:end -->"""
+STATS = Path(__file__).resolve().parent / 'stats'
+README = '# Title\n\n<!-- stats:begin -->\nold\n<!-- stats:end -->\n\nLicense.\n'
+SCORES = [
+    ('compute', '1.9× Go time / 1.2× PyPy time', '2/14 Go, 4/14 PyPy'),
+    ('held-out', '0.82× stock time', '4/37 paired'),
+    ('web', '1 CPU 0.27× / 8 CPUs —', '1/2 layouts'),
+    ('short', 'CLI 3.9× / startup 2.2× time', '6/6 CLI, 3/3 startup'),
+    ('native', 'majority 2.3× / mixed 1.9× time', '20/20 majority, 27/27 mixed'),
+    ('steady', '4/11 settled', '6 unsettled, 1 unavailable'),
+]
+GATES = [
+    ('capi', '70.8%', '1,153 of 1,628', '2026-01-02'),
+    ('numpy', '90.0%', '45 of 50 collected', '2025-12-28'),
+    ('libtest', '80.0%', "40 of CPython's 50", '2025-12-27'),
+    ('kernel', '99.5%', '590 of 593, 4 modes', '2026-01-02'),
+    ('differential', '100.0%', '164 of 164, 2 modes', '2026-01-02'),
+]
 
 
 class StatsCheck(unittest.TestCase):
@@ -58,43 +30,51 @@ class StatsCheck(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.readme = self.root / "README.md"
+        self.readme = self.root / 'README.md'
         self.readme.write_text(README)
-        older = self.root / "status-2026-01-01"
+        older = self.root / 'scorecard-2026-01-01'
         older.mkdir()
-        (older / "summary.csv").write_text(RECORD.replace("50299,50299", "1,1"))
-        self.day = self.root / "status-2026-01-02"
+        (older / 'summary.csv').write_text('obsolete\n')
+        self.day = self.root / 'scorecard-2026-01-02'
         self.day.mkdir()
-        (self.day / "summary.csv").write_text(RECORD)
+        with (self.day / 'summary.csv').open('w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['kind', 'program', 'score', 'counts', 'date', 'status'])
+            for program, score, counts in reversed(SCORES):
+                writer.writerow(['headline', program, score, counts, '', ''])
+            for program, score, counts, date in GATES:
+                writer.writerow(['gate', program, score, counts, date, 'ok'])
+            # Raw programs and command-level gates also live in this file.
+            writer.writerow(['detail', 'compute', 'unrelated', '', '', 'ok'])
+            writer.writerow(['gate', 'check-capi', 'command result', '', '', 'pass'])
 
-    def stats(self):
-        subprocess.run([sys.executable, STATS, "--results", self.root, "--readme", self.readme], check=True)
+    def update(self):
+        subprocess.run([STATS, '--results', self.root, '--readme', self.readme], check=True)
         return self.readme.read_text()
 
-    def test_renders_latest_record_between_markers_only(self):
-        self.assertEqual(self.stats(), README.replace("<!-- stats:begin -->\nold\n<!-- stats:end -->", TABLE))
+    def test_latest_record_supplies_each_card_and_gate(self):
+        result = self.update()
+        rows = [line.split(' | ') for line in result.splitlines() if line.startswith('| ')]
+        self.assertEqual(len(rows), 12)  # header, six score rows and five correctness rows
+        for row, (_, score, counts) in zip(rows[1:7], SCORES):
+            self.assertEqual(row[1:], [score, counts, '2026-01-02 |'])
+        for row, (_, score, counts, date) in zip(rows[7:], GATES):
+            self.assertEqual(row[1:], [score, counts, date + ' |'])
+        for index, label in enumerate(['Go / PyPy', 'Held-out', 'Flask', 'Short programs', 'Native', 'steady state'], 1):
+            self.assertIn(label, rows[index][0])
+        self.assertTrue(result.startswith('# Title\n\n<!-- stats:begin -->\n'))
+        self.assertTrue(result.endswith('\n<!-- stats:end -->\n\nLicense.\n'))
+        self.assertEqual(self.update(), result)
 
-    def test_idempotent(self):
-        once = self.stats()
-        self.assertEqual(self.stats(), once)
-
-    def test_geomean_takes_every_perf_ratio(self):
-        with (self.day / "summary.csv").open("a") as f:
-            f.write("pyperformance.C.on_over_cpython,0.125,\n")
-        self.assertIn("| 1.00x CPython's speed | geomean of 4 programs, 0 fail, 2026-01-02 |", self.stats())
-
-    def test_failing_programs_are_counted_not_scored(self):
-        with (self.day / "summary.csv").open("a") as f:
-            f.write("pyperformance.C.on_over_cpython,0.125,\npyperformance.D.on_over_cpython,,0.5\n")
-        self.assertIn("| 1.00x CPython's speed | geomean of 4 programs, 1 fail, 2026-01-02 |", self.stats())
-
-    def test_pypy_row_skips_programs_either_runtime_fails(self):
-        with (self.day / "summary.csv").open("a") as f:
-            f.write("pyperformance.C.on_over_cpython,0.125,\npyperformance.C.pypy_over_cpython,,\n"
-                    "pyperformance.D.on_over_cpython,,\npyperformance.D.pypy_over_cpython,0.5,\n"
-                    "pyperformance-warm.A.on_over_cpython,1.0,\npyperformance-warm.A.pypy_over_cpython,0.001,\n")
-        self.assertIn("| 0.25x PyPy's speed | geomean of the 2 programs both run, 2026-01-02 |", self.stats())
+    def test_missing_scorecard_leaves_readme_intact(self):
+        for csv_path in self.root.glob('scorecard-*/summary.csv'):
+            csv_path.unlink()
+        run = subprocess.run([STATS, '--results', self.root, '--readme', self.readme], capture_output=True, text=True)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('scorecard', run.stderr)
+        self.assertNotIn('Traceback', run.stderr)
+        self.assertEqual(self.readme.read_text(), README)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

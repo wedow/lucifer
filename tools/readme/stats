@@ -1,82 +1,64 @@
 #!/usr/bin/env python3
-"""Rewrite the stats table between README.md's stats markers from the latest daily status record.
-
-Speed is the geomean over every *.on_over_cpython ratio in the latest record, one per
-program across every benchmark suite, so new benchmarks join it by recording that key.
-A program recorded with an empty ratio failed: it is counted, not scored. The PyPy row is the
-same composite over the programs where both Lucifer and PyPy recorded a ratio (*.pypy_over_cpython). Kernel and differential rows take the worst of
-the record's lanes; numpy and Lib/test rows carry the date of the run behind their counts.
-"""
+"""Rewrite the README stats block from the newest daily scorecard."""
 import argparse
 import csv
-import math
 from pathlib import Path
-import re
-import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-BEGIN, END = "<!-- stats:begin -->", "<!-- stats:end -->"
+BEGIN, END = '<!-- stats:begin -->', '<!-- stats:end -->'
 
-
-def latest(results):
-    """(date, metrics) of the newest status record."""
-    path = sorted(results.glob("status-*/summary.csv"))[-1]
-    return path.parent.name.removeprefix("status-"), {r["metric"]: r["value"] for r in csv.DictReader(path.open())}
-
-
-def share(name, m, part, whole, of="of", note=""):
-    a, b = int(m[part]), int(m[whole])
-    return f"| {name} | {100 * a / b:.1f}% | {a:,} {of} {b:,}{note} |"
-
-
-def worst_lane(name, m, suite):
-    """The lane passing fewest of conformance.SUITE.LANE.{pass,total}, with the lane count."""
-    lanes = [k.split(".")[2] for k in m if k.startswith(f"conformance.{suite}.") and k.count(".") == 3 and k.endswith(".total")]
-    lane = min(lanes, key=lambda lane: int(m[f"conformance.{suite}.{lane}.pass"]))
-    return share(name, m, f"conformance.{suite}.{lane}.pass", f"conformance.{suite}.{lane}.total", note=f", {len(lanes)} modes")
-
-
-def speedup(ratios):
-    """Inverse geomean of time ratios: how many times faster than the reference."""
-    return math.exp(-sum(map(math.log, ratios)) / len(ratios))
+HEADLINES = {
+    'compute': 'Pure-Python compute vs Go / PyPy',
+    'held-out': 'Held-out real Python programs vs CPython 3.14t',
+    'web': 'Web (Flask, 1 and 8 CPUs) vs CPython 3.14t',
+    'short': 'Short programs (CLI, startup) vs CPython 3.14t',
+    'native': 'Native-heavy programs vs CPython 3.14t',
+    'steady': 'Programs that reach steady state',
+}
+CORRECTNESS = {
+    'capi': 'C-API functions implemented',
+    'numpy': 'numpy test suite passing',
+    'libtest': '`Lib/test` passing, relative to CPython',
+    'kernel': 'Kernel programs passing (worst measured mode)',
+    'differential': 'Differential programs matching CPython (worst measured JIT mode)',
+}
 
 
 def table(results):
-    date, m = latest(results)
-    recorded = {k.removesuffix(".on_over_cpython"): v for k, v in m.items()
-                if k.endswith(".on_over_cpython") and not k.startswith("pyperformance-warm.")}
-    ratios = [float(v) for v in recorded.values() if v]
-    both = [float(v) / float(m[p + ".pypy_over_cpython"]) for p, v in recorded.items()
-            if v and m.get(p + ".pypy_over_cpython")]
-    rows = [
-        "| Metric | Score | Counts |",
-        "|---|---|---|",
-        f"| Speed vs CPython 3.14t, composite across benchmark suites | {speedup(ratios):.2f}x CPython's speed | geomean of {len(ratios)} programs, {len(recorded) - len(ratios)} fail, {date} |",
-        f"| Speed vs PyPy 3.11, same composite | {speedup(both):.2f}x PyPy's speed | geomean of the {len(both)} programs both run, {date} |",
-        share("C-API functions implemented", m, "capi.implemented", "capi.total"),
-        share("numpy test suite passing", m, "conformance.numpytest.lucifer.pass", "conformance.numpytest.total",
-              note=f" collected, run {m['conformance.numpytest.date']}"),
-        share("`Lib/test` passing, relative to CPython", m, "conformance.libtest.lucifer.pass",
-              "conformance.libtest.oracle.pass", of="of CPython's", note=f", run {m['conformance.libtest.date']}"),
-        worst_lane("Kernel programs passing in every mode", m, "kernel"),
-        worst_lane("Differential programs matching CPython in every JIT mode", m, "difftest"),
-    ]
-    return "\n".join([BEGIN, *rows, END])
+    path = max(results.glob('scorecard-*/summary.csv'), default=None)
+    if path is None:
+        raise ValueError(f'no scorecard summary in {results}')
+    date = path.parent.name.removeprefix('scorecard-')
+    with path.open(newline='') as source:
+        records = {(r['kind'], r['program']): r for r in csv.DictReader(source)
+                   if r['kind'] in ('headline', 'gate')}
+    lines = ['| Metric | Score | Counts | Date |', '|---|---|---|---|']
+    for kind, labels in [('headline', HEADLINES), ('gate', CORRECTNESS)]:
+        for program, label in labels.items():
+            record = records.get((kind, program))
+            if record is None:
+                raise ValueError(f'{path} is missing {kind} {program}')
+            cells = [label, record['score'], record['counts'], record['date'] or date]
+            lines.append('| ' + ' | '.join(cell.replace('|', r'\|') for cell in cells) + ' |')
+    return '\n'.join(lines)
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--results", type=Path, default=ROOT / "results")
-    p.add_argument("--readme", type=Path, default=ROOT / "README.md")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--results', type=Path, default=ROOT / 'results')
+    parser.add_argument('--readme', type=Path, default=ROOT / 'README.md')
+    args = parser.parse_args()
     text = args.readme.read_text()
-    span = re.compile(re.escape(BEGIN) + ".*?" + re.escape(END), re.S)
-    if not span.search(text):
-        print(f"readme stats: no {BEGIN} ... {END} block in {args.readme}", file=sys.stderr)
-        return 2
-    args.readme.write_text(span.sub(lambda _: table(args.results), text, count=1))
-    return 0
+    start = text.find(BEGIN)
+    end = text.find(END, start + len(BEGIN))
+    if start == -1 or end == -1:
+        parser.exit(2, f'readme stats: no stats block in {args.readme}\n')
+    try:
+        stats = table(args.results)
+    except (ValueError, KeyError) as e:
+        parser.exit(2, f'readme stats: {e}\n')
+    args.readme.write_text(text[:start + len(BEGIN)] + '\n' + stats + '\n' + text[end:])
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    main()
