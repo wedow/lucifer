@@ -1,0 +1,1407 @@
+#!/usr/bin/env python3
+"""Measure compute, application requests, short commands, native calls and settling.
+
+Use Python 3.11+ on Linux in a built tree. Python candidates include the stock
+arm for classification. The default corpus site is prepared if needed. ORACLE_T, LUCIFER,
+PYPY and AWFY_GO name executables (the last is the verified AWFY port). WEB_SITE
+contains Flask. TIMING_PREFIX wraps each single-core arm and supplies affinity.
+TEST_PREFIX wraps the threaded web section. Optional LUCIFER_PREFIX applies
+resource controls per candidate invocation. Profiling needs Linux perf, stock
+debug lines and llvm-symbolizer. Supply wrk via WRK or PATH. The scratch run
+records the series behind the two summaries. Use --repeatability RUN on a
+baseline containing stock and Lucifer to measure empirical paired noise.
+"""
+import argparse
+import ast
+from collections import Counter
+import functools
+import contextlib
+import csv
+import datetime
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import runpy
+import select
+import shlex
+import signal
+import shutil
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[1]
+bench_tool = runpy.run_path(str(ROOT / "tools/status"))["bench_tool"]
+
+
+def settling(samples):
+    """Earliest suffix of at least five values, all within 5% of the last five's median."""
+    if len(samples) < 5:
+        return None, None
+    final = statistics.median(samples[-5:])
+    low, high = .95 * final, 1.05 * final
+    bad = [i for i, value in enumerate(samples) if not low <= value <= high]
+    start = bad[-1] + 1 if bad else 0
+    return (start if len(samples) - start >= 5 else None), final
+
+
+def warm_rows(program, runtime, samples_seconds, loops=1):
+    start, final = settling(samples_seconds)
+    common = dict(program=program, runtime=runtime, values=len(samples_seconds), ops_per_value=loops)
+    settled = start is not None
+    seconds = statistics.median(samples_seconds[start:]) / loops if settled else None
+    return [dict(common, card=1, status="ok" if settled else "unsettled", seconds=seconds,
+                 final_s=final / loops if final is not None else None),
+            dict(common, card=5, status="ok" if settled else "unsettled",
+                 first_steady_op=start * loops + 1 if settled else None,
+                 warmup_s=sum(samples_seconds[:start]) if settled else None)]
+
+
+def add_ratios(rows):
+    indexed = {(r["card"], r["program"], r["runtime"]): r for r in rows}
+    for row in rows:
+        if row["card"] == 2 and row.get("seconds"):
+            row["ops_per_s"] = 1 / row["seconds"]
+        if row["card"] == 2 and row.get("final_s"):
+            row["final_ops_per_s"] = 1 / row["final_s"]
+        if row.get("rps") and row.get("layout") == "disjoint":
+            one = indexed.get((2, "flask.1", row["runtime"]), {})
+            if row["status"] == one.get("status") == "ok" and one.get("rps"):
+                row["scaling"] = row["rps"] / one["rps"]
+        for label in ("cpython", "pypy", "go"):
+            ref = indexed.get((row["card"], row["program"], label), {})
+            if row.get("seconds") and ref.get("seconds") and row["status"] == ref["status"] == "ok":
+                row["over_" + label] = row["seconds"] / ref["seconds"]
+            if row.get("final_s") and ref.get("final_s"):
+                row["final_over_" + label] = row["final_s"] / ref["final_s"]
+            if label == "cpython" and row.get("rps") and ref.get("rps") and row["status"] == ref["status"] == "ok":
+                row["rps_over_cpython"] = row["rps"] / ref["rps"]
+
+
+# Unit events are collected on a second execution. The ordinary timed
+# process never pays for the event logger's IR fingerprinting.
+def jit_counts(events, first, last):
+    """Build time through last, and churn in [first, last], in Unix seconds."""
+    compile_ms = post_compile_ms = 0.0
+    rebuilds = kills = 0
+    for line in events:
+        match = re.match(r"^jit-ev (\d+\.\d+) (build|putoff|kill) (.*)", line)
+        if not match:
+            continue
+        stamp, event, detail = float(match[1]), match[2], match[3]
+        if stamp > last:
+            continue
+        if event in ("build", "putoff"):
+            duration = re.search(r"\bms ([\d.]+)", detail)
+            if duration:
+                cost = float(duration[1])
+                compile_ms += cost
+                if first is not None and stamp >= first:
+                    post_compile_ms += cost
+        if first is not None and stamp >= first:
+            kills += event == "kill"
+            rebuilds += event == "build" and not detail.rstrip().endswith(": first")
+    counts = {"compile_ms": round(compile_ms, 3)}
+    if first is not None:
+        counts.update(post_rebuilds=rebuilds, post_kills=kills, post_compile_ms=round(post_compile_ms, 3))
+    return counts
+
+
+# Source shared with the diagnostic workers. The PyPy profiler accounts for
+# tracing and backend time exclusively. A bridge extends an existing trace;
+# the freed counters advance when the GC releases a compiled loop token.
+PYPY_SNAPSHOT = """\
+def pypy_snapshot():
+    import pypyjit
+    snap = pypyjit.get_stats_snapshot()
+    result = {phase.lower() + "_ms": 1000 * snap.counter_times[phase] for phase in ("TRACING", "BACKEND")}
+    for key in ("compiled_loops", "compiled_bridges", "freed_loops", "freed_bridges"):
+        result[key] = snap.counters["TOTAL_" + key.upper()]
+    return result
+"""
+
+
+def pypy_counts(first, last):
+    result = {"compile_ms": last["tracing_ms"] + last["backend_ms"]}
+    if first is not None:
+        result["post_compile_ms"] = result["compile_ms"] - first["tracing_ms"] - first["backend_ms"]
+        for key in ("compiled_loops", "compiled_bridges", "freed_loops", "freed_bridges"):
+            result["post_" + key] = last[key] - first[key]
+    return result
+
+
+AWFY_CLOCKS = """\
+import os, sys, time
+from run import Run
+pypy = sys.implementation.name == "pypy"
+measure = Run.measure
+index = 0
+def stamped(self, bench):
+    global index
+    if pypy and index == int(os.environ["STEADY_INDEX"]):
+        print("snapshot-first", repr(pypy_snapshot()), file=sys.stderr)
+    print("iteration-begin", time.time(), file=sys.stderr)
+    measure(self, bench)
+    print("iteration-end", time.time(), file=sys.stderr)
+    index += 1
+    if pypy and index == self._num_iterations:
+        print("snapshot-last", repr(pypy_snapshot()), file=sys.stderr)
+Run.measure = stamped
+import harness
+"""
+
+
+def awfy_samples(argv, source, name, driver):
+    """Observe the verified worker's flushed result boundaries in the parent."""
+    import threading
+    started = time.monotonic()
+    samples, completions, output = [], [], []
+    with subprocess.Popen(argv, cwd=source, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, errors="replace") as proc:
+        def read():
+            for line in proc.stdout:
+                elapsed = time.monotonic() - started
+                output.append(line)
+                value = driver.parse_samples(name, line)
+                if value:
+                    samples.extend(value)
+                    completions.append(elapsed)
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        try:
+            code = proc.wait(timeout=120)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            reader.join(timeout=5)
+    if code or len(samples) != 10 or min(samples) <= 0 or not any("Total Runtime:" in line for line in output):
+        raise ValueError(f"AWFY verification or sample count failed (exit {code})")
+    return [v * 1e-6 for v in samples], completions
+
+
+def awfy_telemetry(runtime, command, source, args, directory, start, driver):
+    events = directory / "events.log"
+    env = {**os.environ, "STEADY_INDEX": str(start if start is not None else -1)}
+    code = AWFY_CLOCKS
+    if runtime == "pypy":
+        code = PYPY_SNAPSHOT + code
+    else:
+        env["LUCIFER_JIT_DEBUG"] = "units"
+    with events.open("w") as log:
+        replay = subprocess.run(command + ["-u", "-c", code] + args, cwd=source, env=env,
+                                stdout=subprocess.PIPE, stderr=log, text=True, timeout=120)
+    if replay.returncode or len(driver.parse_samples(args[0], replay.stdout)) != 10:
+        raise ValueError("incomplete event replay")
+    if runtime == "pypy":
+        with events.open() as log:
+            snapshots = {key: ast.literal_eval(data) for key, data in
+                         (line.split(" ", 1) for line in log if line.startswith("snapshot-"))}
+        first = snapshots["snapshot-first"] if start is not None else None
+        return pypy_counts(first, snapshots["snapshot-last"])
+    with events.open() as log:
+        stamps = [line.split() for line in log if line.startswith(("iteration-begin ", "iteration-end "))]
+    if len(stamps) != 20 or any(row[0] != ("iteration-begin", "iteration-end")[i % 2] for i, row in enumerate(stamps)):
+        raise ValueError("incomplete event window")
+    first = float(stamps[2 * start][1]) if start is not None else None
+    with events.open() as log:
+        return jit_counts(log, first, float(stamps[-1][1]))
+
+
+def awfy_rows(runtime, command, scratch, names):
+    driver = bench_tool("awfy")
+    source = ROOT / "third_party/awfy/Python"
+    for name in names:
+        program = "awfy." + name
+        directory = scratch / runtime / program
+        directory.mkdir(parents=True, exist_ok=True)
+        args = [name, "10", str(driver.INNER[name])]
+        argv = command + ([] if runtime == "go" else ["-u", "harness.py"]) + args
+        try:
+            seconds, ends = awfy_samples(argv, source, name, driver)
+            raw = dict(inner=driver.INNER[name], samples_s=seconds, completed_after_s=ends)
+            (directory / "series.json").write_text(json.dumps(raw) + "\n")
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            for card in (1, 5):
+                yield dict(card=card, program=program, runtime=runtime, status=str(exc))
+            continue
+
+        timing, warmup = warm_rows(program, runtime, seconds)
+        start, _ = settling(seconds)
+        warmup["launch_to_first_complete_s"] = ends[0]
+        if start is not None:
+            # Completion observed by the parent, minus the worker's own
+            # verified work duration. Includes a configured launch prefix.
+            warmup["launch_to_steady_s"] = ends[start] - seconds[start]
+        if runtime in ("lucifer", "pypy"):
+            try:
+                warmup.update(awfy_telemetry(runtime, command, source, args, directory, start, driver))
+                warmup["telemetry"] = "ok"
+            except (KeyError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                warmup["telemetry"] = str(exc)
+        yield timing
+        yield warmup
+
+
+def cold_execution():
+    # Run the timer inside the optional resource-control prefix so setting up
+    # the scope does not become part of the measured process lifetime.
+    argv, site, cwd, timeout, receipt = json.load(sys.stdin)
+    status, out, err, wall = bench_tool("corpus").execute(argv, Path(site), cwd, timeout)
+    Path(receipt).write_text(json.dumps([status, wall]))
+    sys.stdout.buffer.write(out)
+    sys.stderr.buffer.write(err)
+
+
+def scoped_cold(prefix, scratch):
+    def execute(argv, site, cwd, timeout):
+        with tempfile.TemporaryDirectory(dir=scratch) as temp:
+            receipt = Path(temp) / "wall.json"
+            command = prefix + [sys.executable, str(ROOT / "tools/scorecard"), "--cold-exec"]
+            msg = json.dumps([argv, str(site), str(cwd), timeout, str(receipt)]).encode()
+            done = subprocess.run(command, input=msg, capture_output=True, check=True, timeout=timeout + 15)
+            status, wall = json.loads(receipt.read_text())
+            return status, done.stdout, done.stderr, wall
+    return execute
+
+
+def cold_rows(runtime, command, site, scratch, names=None):
+    """Use the status suite's files, oracle output checks, loop counts and statistic."""
+    corpus = bench_tool("corpus")
+    if runtime == "lucifer" and os.environ.get("LUCIFER_PREFIX"):
+        corpus.execute = scoped_cold(shlex.split(os.environ["LUCIFER_PREFIX"]), scratch)
+    reference = json.loads((ROOT / "results/status-reference.json").read_text())["corpus"]
+    for program, (kind, argv) in corpus.programs(site).items():
+        if program.partition(".")[0] not in ("startup", "cli"):
+            continue
+        if names is not None and program not in names:
+            continue
+        expected = reference.get(program)
+        result = {"status": "missing oracle check", "seconds": None}
+        if expected and expected.get("check"):
+            try:
+                result = corpus.MEASURE[kind](command, argv, site, expected)
+            except (OSError, subprocess.SubprocessError) as exc:
+                result["status"] = type(exc).__name__
+        yield dict(card=3, program=program, runtime=runtime, status=result["status"], seconds=result["seconds"])
+
+
+# cmath is a loadable CPython extension on the free-threaded runtimes.
+# Prebuilt complex arguments avoid measuring construction in the call loop.
+BOUNDARY = """\
+import cmath, sys, time
+args = [complex(0, i) for i in range(64)]
+one = 17j
+def unary():
+    count = 0
+    for _ in range(2048):
+        for arg in args:
+            count += cmath.isfinite(arg)
+    return count
+def binary():
+    count = 0
+    for _ in range(2048):
+        for arg in args:
+            count += cmath.isclose(arg, one)
+    return count
+fn, answer = (unary, 64 * 2048) if sys.argv[1] == "isfinite" else (binary, 2048)
+for _ in range(10):
+    start = time.perf_counter()
+    count = fn()
+    duration = time.perf_counter() - start
+    if count != answer:
+        raise ValueError("wrong boundary result")
+    print(duration / (64 * 2048))
+"""
+
+
+def boundary_rows(runtime, command, site, scratch):
+    for operation in ("isfinite", "isclose"):
+        row = dict(card=4, program="boundary.cmath." + operation, runtime=runtime)
+        try:
+            done = subprocess.run(command + ["-c", BOUNDARY, operation], capture_output=True,
+                                  text=True, timeout=90, check=True)
+            values = [float(v) for v in done.stdout.splitlines()]
+            if len(values) != 10 or min(values) <= 0:
+                raise ValueError("invalid boundary samples")
+            row.update(status="ok", seconds=statistics.median(values[-5:]))
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            row["status"] = type(exc).__name__
+        yield row
+
+
+def perf_child(stack, args, scratch, pid):
+    """Start disabled, then wait for perf to confirm attachment to the worker."""
+    recv, send = os.pipe()
+    ack, reply = os.pipe()
+    for fd in (recv, send, ack, reply):
+        stack.callback(os.close, fd)
+    err = stack.enter_context((scratch / (args[0] + '.log')).open('w'))
+    proc = subprocess.Popen(['perf', *args, '-p', str(pid), '-D', '-1', '--control',
+                             f'fd:{recv},{reply}'], pass_fds=(recv, reply), stderr=err,
+                            stdout=subprocess.DEVNULL, env={**os.environ, 'LC_ALL': 'C'})
+
+    def stop():
+        if proc.poll() is None:
+            proc.send_signal(signal.SIGINT)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+    stack.callback(stop)
+    def control(message):
+        os.write(send, message + b'\n')
+        if not select.select([ack], [], [], 5)[0] or b'ack' not in os.read(ack, 32):
+            raise RuntimeError('perf ' + args[0] + ' control failed')
+
+    control(b'enable')
+    return lambda: control(b'disable')
+
+
+def compiled_ranges(pid, runtime):
+    if runtime != 'lucifer':
+        return []
+    # codemem.c maps each shared anonymous chunk twice. Match the executable
+    # view to a writable view of the same shmem inode, ignoring other mappings.
+    maps = Path(f'/proc/{pid}/maps').read_text().splitlines()
+    writable = set()
+    executable = []
+    for line in maps:
+        fields = line.split(None, 5)
+        if len(fields) != 6 or fields[5] != '/dev/zero (deleted)' or fields[4] == '0':
+            continue
+        address, perms, offset, device, inode, _ = fields
+        key = offset, device, inode
+        if perms == 'rw-s':
+            writable.add(key)
+        elif perms == 'r-xs':
+            lo, hi = (int(i, 16) for i in address.split('-'))
+            executable.append((lo, hi, key))
+    return [(lo, hi) for lo, hi, key in executable if key in writable]
+
+
+def app_leaf(ip, sym, image, compiled, executable):
+    if ip >= 1 << 63 or image.startswith(('[kernel', '[guest.kernel')):
+        return 'kernel'
+    if any(lo <= ip < hi for lo, hi in compiled):
+        return 'compiled'
+    if sym.startswith(('eval_frame', '_PyEval_EvalFrameDefault', 'pypy_g_dispatch_bytecode',
+                       'pypy_g_PyFrame_dispatch')):
+        return 'interpreter'
+    if ('.cpython-' in image or '.pypy' in image or '.abi3.so' in image
+            or '/lib-dynload/' in image or ('/site-packages/' in image and '.so' in image)):
+        return 'native'
+    # For the executable and runtime library, unresolved functions cannot
+    # distinguish the dispatch loop from the remainder of the C runtime.
+    base = Path(image).name
+    if base == executable or base.startswith(('libpython', 'libpypy')):
+        return 'unknown' if sym.startswith(('[unknown]', '0x')) else 'runtime_c'
+    if base.startswith(('libc.so', 'libpthread.', 'libm.so', 'libgcc_s.', 'ld-linux')):
+        return 'runtime_c'
+    return 'unknown'
+
+
+def perf_window(pid, sample, scratch, runtime):
+    """Measure server/worker threads only. sample runs once and returns completed units."""
+    scratch = Path(scratch)
+    scratch.mkdir(parents=True, exist_ok=True)
+    stat, data = scratch / 'counts.csv', scratch / 'cycles.data'
+    for path in (stat, data):
+        path.unlink(missing_ok=True)
+    errors = []
+    observers = [('stat', ['stat', '-x,', '-e', 'instructions,cycles', '-o', str(stat)]),
+                 ('record', ['record', '--no-buildid-cache', '-q', '-e', 'cycles', '-F', '199',
+                             '-m', '64', '-o', str(data)])]
+    ready = {}
+    with contextlib.ExitStack() as stack:
+        for name, args in observers:
+            try:
+                ready[name] = perf_child(stack, args, scratch, pid)
+            except (OSError, RuntimeError) as exc:
+                errors.append(str(exc))
+        executable = Path(os.readlink(f'/proc/{pid}/exe')).name
+        compiled = compiled_ranges(pid, runtime)
+        count = sample()
+        for pause in ready.values():
+            try:
+                pause()
+            except (OSError, RuntimeError) as exc:
+                errors.append(str(exc))
+        if Path(f'/proc/{pid}/maps').exists():
+            compiled += compiled_ranges(pid, runtime)
+    result = {'profile_units': count, 'profile_scope': 'worker threads and inherited tasks'}
+    if runtime == 'pypy':
+        result['mapping_note'] = 'unmapped PyPy JIT PCs are unresolved'
+    if not count:
+        return {**result, 'profile_status': 'no completed work'}
+    if 'stat' in ready:
+        for line in stat.read_text().splitlines():
+            fields = line.split(',')
+            if len(fields) > 2 and fields[0].isdigit() and fields[2] in ('instructions', 'cycles'):
+                result[fields[2] + '_per_unit'] = int(fields[0]) / count
+        if 'instructions_per_unit' not in result or 'cycles_per_unit' not in result:
+            errors.append('hardware counts unavailable')
+    if 'record' in ready:
+        done = subprocess.run(['perf', 'script', '--no-inline', '-i', str(data), '-F', 'period,ip,sym,dso'],
+                              capture_output=True, text=True, errors='replace')
+        totals = Counter()
+        samples = 0
+        for line in done.stdout.splitlines():
+            m = re.fullmatch(r'\s*(\d+)\s+([0-9a-fA-F]+)\s+(.*?)\s+\((.*)\)\s*', line)
+            if not m:
+                if line.strip():
+                    errors.append('unparsed cycle samples')
+                    break
+                continue
+            kind = app_leaf(int(m[2], 16), m[3], m[4], compiled, executable)
+            totals[kind] += int(m[1])
+            samples += 1
+        if done.returncode or not sum(totals.values()):
+            errors.append('cycle attribution unavailable')
+        else:
+            result['profile_samples'] = samples
+            for kind in ('compiled', 'interpreter', 'runtime_c', 'native', 'kernel', 'unknown'):
+                result[kind + '_pct'] = 100 * totals[kind] / sum(totals.values())
+    result['profile_status'] = ', '.join(errors) or 'ok'
+    return result
+
+
+def flask_layouts(web):
+    order, client = web.layout()
+    for n in (1, 8):
+        available = n <= len(order) and not set(order[:n]).intersection(client)
+        yield f'flask.{n}', order[:n] if available else [], client, 'disjoint'
+        if not available:
+            cores = web.cores()
+            shared = [cpus[0] for cpus in cores] + [c for cpus in cores for c in cpus[1:]]
+            if n <= len(shared):
+                yield f'flask.{n}.shared', shared[:n], client, 'shared-client'
+
+
+def flask_command(command, site, log, events=False):
+    args = ['env', f'PYTHONPATH={site}', 'PYTHONDONTWRITEBYTECODE=1']
+    if events:
+        args += ['LUCIFER_JIT_DEBUG=units']
+    # The web driver inherits stderr. Redirect just this server and preserve
+    # its PID across exec so perf observes the application and its threads.
+    return shlex.join(['sh', '-c', 'exec "$@" 2>"$0"', str(log), *args, *command])
+
+
+@contextlib.contextmanager
+def flask_server(web, command, cpus):
+    # web.Server waits indefinitely for a ready line. Bound daily runs even
+    # when the command is an external runtime launcher or fails during import.
+    argv = ['taskset', '-c', web.cpu_list(cpus), *shlex.split(command), str(web.HERE / 'app.py'), '0']
+    with subprocess.Popen(argv, stdout=subprocess.PIPE, text=True, start_new_session=True) as proc:
+        try:
+            if not select.select([proc.stdout], [], [], 45)[0]:
+                raise RuntimeError('server startup timeout')
+            line = proc.stdout.readline().split()
+            if len(line) != 2 or line[0] != 'listening':
+                raise RuntimeError('server startup failed')
+            yield SimpleNamespace(port=int(line[1]), process=proc)
+        finally:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def flask_pid(server):
+    # A launcher may retain its PID and fork the server. Find the worker
+    # holding this port inside the launched tree before attaching counters.
+    port = f'{server.port:04X}'
+    root = Path('/proc')
+    inodes = set()
+    for path in ('net/tcp', 'net/tcp6'):
+        file = root / str(server.process.pid) / path
+        if file.exists():
+            for line in file.read_text().splitlines()[1:]:
+                fields = line.split()
+                if fields[3] == '0A' and fields[1].split(':')[-1] == port:
+                    inodes.add('socket:[' + fields[9] + ']')
+    todo = [server.process.pid]
+    while todo:
+        pid = todo.pop()
+        folder = root / str(pid)
+        try:
+            for fd in (folder / 'fd').iterdir():
+                try:
+                    if os.readlink(fd) in inodes:
+                        return pid
+                except FileNotFoundError:
+                    continue
+            for children in (folder / 'task').glob('*/children'):
+                todo.extend(map(int, children.read_text().split()))
+        except FileNotFoundError:
+            continue
+    raise RuntimeError('cannot identify the server listener')
+
+
+PYPY_FLASK = """
+import json, os, runpy, signal, sys, time
+def snapshot(signum, frame):
+    record = dict(pypy_snapshot(), timestamp=time.time())
+    os.write(1, (json.dumps(record) + chr(10)).encode())
+signal.signal(signal.SIGUSR1, snapshot)
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+def flask_snapshot(server, pid):
+    os.kill(pid, signal.SIGUSR1)
+    stream = server.process.stdout
+    if not select.select([stream], [], [], 5)[0]:
+        raise RuntimeError('PyPy snapshot timeout')
+    return json.loads(stream.readline())
+
+
+def flask_windows(web, args, command, server_cpus, client, snapshots=None):
+    windows = []
+    origin = time.monotonic()
+    with flask_server(web, command, server_cpus) as server:
+        pid = flask_pid(server) if snapshots is not None else None
+        for _ in range(10):
+            if snapshots is not None:
+                snapshots.append(flask_snapshot(server, pid))
+            start, elapsed = time.time(), time.monotonic() - origin
+            window = web.wrk(args, server.port, 2, client)
+            if not window['requests'] or server.process.poll() is not None:
+                raise ValueError('server exited or completed no requests')
+            windows.append(dict(window, start=start, end=time.time(), elapsed=elapsed))
+        if snapshots is not None:
+            snapshots.append(flask_snapshot(server, pid))
+    return windows
+
+
+def flask_rows(runtime, command, site, scratch):
+    """Uninstrumented daily web mix and a separate cold series on each server layout."""
+    web = bench_tool('web/bench')
+    args = SimpleNamespace(wrk=os.environ.get('WRK', 'wrk'), connections=64, warmup=10, duration=10)
+    web.Server = functools.partial(flask_server, web)
+    check = None
+    for program, cpus, client, layout in flask_layouts(web):
+        base = dict(program=program, runtime=runtime, layout=layout)
+        if not cpus:
+            for card in (2, 5):
+                yield dict(base, card=card, status='insufficient disjoint CPUs')
+            continue
+        out = Path(scratch) / runtime / program
+        out.mkdir(parents=True, exist_ok=True)
+        server_command = flask_command(command, site, out / 'server.log')
+        try:
+            if check is None:
+                with flask_server(web, server_command, cpus) as server:
+                    transcript = json.dumps(web.transcript(server.port)).encode()
+                digest = hashlib.sha256(transcript).hexdigest()
+                reference = Path(scratch) / 'flask-transcript.sha256'
+                if runtime == 'cpython':
+                    reference.write_text(digest)
+                check = 'ok' if reference.is_file() and reference.read_text() == digest else 'response mismatch'
+            with flask_server(web, server_command, cpus) as server:
+                problems = web.hammer(server.port)
+            points = [web.point(args, runtime, server_command, len(cpus), cpus, client) for _ in range(3)]
+            (out / 'throughput.json').write_text(json.dumps(points))
+            rates = [p['rps'] for p in points]
+            errors = sum(p['errors'] for p in points)
+            status = check
+            if problems:
+                status = 'concurrent update mismatch'
+            if any(p['server_exit'] is not None for p in points):
+                status = 'server exited'
+            yield dict(base, card=2, status='request errors' if errors else status, response_check=check,
+                       rps=statistics.median(rates), rps_min=min(rates), rps_max=max(rates), errors=errors,
+                       concurrent_check='ok' if not problems else ', '.join(problems),
+                       cpus=len(cpus), repeats=len(rates), p99_ms=statistics.median(p['p99_ms'] for p in points))
+        except (OSError, ValueError, RuntimeError) as exc:
+            yield dict(base, card=2, status=str(exc))
+        try:
+            windows = flask_windows(web, args, server_command, cpus, client)
+            (out / 'warmup.json').write_text(json.dumps(windows))
+            rates = [w['duration_us'] * 1e-6 / w['requests'] for w in windows]
+            start, final = settling(rates)
+            errors = sum(w['errors'] for w in windows)
+            row = dict(base, card=5, status='unsettled' if start is None else 'ok',
+                       final_s=final, samples=len(windows), errors=errors)
+            if start is not None:
+                row.update(first_steady_op=1 + sum(w['requests'] for w in windows[:start]),
+                           warmup_s=windows[start]['elapsed'])
+            if errors:
+                row['status'] += ', request errors'
+            if runtime == 'lucifer':
+                try:
+                    events = out / 'events.log'
+                    replay = flask_windows(web, args, flask_command(command, site, events, True), cpus, client)
+                    (out / 'warmup-replay.json').write_text(json.dumps(replay))
+                    with events.open(errors='replace') as lines:
+                        row.update(jit_counts(lines, replay[start]['start'] if start is not None else None,
+                                              replay[-1]['end']))
+                    row['telemetry'] = 'ok'
+                except (OSError, RuntimeError, ValueError) as exc:
+                    row['telemetry'] = str(exc)
+            elif runtime == 'pypy':
+                snapshots = []
+                try:
+                    cmd = command + ['-c', PYPY_SNAPSHOT + PYPY_FLASK]
+                    replay_command = flask_command(cmd, site, out / 'telemetry.log')
+                    flask_windows(web, args, replay_command, cpus, client, snapshots)
+                    (out / 'pypy-snapshots.json').write_text(json.dumps(snapshots))
+                    row.update(pypy_counts(snapshots[start] if start is not None else None, snapshots[-1]))
+                    row['telemetry'] = 'ok'
+                except (OSError, RuntimeError, ValueError, KeyError) as exc:
+                    row['telemetry'] = str(exc)
+            yield row
+        except (OSError, ValueError, RuntimeError) as exc:
+            yield dict(base, card=5, status=str(exc))
+
+
+def flask_profile_rows(runtime, command, site, scratch):
+    """Profile a separate warm server under the timing prefix at its available layouts."""
+    web = bench_tool('web/bench')
+    args = SimpleNamespace(wrk=os.environ.get('WRK', 'wrk'), connections=64)
+    for program, cpus, client, layout in flask_layouts(web):
+        name = program + '.profile'
+        if not cpus:
+            yield dict(card=2, program=name, runtime=runtime, layout=layout,
+                       status='insufficient disjoint CPUs', profile_status='insufficient disjoint CPUs')
+            continue
+        out = Path(scratch) / runtime / name
+        out.mkdir(parents=True, exist_ok=True)
+        row = dict(card=2, program=name, runtime=runtime, layout=layout, cpus=len(cpus))
+        try:
+            with flask_server(web, flask_command(command, site, out / 'server.log'), cpus) as server:
+                web.wrk(args, server.port, 10, client)
+
+                def sample():
+                    result = web.wrk(args, server.port, 5, client)
+                    row['errors'] = result['errors']
+                    return result['requests']
+
+                row.update(perf_window(flask_pid(server), sample, out, runtime))
+                row['status'] = row['profile_status'] if not row['errors'] else 'request errors'
+        except (OSError, ValueError, RuntimeError) as exc:
+            row['status'] = str(exc)
+        yield row
+
+
+# Run the pinned benchmark's own task and clock. Timing, profiling and JIT
+# event collection use disjoint windows. The benchmark source is unchanged.
+CORPUS_WORKER = """
+import builtins, json, math, os, runpy, sys, time
+from pyperf._worker import WorkerTask
+
+channel = os.fdopen(os.dup(1), "w", 1)
+with open(os.environ["SCORECARD_STDOUT"], "w") as log:
+    os.dup2(log.fileno(), 1)
+mode = os.environ["SCORECARD_OBSERVER"]
+snapshot = os.environ.get("SCORECARD_PYPY_STATS")
+original = WorkerTask._compute_values
+
+def values(self, dest, count, **kwargs):
+    if os.environ["SCORECARD_RUNTIME"] == "cpython":
+        if sys.version_info[:2] != (3, 14) or sys.abiflags != 't' or sys._is_gil_enabled():
+            raise ValueError("classification requires CPython 3.14t with GIL disabled")
+    work = self.task_func
+    stamps = []
+    snapshots = []
+    def timed(task, loops):
+        if snapshot:
+            snapshots.append(pypy_snapshot())
+        begin = time.time()
+        value = work(task, loops)
+        stamps.append([begin, time.time()])
+        return value
+    self.task_func = timed
+    try:
+        original(self, dest, count, **kwargs)
+    finally:
+        self.task_func = work
+    if snapshot:
+        snapshots.append(pypy_snapshot())
+    ops = self.loops * (self.inner_loops or 1)
+    print(json.dumps(dict(task=self.name, pid=os.getpid(), ops=ops, values=dest, stamps=stamps, snapshots=snapshots,
+                          version=sys.version.split()[0], gil_enabled=(sys._is_gil_enabled()
+                          if hasattr(sys, "_is_gil_enabled") else None))), file=channel)
+    if mode:
+        # Keep the process alive while the parent attaches and reads counters.
+        if sys.stdin.readline() != "go\\n":
+            raise RuntimeError("profile controller disconnected")
+        repeats = max(1, min(1000, math.ceil(0.8 / (max(dest[-3:]) * ops))))
+        for _ in range(repeats):
+            work(self, self.loops)
+        print(json.dumps(dict(completed=repeats * ops)), file=channel)
+        if sys.stdin.readline() != "next\\n":
+            raise RuntimeError("profile controller disconnected")
+
+WorkerTask._compute_values = values
+sys.argv = sys.argv[1:]
+sys.path.insert(0, os.path.dirname(sys.argv[0]))
+runpy.run_path(sys.argv[0], init_globals={"__builtins__": builtins}, run_name="__main__")
+"""
+
+
+@functools.lru_cache(maxsize=4)
+def corpus_inputs(site):
+    corpus = bench_tool("corpus")
+    return corpus, corpus.pyperformance(site), json.loads((ROOT / "results/status-reference.json").read_text())["corpus"]
+
+
+@functools.lru_cache(maxsize=None)
+def command_benchmark(script):
+    # The pinned runner uses bench_command for a fresh process per operation.
+    calls = (node.func for node in ast.walk(ast.parse(Path(script).read_text())) if isinstance(node, ast.Call))
+    return any(isinstance(func, ast.Attribute) and func.attr == "bench_command" for func in calls)
+
+
+def corpus_classification(name, argv, share):
+    # Length is the lifetime of the benchmarked workload: a new process per
+    # operation is short, while an in-process worker can run indefinitely.
+    if name in bench_tool("corpus").STARTUP or (argv and command_benchmark(argv[0])):
+        return 3, "fresh process"
+    if argv:
+        directory = Path(argv[0]).parent
+        variant = directory / f"bm_{name}.toml"
+        tags = set()
+        for config in [directory / "pyproject.toml", variant]:
+            if config.is_file():
+                meta = tomllib.loads(config.read_text()).get("tool", {}).get("pyperformance", {})
+                tags.update(re.findall(r"\w+", str(meta.get("tags", ""))))
+        if tags & {"apps", "template"}:
+            return 2, "application"
+    if share is None:
+        return 4, "unmeasured guard"
+    if share < 5:
+        return 1, "held out"
+    return 4, "native majority" if share > 50 else "mixed"
+
+
+def native_sample_periods(data, executable):
+    """Charge extension calls up to the innermost Python evaluator, by cycles."""
+    cmd = ["perf", "script", "-i", str(data), "--no-inline", "-F", "period,ip,sym,dso,dsoff"]
+    grouped = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=30)
+    flat = subprocess.check_output(cmd + ["-G"], text=True, stderr=subprocess.DEVNULL, timeout=30).splitlines()
+    groups = [s for s in grouped.strip().split("\n\n") if s.strip()]
+    if len(flat) != len(groups):
+        raise ValueError("flat/stack sample count differs")
+    traces = []
+    addresses = {}
+    for group, leaf in zip(groups, flat):
+        head, *frames = group.splitlines()
+        period, fallback = leaf.strip().split(None, 1)
+        if int(head) != int(period):
+            raise ValueError("flat/stack sample period differs")
+        stack = []
+        for frame in frames or [fallback]:
+            m = re.fullmatch(r"\s*[0-9a-f]+ (.*?) \((.*?)(?:\+(0x[0-9a-f]+))?\)", frame)
+            if not m:
+                raise ValueError("unrecognized perf stack frame")
+            symbol, image, offset = m.groups()
+            if symbol.startswith("_PyEval_EvalFrameDefault"):
+                break
+            stack.append((image, offset))
+            if offset and (image == executable or Path(image).name.startswith("libpython3.14")):
+                addresses.setdefault(image, set()).add(offset)
+        traces.append((int(period), stack))
+    module = set()
+    for image, offsets in addresses.items():
+        ordered = sorted(offsets)
+        result = subprocess.run(["llvm-symbolizer", "--obj=" + image, "--output-style=JSON"],
+                                input="\n".join(ordered) + "\n", capture_output=True, text=True,
+                                check=True, timeout=30)
+        records = [json.loads(line) for line in result.stdout.splitlines()]
+        if len(records) != len(ordered) or not any(s["FileName"] for record in records for s in record["Symbol"]):
+            raise ValueError("missing stock debug lines for native modules")
+        for offset, record in zip(ordered, records):
+            if any(re.search(r"(?:^|/)Modules/(?!main\.c)", s["FileName"]) for s in record["Symbol"]):
+                module.add((image, offset))
+    total = sum(weight for weight, stack in traces)
+    native = sum(weight for weight, stack in traces if any(
+        frame in module or "/lib-dynload/" in frame[0] or ".cpython-314t-" in frame[0]
+        or ("/site-packages/" in frame[0] and ".so" in frame[0])
+        or re.search(r"/lib(?:sqlite3|expat|mpdec|ssl|crypto|zstd)\.so", frame[0]) for frame in stack))
+    if not total or len(traces) < 10:
+        raise ValueError("too few stock cycle samples")
+    return native, total, len(traces)
+
+
+def native_window(pid, sample, scratch):
+    data = scratch / "native.data"
+    samples = {}
+    with contextlib.ExitStack() as stack:
+        try:
+            executable = os.readlink(f"/proc/{pid}/exe")
+            disable = perf_child(stack, ["record", "--no-buildid-cache", "-q", "-e", "cycles:u", "-F", "249",
+                                         "--call-graph", "dwarf,4096", "-m", "256K", "-o", str(data)], scratch, pid)
+        except (OSError, RuntimeError) as exc:
+            sample()
+            return {"classification_error": str(exc)}
+        completed = sample()
+        try:
+            disable()
+        except (OSError, RuntimeError) as exc:
+            return {"classification_error": str(exc)}
+    try:
+        native, total, count = native_sample_periods(data, executable)
+        samples.update(native_cycles_per_unit=native / completed, user_cycles_per_unit=total / completed,
+                       stock_samples=count)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        samples["classification_error"] = str(exc)
+    finally:
+        data.unlink(missing_ok=True)
+    return samples
+
+
+def corpus_process(command, argv, site, runtime, directory, loops, observer="", jit=False):
+    """Collect each named pyperf subbenchmark in its real execution order."""
+    directory.mkdir(parents=True, exist_ok=True)
+    worker = directory / "worker.py"
+    pypy_stats = jit and runtime == "pypy"
+    worker.write_text((PYPY_SNAPSHOT if pypy_stats else "") + CORPUS_WORKER)
+    deadline = time.monotonic() + 110
+    stderr = directory / "stderr.log"
+    tasks = {}
+    with contextlib.ExitStack() as stack:
+        env = dict(os.environ, PYTHONHASHSEED="0", PYTHONPATH=str(site), SCORECARD_STDOUT=str(directory / "stdout.log"),
+                   SCORECARD_OBSERVER=observer, SCORECARD_RUNTIME=runtime)
+        if runtime == "cpython":
+            env["PYTHON_GIL"] = "0"
+        if pypy_stats:
+            env["SCORECARD_PYPY_STATS"] = "1"
+        elif jit:
+            env["LUCIFER_JIT_DEBUG"] = "units"
+        launched = time.time()
+        proc = subprocess.Popen(command + [str(worker), *argv, "--worker", "-l", str(loops), "-w", "0",
+                                           "-n", "8"], cwd=directory, env=env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=stack.enter_context(stderr.open("w")),
+                                text=True, start_new_session=True)
+        events = stack.enter_context(proc.stdout)
+        stack.callback(proc.stdin.close)
+
+        def message():
+            if not select.select([events], [], [], max(0, deadline - time.monotonic()))[0]:
+                raise TimeoutError("pyperformance worker time limit")
+            line = events.readline()
+            return json.loads(line) if line else None
+
+        def sample():
+            proc.stdin.write("go\n")
+            proc.stdin.flush()
+            done = message()
+            if not done or not done.get("completed"):
+                raise ValueError("incomplete profile window")
+            return done["completed"]
+
+        try:
+            while (event := message()) is not None:
+                task = event["task"]
+                if task in tasks or len(event["values"]) != 8 or not all(
+                        math.isfinite(x) and x > 0 for x in event["values"]):
+                    raise ValueError("invalid pyperf series")
+                event["launched"] = launched
+                tasks[task] = event
+                if observer:
+                    point = directory / str(len(tasks))
+                    point.mkdir(exist_ok=True)
+                    if observer == "stock":
+                        event.update(native_window(event["pid"], sample, point))
+                    else:
+                        event.update(perf_window(event["pid"], sample, point, runtime))
+                    proc.stdin.write("next\n")
+                    proc.stdin.flush()
+            if proc.wait(timeout=max(0.1, deadline - time.monotonic())):
+                raise ValueError(f"pyperf worker exit {proc.returncode}")
+        finally:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+    (directory / "samples.json").write_text(json.dumps(tasks, indent=1) + "\n")
+    return tasks, stderr
+
+
+def stderr_digest(path, site):
+    # corpus.execute canonicalizes the suite and working directory before
+    # checking diagnostics. A legitimate warning can contain either path.
+    data = path.read_bytes().replace(os.fsencode(site), b"SITE").replace(os.fsencode(path.parent), b"CWD")
+    return hashlib.sha256(data).hexdigest()
+
+
+def corpus_rows(runtime, command, site, scratch, names, classification_root=None):
+    corpus, programs, reference = corpus_inputs(site)
+    for name in names:
+        name = name.removeprefix("pyperformance.")
+        if name in corpus.STARTUP:
+            continue
+        program = "pyperformance." + name
+        directory = scratch / "pyperformance" / name
+        directory.mkdir(parents=True, exist_ok=True)
+        classify = runtime == "cpython" and classification_root is None
+        classification = (classification_root or scratch) / "pyperformance" / name / "classification.json"
+        meta = {} if classify or not classification.is_file() else json.loads(classification.read_text())
+        card, group = corpus_classification(name, programs.get(name), meta.get("stock_native_pct"))
+        ref = reference.get("pyperformance-warm." + name, {})
+        raw = dict(card=card, program=program, manifest=name, runtime=runtime, group=group)
+        try:
+            if name not in programs or not ref.get("check"):
+                raise ValueError("excluded by corpus lock or missing oracle check")
+            observer = "application" if card == 2 else "stock" if classify and card != 3 else ""
+            tasks, stderr = corpus_process(command, programs[name], site, runtime, directory / runtime,
+                                           ref["loops"], observer)
+            # The status corpus primes the bytecode cache before checking stderr.
+            # If a first import emitted a compiler warning, repeat in a fresh worker.
+            if b"SyntaxWarning:" in stderr.read_bytes() and stderr_digest(stderr, site) != ref["check"][-1]:
+                tasks, stderr = corpus_process(command, programs[name], site, runtime, directory / runtime / "retry",
+                                              ref["loops"], observer)
+            if sorted(tasks) != ref["check"][:-1]:
+                raise ValueError("pyperf benchmark names differ from oracle")
+            if stderr_digest(stderr, site) != ref["check"][-1]:
+                raise ValueError("pyperf stderr differs from oracle")
+            if observer == "stock":
+                if all("native_cycles_per_unit" in row for row in tasks.values()):
+                    pct = 100 * sum(r["native_cycles_per_unit"] for r in tasks.values()) / sum(
+                        r["user_cycles_per_unit"] for r in tasks.values())
+                    meta = dict(stock_native_pct=pct, stock_samples=sum(r["stock_samples"] for r in tasks.values()))
+                else:
+                    meta = dict(classification_error="; ".join(sorted({r["classification_error"]
+                                for r in tasks.values() if "classification_error" in r})))
+                card, group = corpus_classification(name, programs[name], meta.get("stock_native_pct"))
+            if classify:
+                first = next(iter(tasks.values()))
+                meta.update(stock_version=first["version"], stock_gil_enabled=first["gil_enabled"])
+                classification.write_text(json.dumps(meta))
+            raw.update(meta, card=card, group=group)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            yield dict(raw, **meta, status=str(exc))
+            if card in (1, 2):
+                yield dict(raw, **meta, card=5, status=str(exc))
+            continue
+        replay, replay_error = {}, ""
+        if runtime in ("lucifer", "pypy") and card in (1, 2):
+            try:
+                replay, log = corpus_process(command, programs[name], site, runtime, directory / runtime / "replay",
+                                             ref["loops"], jit=True)
+                if sorted(replay) != sorted(tasks):
+                    raise ValueError("incomplete event replay")
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                replay_error = str(exc)
+        for task, event in tasks.items():
+            ident = program if len(tasks) == 1 else program + "/" + task
+            ops = event["ops"]
+            times = [value * ops for value in event["values"]]
+            timing, warm = warm_rows(ident, runtime, times, loops=ops)
+            timing.update(raw, program=ident, unit="pyperf operation")
+            if card in (3, 4):
+                timing.update(status="ok", seconds=statistics.median(event["values"][-5:]))
+            if card == 2:
+                timing.update({k: v for k, v in event.items() if k not in ("values", "stamps", "ops", "task", "pid", "launched", "version", "gil_enabled", "snapshots")})
+            yield timing
+            if card in (1, 2):
+                warm.update(raw, program=ident, card=5)
+                start, _ = settling(times)
+                if start is not None:
+                    warm["warmup_s"] = event["stamps"][start][0] - event["stamps"][0][0]
+                    warm["process_to_steady_s"] = event["stamps"][start][0] - event["launched"]
+                if runtime in ("lucifer", "pypy"):
+                    if task in replay and not replay_error:
+                        stamps = replay[task]["stamps"]
+                        if runtime == "pypy":
+                            snaps = replay[task]["snapshots"]
+                            warm.update(pypy_counts(snaps[start] if start is not None else None, snaps[-1]))
+                        else:
+                            with log.open() as stream:
+                                warm.update(jit_counts(stream, stamps[start][0] if start is not None else None,
+                                                       stamps[-1][1]))
+                        warm["telemetry"] = "ok"
+                    else:
+                        warm["telemetry"] = replay_error or "missing replay"
+                yield warm
+
+
+def classification_table(rows):
+    inventory = {}
+    startup = bench_tool("corpus").STARTUP
+    for r in rows:
+        if r["runtime"] != "cpython" or r["card"] == 5:
+            continue
+        name = r.get("manifest")
+        if r["program"].removeprefix("startup.") in startup:
+            name = r["program"].split(".")[1]
+        if name:
+            inventory[name] = (r["card"], r.get("group", "fresh process"),
+                               r.get("stock_native_pct"), r.get("stock_samples"), r.get("classification_error"))
+    return inventory
+
+
+def suite_name(row):
+    family = row["program"].partition(".")[0]
+    return row.get("group", family)
+
+
+def summaries(rows, runtime, denominator):
+    """Give each manifest one vote. All of its tasks must have valid matched values."""
+    refs = {r["program"]: r for r in rows if r["card"] != 5 and r["runtime"] == denominator}
+    data = {r["program"]: r for r in rows if r["card"] != 5 and r["runtime"] == runtime}
+    paired = {}
+    for key in data.keys() | refs.keys():
+        row, ref = data.get(key, {}), refs.get(key, {})
+        exemplar = row or ref
+        group = suite_name(exemplar)
+        if group in ("application", "flask", "unmeasured guard") or (
+                "go" in (runtime, denominator) and group != "awfy"):
+            continue
+        ident = exemplar.get("manifest", key)
+        bag = paired.setdefault(group, {}).setdefault(ident, [])
+        bag.append((row.get("seconds") if row.get("status") == "ok" else None,
+                    ref.get("seconds") if ref.get("status") == "ok" else None))
+    result = {}
+    for group, manifests in paired.items():
+        ratios = []
+        for pairs in manifests.values():
+            if all(a and b for a, b in pairs):
+                ratios.append(sum(a for a, _ in pairs) / sum(b for _, b in pairs))
+        result[group] = (statistics.geometric_mean(ratios) if ratios else None, len(ratios), len(manifests))
+    return result
+
+
+def summary_overview(rows):
+    md = ["## Paired performance", "",
+          "Each program has one vote. For a multi-task program, sum task times before dividing. "
+          "A partial row count limits the ratio to the matched subset.", "",
+          "| Runtime | Reference | Suite | Time ratio | Programs paired / observed |", "|---|---|---|---:|---:|"]
+    present = {r["runtime"] for r in rows}
+    for runtime in sorted(present - {"cpython"}):
+        for label in ("cpython", "pypy", "go"):
+            if runtime == label or label not in present:
+                continue
+            for group, (ratio, passed, total) in sorted(summaries(rows, runtime, label).items()):
+                md.append(f"| {runtime} | {label} | {group} | {cell(ratio)} | {passed}/{total} |")
+    md.extend(["", "## Settling coverage", "", "Each row is a measured AWFY iteration series, "
+               "pyperf task or Flask layout. An unsettled series fails the five-value stability requirement.", "",
+               "| Runtime | Card 5 | Settled | Unsettled | Unavailable or incorrect |",
+               "|---|---|---:|---:|---:|"])
+    for runtime in sorted(present):
+        states = [r["status"] for r in rows if r["runtime"] == runtime and r["card"] == 5]
+        ok, unsettled = states.count("ok"), states.count("unsettled")
+        missing = len(states) - ok - unsettled
+        verdict = "FAIL" if unsettled else "INCOMPLETE" if missing or not states else "PASS"
+        md.append(f"| {runtime} | {verdict} | {ok} | {unsettled} | {missing} |")
+    inventory = classification_table(rows)
+    md.extend(["", "## Pinned pyperformance manifest", "",
+               "A fresh command per operation goes on card 3. In-process programs tagged apps or template "
+               "go on card 2. Of the rest, a stock warm native-operation share below 5% goes on card 1 "
+               "and is held out prospectively. Card 4 separates native-majority (>50%), mixed, and unmeasured rows.", "",
+               "| Program | Card | Group | Native cycles (%) | Samples |", "|---|---:|---|---:|---:|"])
+    for name, (card, group, pct, samples, _) in sorted(inventory.items()):
+        md.append(f"| {name} | {card} | {group} | {cell(pct)} | {cell(samples)} |")
+    return md + [""]
+
+
+def repeatability(site, scratch):
+    """Five alternating fresh stock/candidate pairs on frozen single-task representatives."""
+    baseline = [json.loads(line) for line in (scratch / "corpus-cpython.jsonl").read_text().splitlines()]
+    groups = {}
+    for row in baseline:
+        if row["card"] == 5 or "/" in row["program"] or not (row.get("seconds") or row.get("final_s")):
+            continue
+        group = suite_name(row)
+        if group in ("held out", "native majority", "application", "cli", "startup"):
+            groups.setdefault(group, []).append(row)
+    def pick(names):
+        return min(names, key=lambda name: hashlib.sha256(name.encode()).digest())
+
+    names = {pick(r["program"] for r in group) for group in groups.values()}
+    # Measure the repeatability of a positive settling claim as well. Select
+    # one previously settled pair without looking at the size of its speedup.
+    candidate_ok = {r["program"] for path in scratch.glob("*-lucifer.jsonl")
+                    for line in path.read_text().splitlines() if (r := json.loads(line))["card"] == 5
+                    and r["status"] == "ok"}
+    settled = [r["program"] for r in baseline if r["card"] == 5 and r["status"] == "ok"
+               and r.get("group") == "held out" and "/" not in r["program"] and r["program"] in candidate_ok]
+    if settled:
+        names.add(pick(settled))
+    corpus_names = sorted(name.split(".", 1)[1] for name in names if name.startswith("pyperformance."))
+    awfy = pick(bench_tool("awfy").INNER)
+    for n in range(5):
+        arms = ("cpython", "lucifer") if n % 2 == 0 else ("lucifer", "cpython")
+        for label in arms:
+            raw = scratch / "repeatability" / str(n + 1)
+            raw.mkdir(exist_ok=True, parents=True)
+            command = runtime_command(label)
+            prefix = shlex.split(os.environ.get("LUCIFER_PREFIX", "")) if label == "lucifer" else []
+            target = prefix + command
+            for rows in (awfy_rows(label, target, raw, [awfy]),
+                         cold_rows(label, command, site, raw, names),
+                         boundary_rows(label, target, site, raw),
+                         corpus_rows(label, target, site, raw, corpus_names, classification_root=scratch)):
+                for row in rows:
+                    yield dict(row, repeat=n + 1)
+
+
+def repeat_fields(rows, repeats):
+    """Add empirical ranges of paired ratios, preserving unresolved pairs."""
+    lookup = {(r["repeat"], r["card"], r["program"], r["runtime"]): r for r in repeats}
+    for row in rows:
+        key = row["card"], row["program"]
+        if row["runtime"] != "lucifer" or (1, *key, "lucifer") not in lookup:
+            continue
+        if row["card"] == 5:
+            walls = [lookup.get((i, *key, "lucifer"), {}).get("warmup_s") for i in range(1, 6)]
+            walls = [value for value in walls if value is not None]
+            row["warmup_settled_runs"] = len(walls)
+            if walls:
+                row.update(warmup_min_s=min(walls), warmup_max_s=max(walls))
+        for metric in ("seconds", "final_s", "instructions_per_unit", "cycles_per_unit", "first_steady_op"):
+            ratios = []
+            for i in range(1, 6):
+                left = lookup.get((i, *key, "lucifer"), {}).get(metric)
+                right = lookup.get((i, *key, "cpython"), {}).get(metric)
+                if left is not None and right:
+                    ratios.append(left / right)
+            if ratios:
+                row.update({f"{metric}_paired_n": len(ratios), f"{metric}_ratio_min": min(ratios),
+                            f"{metric}_ratio_max": max(ratios)})
+
+
+def runtime_command(runtime):
+    key, fallback = {"cpython": ("ORACLE_T", "python3.14t"), "lucifer": ("LUCIFER", str(ROOT / "bin/lucifer")),
+                     "pypy": ("PYPY", "pypy3"), "go": ("AWFY_GO", "awfy-go")}[runtime]
+    name = os.environ.get(key, fallback)
+    path = shutil.which(name)
+    return [str(Path(path).absolute()) if path else name]
+
+
+def fingerprints(runtimes):
+    hashes = {}
+    for label in runtimes:
+        binary = Path(runtime_command(label)[0])
+        if binary.is_file():
+            with binary.open("rb") as stream:
+                hashes[label] = hashlib.file_digest(stream, "sha256").hexdigest()
+    return hashes
+
+
+def arm(section, runtime, site, scratch):
+    command = runtime_command(runtime)
+    prefix = shlex.split(os.environ.get("LUCIFER_PREFIX", "")) if runtime == "lucifer" else []
+    target = prefix + command
+    if section in ("awfy", "corpus"):
+        if section == "awfy":
+            yield from awfy_rows(runtime, target, scratch, sorted(bench_tool("awfy").INNER))
+            if runtime in ("go", "cpython"):
+                return
+        else:
+            yield from cold_rows(runtime, command, site, scratch)
+            yield from boundary_rows(runtime, target, site, scratch)
+        corpus = bench_tool("corpus")
+        names = sorted((corpus.pyperformance(site).keys() | corpus.EXCLUDED.keys()) - set(corpus.STARTUP))
+        # Stock establishes every classification first. Distribute each other
+        # Python runtime's corpus across its two timed holds to bound their length.
+        if runtime != "cpython":
+            mid = len(names) // 2
+            names = names[:mid] if section == "corpus" else names[mid:]
+        yield from corpus_rows(runtime, target, site, scratch, names)
+    elif section == "web":
+        yield from flask_rows(runtime, target, Path(os.environ.get("WEB_SITE", site)), scratch)
+    elif section == "profile":
+        yield from flask_profile_rows(runtime, target, Path(os.environ.get("WEB_SITE", site)), scratch)
+
+
+def worker(args):
+    site, scratch = args.site.resolve(), args.scratch.resolve()
+    temp = scratch / "tmp"
+    temp.mkdir(exist_ok=True)
+    os.environ["TMPDIR"] = tempfile.tempdir = str(temp)
+    os.environ["PYTHONHASHSEED"] = "0"
+    with args.receipt.open("w") as stream:
+        for runtime in args.runtimes.split(","):
+            if runtime == "cpython":
+                os.environ["PYTHON_GIL"] = "0"
+            else:
+                os.environ.pop("PYTHON_GIL", None)
+            rows = repeatability(site, scratch) if args.section == "repeat" else arm(args.section, runtime, site, scratch)
+            for row in rows:
+                print(json.dumps(row, allow_nan=False), file=stream, flush=True)
+                print(row["card"], row["program"], row["runtime"], row["status"], flush=True)
+
+
+def cell(value):
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        return f"{value:.5g}"
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def markdown_table(rows, columns):
+    header = ["| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
+    return header + ["| " + " | ".join(cell(row.get(key)) for key in columns) + " |" for row in rows] + [""]
+
+
+def write_summary(out, rows, issues, source, elapsed):
+    public = bench_tool("awfy").public_data
+    rows = sorted((public(row) for row in rows), key=lambda row: (row["card"], row["program"], row["runtime"]))
+    add_ratios(rows)
+    first = ["card", "program", "runtime", "status", "seconds", "over_cpython", "over_pypy", "over_go"]
+    fields = first + sorted(set().union(*(r.keys() for r in rows)) - set(first))
+    with (out / "summary.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    lines = ["# Runtime scorecards", "", f"Source revision `{source}`.", "",
+             "Time ratios use matched successful rows. Blanks denote missing observations. "
+             "The CSV retains diagnostics, including the final five values’ median when a run fails to settle.", ""]
+    if elapsed:
+        lines.extend([f"The {len(elapsed)} daily arms took {sum(elapsed.values()) / 60:.1f} minutes "
+                      "including queue waits. Paired repeats are a separate run.", ""])
+    if issues:
+        lines.extend(["## Incomplete arms", "", *["- " + issue for issue in issues], ""])
+    lines.extend(summary_overview(rows))
+    titles = ["Pure Python", "Application paths", "Short programs", "Native and mixed workloads", "Time to steady state"]
+    descriptions = [
+        "Seconds per verified AWFY iteration or pyperf operation in the steady suffix. "
+        "Go ratios require a matching port. Keep AWFY and the prospective held-outs separate.",
+        "Flask reports the median of three fresh servers at each layout. Its profiling row uses a separate warm server. "
+        "Counts are per completed request or pyperf operation. The six percentages partition leaf cycle samples. "
+        "Shared-client layouts are diagnostic, and failed requests disqualify a gate.",
+        "Whole-process wall time at the status suite's fixed work and output checks. "
+        "The CLI, startup and additional fresh-process workers have separate denominators.",
+        "Median time over the final five values. The stock native share includes callees up to Python re-entry. "
+        "Score native-majority, mixed and boxed boundary calls separately.",
+        "The last five values define the final median. The suffix must contain at least five values, "
+        "all within 5% of that median. A batch reports its first operation. An unsettled row fails this card. "
+        "Unit-event replays measure Lucifer churn. PyPy loop and bridge counters are in the CSV.",
+    ]
+    for card, title in enumerate(titles, 1):
+        group = [r for r in rows if r["card"] == card]
+        columns = ["program", "runtime", "status"]
+        columns += {1: ["seconds","over_cpython","over_pypy","over_go","final_s"],
+                    2: ["ops_per_s","final_ops_per_s","rps","rps_min","rps_max","rps_over_cpython","scaling","p99_ms","errors"],
+                    3: ["seconds","over_cpython"], 4: ["seconds","over_cpython","group","stock_native_pct"],
+                    5: ["first_steady_op","warmup_s","compile_ms","post_compile_ms","post_rebuilds","post_kills"]}[card]
+        lines.extend([f"## {card}. {title}", "", descriptions[card-1], ""])
+        lines.extend(markdown_table(group, columns))
+        if card == 2:
+            lines.extend(["### Warm CPU attribution", ""])
+            profiles = [r for r in group if "profile_status" in r or r["program"].endswith(".profile")]
+            lines.extend(markdown_table(profiles, ["program", "runtime", "profile_status", "profile_units",
+                                      "instructions_per_unit", "cycles_per_unit", "compiled_pct", "interpreter_pct",
+                                      "runtime_c_pct", "native_pct", "kernel_pct", "unknown_pct"]))
+    repeats = []
+    for r in rows:
+        for metric in ("seconds", "final_s", "cycles_per_unit", "first_steady_op"):
+            n = r.get(metric + "_paired_n")
+            if n:
+                low, high = r[metric + "_ratio_min"], r[metric + "_ratio_max"]
+                repeats.append(dict(card=r["card"], program=r["program"], metric=metric, pairs=n,
+                                    low=low, high=high, spread_pct=100 * (high / low - 1) if low else None))
+    if repeats:
+        lines.extend(["## Paired repeatability", "", "Low and high are the observed Lucifer/stock ratios "
+                      "in five interleaved pairs. Spread is 100 × (high/low − 1). A final_s range is diagnostic.", ""])
+        lines.extend(markdown_table(repeats, ["card", "program", "metric", "pairs", "low", "high", "spread_pct"]))
+    (out / "summary.md").write_text("\n".join(lines) + "\n")
+
+
+def revision():
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--runtimes", default="cpython,lucifer,pypy,go")
+    p.add_argument("--site", type=Path, default=ROOT / "build/corpus/site")
+    p.add_argument("--output", type=Path, default=ROOT / "results" / f"scorecard-{datetime.datetime.now(datetime.timezone.utc).date()}")
+    p.add_argument("--scratch", type=Path, default=ROOT / "build/scorecard")
+    p.add_argument("--repeatability", type=Path, metavar="RUN",
+                   help="measure five paired repeats on representative rows of a previous run, then render it")
+    p.add_argument("--summarize", type=Path, metavar="RUN", help="render a completed scratch run again")
+    p.add_argument("--section", choices=["awfy","corpus","web","profile","repeat"], help=argparse.SUPPRESS)
+    p.add_argument("--receipt", type=Path, help=argparse.SUPPRESS)
+    args = p.parse_args()
+    if args.repeatability:
+        args.summarize = args.repeatability.resolve()
+        recorded = json.loads((args.summarize / "run.json").read_text())["runtime_sha256"]
+        current = fingerprints(("cpython", "lucifer"))
+        if len(current) != 2 or any(recorded.get(label) != digest for label, digest in current.items()):
+            p.error("repeatability requires the baseline stock and Lucifer executables")
+        if not os.environ.get("TIMING_PREFIX"):
+            p.error("set TIMING_PREFIX for paired repeats")
+        repeat_dir = args.summarize / "repeatability"
+        repeat_dir.mkdir(exist_ok=True)
+        cmd = [sys.executable, __file__, "--section", "repeat", "--runtimes", "lucifer",
+               "--site", str(args.site.resolve()), "--scratch", str(args.summarize),
+               "--receipt", str(repeat_dir / "samples.jsonl")]
+        with (repeat_dir / "run.log").open("w") as log:
+            subprocess.run(shlex.split(os.environ["TIMING_PREFIX"]) + cmd, stdout=log, stderr=subprocess.STDOUT, check=True)
+    if args.summarize:
+        meta = json.loads((args.summarize / "run.json").read_text())
+        rows = [json.loads(line) for f in sorted(args.summarize.glob("*.jsonl"))
+                for line in f.read_text().splitlines()]
+        receipt = args.summarize / "repeatability/samples.jsonl"
+        if receipt.is_file():
+            repeat_fields(rows, [json.loads(line) for line in receipt.read_text().splitlines()])
+        args.output.mkdir(parents=True, exist_ok=True)
+        write_summary(args.output, rows, meta["issues"], meta["revision"], meta["elapsed_s"])
+        return int(bool(meta["issues"]))
+    if args.section:
+        if args.receipt is None:
+            p.error("a worker needs --receipt")
+        return worker(args)
+    runtimes = args.runtimes.split(",")
+    if not runtimes or len(runtimes) != len(set(runtimes)) or set(runtimes) - {"cpython","lucifer","pypy","go"}:
+        p.error("choose distinct names from cpython,lucifer,pypy,go")
+    if "cpython" not in runtimes and set(runtimes) != {"go"}:
+        runtimes.insert(0, "cpython")  # stock defines the corpus classification and denominators
+    if not all(os.environ.get(key) for key in ("TEST_PREFIX", "TIMING_PREFIX")):
+        p.error("set TEST_PREFIX and TIMING_PREFIX for the test host")
+    args.scratch.mkdir(parents=True, exist_ok=True)
+    if set(runtimes) != {"go"}:
+        corpus = bench_tool("corpus")
+        stamp = args.site / ".lock-sha256"
+        digest = hashlib.sha256(corpus.LOCK.read_bytes()).hexdigest()
+        if not stamp.is_file() or stamp.read_text() != digest:
+            if args.site.resolve() != (ROOT / "build/corpus/site"):
+                p.error("custom --site must be prepared with the current corpus lock")
+            subprocess.run(shlex.split(os.environ["TEST_PREFIX"]) + [
+                sys.executable, str(ROOT / "tools/bench/corpus"), "prepare", str(args.site),
+                "--cache", str(args.scratch / "downloads")], check=True)
+    scratch = Path(tempfile.mkdtemp(prefix="run-", dir=args.scratch.resolve()))
+    args.output.mkdir(parents=True, exist_ok=True)
+    python = sorted((r for r in runtimes if r != "go"), key=lambda r: r != "cpython")
+    jobs = ([("corpus", ["cpython"])] if python else []) + [("awfy", [r]) for r in runtimes]
+    jobs += [("corpus", [r]) for r in python if r != "cpython"]
+    if python:
+        jobs += [("web",python), ("profile",python)]
+    source = revision()
+    runtime_sha256 = fingerprints(runtimes)
+    rows, issues, elapsed = [], [], {}
+    print(f"Raw observations: {scratch}", flush=True)
+    for section, labels in jobs:
+        label = section + "-" + "-".join(labels)
+        receipt = scratch / (label + ".jsonl")
+        cmd = [sys.executable, __file__, "--section", section, "--runtimes", ",".join(labels),
+               "--site", str(args.site.resolve()), "--scratch", str(scratch), "--receipt", str(receipt)]
+        prefix = os.environ["TEST_PREFIX" if section == "web" else "TIMING_PREFIX"]
+        print(label, flush=True)
+        started = time.monotonic()
+        with (scratch / (label + ".log")).open("w") as log:
+            done = subprocess.run(shlex.split(prefix) + cmd, stdout=log, stderr=subprocess.STDOUT)
+        if done.returncode:
+            issues.append(f"{label} exited {done.returncode}")
+        if receipt.exists():
+            rows.extend(json.loads(line) for line in receipt.read_text().splitlines())
+        elapsed[label] = round(time.monotonic() - started, 3)
+        (scratch / "run.json").write_text(json.dumps(dict(revision=source, runtime_sha256=runtime_sha256, issues=issues, elapsed_s=elapsed), indent=2))
+    write_summary(args.output, rows, issues, source, elapsed)
+    return int(bool(issues))
+
+
+if __name__ == "__main__":
+    sys.exit(cold_execution() if sys.argv[1:] == ["--cold-exec"] else main())
