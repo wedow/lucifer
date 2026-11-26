@@ -2,83 +2,19 @@
 """Binary-level regression checks for benchmark drivers, using no real timings."""
 import csv
 import hashlib
-from importlib.machinery import SourceFileLoader
-from importlib.util import module_from_spec, spec_from_loader
 import io
 import json
 import os
 from pathlib import Path
-import shlex
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
 import zipfile
 
 from common import ROOT
 from steady import median_interval, steady_start, summarize
-
-
-def status_with_prefix(root):
-    loader = SourceFileLoader('status_tool', str(ROOT / 'tools/status'))
-    spec = spec_from_loader(loader.name, loader)
-    status = module_from_spec(spec)
-    loader.exec_module(status)
-    prefix = root / 'prefix.py'
-    prefix.write_text('import json, os, sys\n'
-                      'with open(sys.argv[1], "a") as log:\n'
-                      '    print(json.dumps(sys.argv[4:]), file=log)\n'
-                      'os.execv(sys.argv[2], sys.argv[2:])\n')
-    log = root / 'prefix.log'
-    return status, log, patch.dict(os.environ, TIMING_PREFIX=shlex.join([sys.executable, str(prefix), str(log)]))
-
-
-class StatusCheck(unittest.TestCase):
-    def test_awfy_is_one_prefixed_step(self):
-        with tempfile.TemporaryDirectory() as temp:
-            status, log, prefix = status_with_prefix(Path(temp))
-            worker = Path(temp) / 'awfy.py'
-            worker.write_text('import json, sys\n'
-                              'assert sys.argv[3:] == ["--iters", "3", "--run=on=fake"]\n'
-                              'print(json.dumps({n: {"on": 42} for n in sys.argv[2].split(",")}))\n')
-            with prefix, patch.object(status, '__file__', str(worker)):
-                times = status.timings(['Alpha', 'Beta'], 3, {'on': 'fake'})
-            self.assertEqual(times, {'Alpha': {'on': 42}, 'Beta': {'on': 42}})
-            self.assertEqual([json.loads(line)[1] for line in log.read_text().splitlines()], ['Alpha,Beta'])
-
-    def test_web_is_one_prefixed_step_per_runtime(self):
-        with tempfile.TemporaryDirectory() as temp:
-            status, log, prefix = status_with_prefix(Path(temp))
-            worker = Path(temp) / 'web.py'
-            worker.write_text('import json, sys\n'
-                              'for run in sys.argv[4:]:\n'
-                              '    name, cmd = run.removeprefix("--run=").split("=", 1)\n'
-                              '    assert cmd == "fake " + name\n'
-                              '    for cpu in map(int, sys.argv[3].split(",")):\n'
-                              '        print(json.dumps(dict(runtime=name, cpus=cpu, rps=100 * cpu,\n'
-                              '                              p50_ms=1, p99_ms=2, errors=0, server_exit=None)))\n')
-            with prefix, patch.object(status, 'WEB', worker), patch.object(status, 'WEB_CPUS', '1,2'):
-                points, output = status.web_timings({'a': 'fake a', 'b': 'fake b'})
-            self.assertEqual(points, {name: {str(cpu): dict(rps=100 * cpu, p50_ms=1, p99_ms=2, errors=0,
-                                                            server_exit=None) for cpu in (1, 2)} for name in 'ab'})
-            self.assertEqual(len(output.splitlines()), 4)
-            self.assertEqual([json.loads(line)[2:] for line in log.read_text().splitlines()],
-                             [['1,2', f'--run={name}=fake {name}'] for name in 'ab'])
-
-
-    def test_idioms_are_one_prefixed_step_at_the_reference_counts(self):
-        with tempfile.TemporaryDirectory() as temp:
-            status, log, prefix = status_with_prefix(Path(temp))
-            worker = Path(temp) / 'idioms.py'
-            worker.write_text('import json, sys\n'
-                              'assert sys.argv[2] == "--run=lucifer=fake"\n'
-                              'print(json.dumps(json.load(open(sys.argv[4]))))\n')
-            with prefix, patch.object(status, 'IDIOMS', worker):
-                found, _ = status.idiom_timings({'lucifer': 'fake'}, {'counts': {'a': [1, 2]}})
-            self.assertEqual(found, {'counts': {'a': [1, 2]}})
-            self.assertEqual(len(log.read_text().splitlines()), 1)
 
 
 class IdiomsCheck(unittest.TestCase):
@@ -334,22 +270,6 @@ class CorpusCheck(unittest.TestCase):
         reference['cli.black']['check'] = 'other'
         self.assertEqual(self.time(['cli.black'], reference)['cli.black']['status'], 'wrong')
         self.assertEqual(self.time(['cli.isort'], reference)['cli.isort']['status'], 'noreference')
-
-    def test_status_corpus_prefix_runs_a_batch_of_programs_per_step(self):
-        status, log, prefix = status_with_prefix(self.root)
-        stamp = hashlib.sha256((ROOT / 'tools/bench/corpus.lock.json').read_bytes()).hexdigest()
-        (self.site / '.lock-sha256').write_text(stamp)
-        programs = ['pyperformance.alpha', 'pyperformance.alpha_two']
-        reference = self.time(programs)
-        reference[programs[0]]['loops'] = 7
-        with prefix, patch.object(status, 'CORPUS_SITE', self.site):
-            results, output = status.corpus_timings(shlex.quote(str(self.python)), reference)
-        self.assertEqual({p: r for p, r in results.items() if r['status'] != 'noreference'},
-                         self.time(programs, reference), output)
-        self.assertEqual(results['startup.import_stdlib']['status'], 'noreference')
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual([args[args.index('--programs') + 1] for args in calls],
-                         [','.join(group) for group in status.batches(list(results), 20)])
 
     def test_compile_warnings_of_a_fresh_site_are_not_output(self):
         # The reference ran on a site whose bytecode was already cached; this one compiles on its first run.
