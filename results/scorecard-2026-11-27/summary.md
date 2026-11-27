@@ -1,798 +1,1024 @@
 # Runtime scorecards
 
-Source revision `ee5a90dfee1d83078f83b8110b7dd0a7d4960377`.
+Source revision `5b164faf4d52ac4e24fe56587927f45834b0a3d2`.
+
+The trial began at `a3fad06c`. The source revision above includes the scheduling, Flask controller and reporting fixes applied during collection. The runtime binary and sample counts were the same throughout.
+
+Whole-process timer: hyperfine 2.0.0.
 
 ## Scorecards
 
-Stock is CPython 3.14t. Ratios compare Lucifer time except for Flask, which compares requests/s on disjoint server and client CPUs. Each paired manifest has one vote. Change compares the same programs with yesterday's ratios; a dash means no comparable measurement.
+Stock is CPython 3.14t. Ratios compare Lucifer time to the reference. The Flask CPU layouts compare requests/s on disjoint server and client CPUs. Within each group the geometric mean gives each program one vote. A multi-task program sums its task times before division. Failed runs count against coverage. Bounds propagate each timing’s 95% interval through the sums, numerator/denominator extremes, and geometric mean. A percentage change requires the same programs and nonoverlapping intervals on consecutive dates.
 
-| Card | Lucifer | Paired / observed | Target | Change since yesterday |
+| Card | Lucifer | Failed programs | Target | Change since yesterday |
 |---|---|---|---|---|
-| 1. Pure-Python compute / Held-out real Python programs | Go 10.7×, PyPy 2.67×<br>stock 0.813× | Go 5/14, PyPy 3/14<br>stock 9/36 | AWFY ≤2× Go and ≤1× PyPy time on all 14<br>Warm-suite bar ≤0.35× stock and ≤0.72× PyPy | Go coverage changed, PyPy coverage changed<br>stock coverage changed |
-| 2. Flask throughput vs stock | 1 CPU 0.264×, 8 CPUs 0.427× | 1 CPU 1/1, 8 CPUs 1/1 | ≥1.5× stock at both counts, ≥4× scaling, zero errors, p99 ≤stock | 1 CPU -0.871%, 8 CPUs — |
-| 3. Short programs vs stock | CLI 3.98×, startup 2.12× | CLI 6/6, startup 3/3 | Each CLI and startup program ≤1× stock time | CLI +2.45%, startup -1.88% |
-| 4. Native-heavy programs vs stock | majority 2.41×, mixed 1.97× | majority 21/21, mixed 27/27 | ≥10% gain on a second wheel, no bulk regression; warm-suite bar ≤0.35× stock | majority coverage changed, mixed coverage changed |
-| 5. Time to steady state | 23/75 settled | 52 unsettled, 0 unavailable | Track onset and compile cost; PLAN2 sets no numeric settling target | coverage changed |
+| 1. Pure-Python compute / Held-out real Python programs | Go 10.7× (10–11.3×), 14/14<br>PyPy 3.3× (3.06–3.44×), 14/14<br>stock 1.03× (0.937–1.13×), 36/36 | Go 0 failed<br>PyPy 0 failed<br>stock 0 failed | AWFY ≤2× Go and ≤1× PyPy time on all 14<br>Warm-suite bar ≤0.35× stock and ≤0.72× PyPy | Go —<br>PyPy —<br>stock — |
+| 2. Application paths vs stock | 1 CPU 0.266× (0.246–0.285×), 1/1<br>8 CPUs —, 0/1<br>applications (time) 2.12× (1.94–2.32×), 9/9 | 1 CPU 0 failed<br>8 CPUs 1 failed<br>applications (time) 0 failed | Flask ≥1.5× stock at both counts, ≥4× scaling, zero errors, p99 ≤stock | 1 CPU —<br>8 CPUs —<br>applications (time) — |
+| 3. Short programs vs stock | CLI 4.38× (4.1–4.67×), 6/6<br>startup 2.26× (2.01–2.54×), 3/3<br>fresh process 5.5× (4.23–7.22×), 1/1 | CLI 0 failed<br>startup 0 failed<br>fresh process 0 failed | Each CLI and startup program ≤1× stock time | CLI —<br>startup —<br>fresh process — |
+| 4. Native-heavy programs vs stock | majority 2.25× (2.07–2.44×), 20/20<br>mixed 2× (1.82–2.19×), 28/28<br>boundary 3.49× (3.19–3.82×), 2/2<br>unclassified —, 0/1 | majority 0 failed<br>mixed 0 failed<br>boundary 0 failed<br>unclassified 1 failed | ≥10% gain on a second wheel, no bulk regression, warm-suite bar ≤0.35× stock | majority —<br>mixed —<br>boundary —<br>unclassified — |
+| 5. Post-warm-up JIT churn | Lucifer FAIL 92/111 with churn<br>PyPy FAIL 76/107 with churn | Lucifer 2 unmeasured<br>PyPy 6 unmeasured | Zero builds, kills and compile time after warm-up | — |
+
+### All-program geometric mean by card
+
+Each ratio is Lucifer time divided by reference time. Flask contributes the inverse of each disjoint layout’s throughput ratio. Go covers the verified AWFY ports.
+
+| Card | Time ratios | Failed programs | Change since yesterday |
+|---|---|---|---|
+| 1 | stock 0.694× (0.639–0.754×), 50/50<br>PyPy 3.87× (3.42–4.39×), 49/50<br>Go 10.7× (10–11.3×), 14/14 | stock 0 failed<br>PyPy 1 failed<br>Go 0 failed | stock —<br>PyPy —<br>Go — |
+| 2 | stock 2.25× (2.05–2.45×), 10/11<br>PyPy 4.11× (3.44–4.98×), 9/11 | stock 1 failed<br>PyPy 2 failed | stock —<br>PyPy — |
+| 3 | stock 3.67× (3.32–4.06×), 10/10<br>PyPy 1.56× (1.42–1.7×), 10/10 | stock 0 failed<br>PyPy 0 failed | stock —<br>PyPy — |
+| 4 | stock 2.14× (1.96–2.34×), 50/51<br>PyPy 2.39× (2.05–inf×), 48/51 | stock 1 failed<br>PyPy 3 failed | stock —<br>PyPy — |
 
 ## 1. Pure Python
 
-Seconds per verified AWFY iteration or pyperf operation in the steady suffix. Go ratios require a matching port. Keep AWFY and the prospective held-outs separate.
+AWFY discards the first 3 verified in-process iterations for every runtime. It reports the median and a 95% bootstrap interval over the next 7. Pyperformance discards 3 warm-up values and reports pyperf’s mean and sample standard deviation over 8 measured values. Means use a two-sided Student t interval.
 
-| program | runtime | status | group | seconds | over_cpython | over_pypy | over_go | final_s |
-|---|---|---|---|---|---|---|---|---|
-| awfy.Bounce | cpython | ok | — | 1.923 | 1 | 48.168 | — | 1.9297 |
-| awfy.Bounce | go | unsettled | — | — | — | — | — | 0.037138 |
-| awfy.Bounce | lucifer | ok | — | 0.15189 | 0.078989 | 3.8047 | — | 0.15189 |
-| awfy.Bounce | pypy | ok | — | 0.039922 | 0.020761 | 1 | — | 0.039922 |
-| awfy.CD | cpython | ok | — | 3.1203 | 1 | — | — | 3.1154 |
-| awfy.CD | go | unsettled | — | — | — | — | — | 0.10157 |
-| awfy.CD | lucifer | unsettled | — | — | — | — | — | 1.1008 |
-| awfy.CD | pypy | unsettled | — | — | — | — | — | 0.28395 |
-| awfy.DeltaBlue | cpython | unsettled | — | — | — | — | — | 0.77288 |
-| awfy.DeltaBlue | go | unsettled | — | — | — | — | — | 0.046244 |
-| awfy.DeltaBlue | lucifer | unsettled | — | — | — | — | — | 0.606 |
-| awfy.DeltaBlue | pypy | unsettled | — | — | — | — | — | 0.08252 |
-| awfy.Havlak | cpython | ok | — | 4.4739 | 1 | 7.4871 | 20.58 | 4.484 |
-| awfy.Havlak | go | ok | — | 0.21739 | 0.048592 | 0.36381 | 1 | 0.21739 |
-| awfy.Havlak | lucifer | ok | — | 2.8343 | 0.63352 | 4.7432 | 13.038 | 2.8258 |
-| awfy.Havlak | pypy | ok | — | 0.59755 | 0.13356 | 1 | 2.7487 | 0.59755 |
-| awfy.Json | cpython | unsettled | — | — | — | — | — | 1.0566 |
-| awfy.Json | go | unsettled | — | — | — | — | — | 0.050517 |
-| awfy.Json | lucifer | unsettled | — | — | — | — | — | 0.37878 |
-| awfy.Json | pypy | unsettled | — | — | — | — | — | 0.11752 |
-| awfy.List | cpython | unsettled | — | — | — | — | — | 1.2605 |
-| awfy.List | go | unsettled | — | — | — | — | — | 0.025519 |
-| awfy.List | lucifer | ok | — | 0.27627 | — | — | — | 0.27627 |
-| awfy.List | pypy | unsettled | — | — | — | — | — | 0.31762 |
-| awfy.Mandelbrot | cpython | ok | — | 1.5768 | 1 | 28.892 | 33.516 | 1.5652 |
-| awfy.Mandelbrot | go | ok | — | 0.047047 | 0.029837 | 0.86205 | 1 | 0.046533 |
-| awfy.Mandelbrot | lucifer | ok | — | 0.057438 | 0.036426 | 1.0524 | 1.2209 | 0.057649 |
-| awfy.Mandelbrot | pypy | ok | — | 0.054576 | 0.034611 | 1 | 1.16 | 0.054895 |
-| awfy.NBody | cpython | ok | — | 2.2333 | 1 | — | 109.5 | 2.2221 |
-| awfy.NBody | go | ok | — | 0.020394 | 0.0091321 | — | 1 | 0.020416 |
-| awfy.NBody | lucifer | ok | — | 0.34053 | 0.15248 | — | 16.697 | 0.34053 |
-| awfy.NBody | pypy | unsettled | — | — | — | — | — | 0.077015 |
-| awfy.Permute | cpython | ok | — | 2.3901 | 1 | — | 93.192 | 2.4288 |
-| awfy.Permute | go | ok | — | 0.025646 | 0.010731 | — | 1 | 0.025678 |
-| awfy.Permute | lucifer | ok | — | 0.94221 | 0.39422 | — | 36.738 | 0.93559 |
-| awfy.Permute | pypy | unsettled | — | — | — | — | — | 0.1916 |
-| awfy.Queens | cpython | unsettled | — | — | — | — | — | 1.1524 |
-| awfy.Queens | go | unsettled | — | — | — | — | — | 0.017006 |
-| awfy.Queens | lucifer | unsettled | — | — | — | — | — | 0.3365 |
-| awfy.Queens | pypy | ok | — | 0.099137 | — | 1 | — | 0.099405 |
-| awfy.Richards | cpython | ok | — | 5.0052 | 1 | — | 63.453 | 5.0122 |
-| awfy.Richards | go | ok | — | 0.07888 | 0.01576 | — | 1 | 0.078867 |
-| awfy.Richards | lucifer | ok | — | 1.119 | 0.22357 | — | 14.186 | 1.119 |
-| awfy.Richards | pypy | unsettled | — | — | — | — | — | 0.20492 |
-| awfy.Sieve | cpython | ok | — | 2.5018 | 1 | 18.838 | — | 2.4961 |
-| awfy.Sieve | go | unsettled | — | — | — | — | — | 0.036104 |
-| awfy.Sieve | lucifer | unsettled | — | — | — | — | — | 0.29936 |
-| awfy.Sieve | pypy | ok | — | 0.13281 | 0.053084 | 1 | — | 0.13281 |
-| awfy.Storage | cpython | ok | — | 2.0467 | 1 | — | — | 2.0566 |
-| awfy.Storage | go | unsettled | — | — | — | — | — | 0.52041 |
-| awfy.Storage | lucifer | unsettled | — | — | — | — | — | 1.4989 |
-| awfy.Storage | pypy | unsettled | — | — | — | — | — | 0.30754 |
-| awfy.Towers | cpython | ok | — | 1.6525 | 1 | — | — | 1.6728 |
-| awfy.Towers | go | unsettled | — | — | — | — | — | 0.020679 |
-| awfy.Towers | lucifer | unsettled | — | — | — | — | — | 0.39073 |
-| awfy.Towers | pypy | unsettled | — | — | — | — | — | 0.25991 |
-| pyperformance.argparse_subparsers | cpython | unsettled | held out | — | — | — | — | 0.015017 |
-| pyperformance.argparse_subparsers | lucifer | unsettled | held out | — | — | — | — | 0.024807 |
-| pyperformance.argparse_subparsers | pypy | unsettled | held out | — | — | — | — | 0.024143 |
-| pyperformance.async_generators | cpython | ok | held out | 0.42168 | 1 | — | — | 0.42168 |
-| pyperformance.async_generators | lucifer | unsettled | held out | — | — | — | — | 1.4205 |
-| pyperformance.async_generators | pypy | unsettled | held out | — | — | — | — | 0.2663 |
-| pyperformance.base64/ascii85_large | cpython | ok | held out | 1.4003 | 1 | — | — | 1.3929 |
-| pyperformance.base64/ascii85_large | lucifer | ok | held out | 1.2285 | 0.87727 | — | — | 1.2285 |
-| pyperformance.base64/ascii85_large | pypy | unsettled | held out | — | — | — | — | 0.27679 |
-| pyperformance.base64/ascii85_small | cpython | ok | held out | 0.026645 | 1 | — | — | 0.026666 |
-| pyperformance.base64/ascii85_small | lucifer | unsettled | held out | — | — | — | — | 0.043555 |
-| pyperformance.base64/ascii85_small | pypy | unsettled | held out | — | — | — | — | 0.003744 |
-| pyperformance.base64/base16_large | cpython | unsettled | held out | — | — | — | — | 0.0071503 |
-| pyperformance.base64/base16_large | lucifer | unsettled | held out | — | — | — | — | 0.034184 |
-| pyperformance.base64/base16_large | pypy | unsettled | held out | — | — | — | — | 0.034054 |
-| pyperformance.base64/base16_small | cpython | unsettled | held out | — | — | — | — | 0.00038777 |
-| pyperformance.base64/base16_small | lucifer | unsettled | held out | — | — | — | — | 0.0062562 |
-| pyperformance.base64/base16_small | pypy | unsettled | held out | — | — | — | — | 0.0011164 |
-| pyperformance.base64/base32_large | cpython | ok | held out | 0.66975 | 1 | — | — | 0.66975 |
-| pyperformance.base64/base32_large | lucifer | ok | held out | 0.78025 | 1.165 | — | — | 0.7801 |
-| pyperformance.base64/base32_large | pypy | unsettled | held out | — | — | — | — | 0.10182 |
-| pyperformance.base64/base32_small | cpython | unsettled | held out | — | — | — | — | 0.012822 |
-| pyperformance.base64/base32_small | lucifer | unsettled | held out | — | — | — | — | 0.018064 |
-| pyperformance.base64/base32_small | pypy | unsettled | held out | — | — | — | — | 0.0021524 |
-| pyperformance.base64/base64_large | cpython | ok | held out | 0.0067414 | 1 | — | — | 0.0067414 |
-| pyperformance.base64/base64_large | lucifer | unsettled | held out | — | — | — | — | 0.033156 |
-| pyperformance.base64/base64_large | pypy | unsettled | held out | — | — | — | — | 0.016476 |
-| pyperformance.base64/base64_small | cpython | ok | held out | 0.00032906 | 1 | — | — | 0.00032906 |
-| pyperformance.base64/base64_small | lucifer | unsettled | held out | — | — | — | — | 0.0016576 |
-| pyperformance.base64/base64_small | pypy | unsettled | held out | — | — | — | — | 0.00065679 |
-| pyperformance.base64/base85_large | cpython | unsettled | held out | — | — | — | — | 0.55507 |
-| pyperformance.base64/base85_large | lucifer | unsettled | held out | — | — | — | — | 0.5199 |
-| pyperformance.base64/base85_large | pypy | ok | held out | 0.11514 | — | 1 | — | 0.11536 |
-| pyperformance.base64/base85_small | cpython | unsettled | held out | — | — | — | — | 0.010484 |
-| pyperformance.base64/base85_small | lucifer | unsettled | held out | — | — | — | — | 0.018144 |
-| pyperformance.base64/base85_small | pypy | unsettled | held out | — | — | — | — | 0.0016145 |
-| pyperformance.base64/urlsafe_base64_small | cpython | unsettled | held out | — | — | — | — | 0.00056836 |
-| pyperformance.base64/urlsafe_base64_small | lucifer | unsettled | held out | — | — | — | — | 0.0024817 |
-| pyperformance.base64/urlsafe_base64_small | pypy | unsettled | held out | — | — | — | — | 0.00081508 |
-| pyperformance.bpe_tokeniser | cpython | ok | held out | 6.1588 | 1 | 3.3225 | — | 6.1512 |
-| pyperformance.bpe_tokeniser | lucifer | ok | held out | 4.3943 | 0.7135 | 2.3706 | — | 4.3732 |
-| pyperformance.bpe_tokeniser | pypy | ok | held out | 1.8537 | 0.30098 | 1 | — | 1.8316 |
-| pyperformance.chaos | cpython | unsettled | held out | — | — | — | — | 0.093482 |
-| pyperformance.chaos | lucifer | unsettled | held out | — | — | — | — | 0.036431 |
-| pyperformance.chaos | pypy | unsettled | held out | — | — | — | — | 0.0063759 |
-| pyperformance.comprehensions | cpython | ok | held out | 2.2646e-05 | 1 | 2.7714 | — | 2.256e-05 |
-| pyperformance.comprehensions | lucifer | unsettled | held out | — | — | — | — | 2.9712e-05 |
-| pyperformance.comprehensions | pypy | ok | held out | 8.1712e-06 | 0.36083 | 1 | — | 8.1712e-06 |
-| pyperformance.coroutines | cpython | unsettled | held out | — | — | — | — | 0.029555 |
-| pyperformance.coroutines | lucifer | unsettled | held out | — | — | — | — | 0.04539 |
-| pyperformance.coroutines | pypy | ok | held out | 0.015946 | — | 1 | — | 0.015856 |
-| pyperformance.crypto_pyaes | cpython | unsettled | held out | — | — | — | — | 0.11659 |
-| pyperformance.crypto_pyaes | lucifer | unsettled | held out | — | — | — | — | 0.086671 |
-| pyperformance.crypto_pyaes | pypy | unsettled | held out | — | — | — | — | 0.0044797 |
-| pyperformance.deepcopy/deepcopy | cpython | unsettled | held out | — | — | — | — | 0.00040372 |
-| pyperformance.deepcopy/deepcopy | lucifer | unsettled | held out | — | — | — | — | 0.00051846 |
-| pyperformance.deepcopy/deepcopy | pypy | unsettled | held out | — | — | — | — | 9.4704e-05 |
-| pyperformance.deepcopy/deepcopy_memo | cpython | ok | held out | 4.0947e-05 | 1 | — | — | 4.0658e-05 |
-| pyperformance.deepcopy/deepcopy_memo | lucifer | unsettled | held out | — | — | — | — | 3.8934e-05 |
-| pyperformance.deepcopy/deepcopy_memo | pypy | unsettled | held out | — | — | — | — | 9.5145e-06 |
-| pyperformance.deepcopy/deepcopy_reduce | cpython | unsettled | held out | — | — | — | — | 3.9176e-06 |
-| pyperformance.deepcopy/deepcopy_reduce | lucifer | unsettled | held out | — | — | — | — | 6.3951e-06 |
-| pyperformance.deepcopy/deepcopy_reduce | pypy | unsettled | held out | — | — | — | — | 3.5078e-05 |
-| pyperformance.deltablue | cpython | unsettled | held out | — | — | — | — | 0.0046907 |
-| pyperformance.deltablue | lucifer | unsettled | held out | — | — | — | — | 0.0043611 |
-| pyperformance.deltablue | pypy | unsettled | held out | — | — | — | — | 0.00087058 |
-| pyperformance.fannkuch | cpython | unsettled | held out | — | — | — | — | 0.58485 |
-| pyperformance.fannkuch | lucifer | ok | held out | 0.54066 | — | 6.734 | — | 0.537 |
-| pyperformance.fannkuch | pypy | ok | held out | 0.080288 | — | 1 | — | 0.079721 |
-| pyperformance.generators | cpython | ok | held out | 0.033775 | 1 | — | — | 0.033775 |
-| pyperformance.generators | lucifer | ok | held out | 0.05701 | 1.6879 | — | — | 0.057034 |
-| pyperformance.generators | pypy | unsettled | held out | — | — | — | — | 0.023829 |
-| pyperformance.go | cpython | unsettled | held out | — | — | — | — | 0.14706 |
-| pyperformance.go | lucifer | unsettled | held out | — | — | — | — | 0.1322 |
-| pyperformance.go | pypy | unsettled | held out | — | — | — | — | 0.14979 |
-| pyperformance.hexiom | cpython | unsettled | held out | — | — | — | — | 0.0078465 |
-| pyperformance.hexiom | lucifer | unsettled | held out | — | — | — | — | 0.0054404 |
-| pyperformance.hexiom | pypy | unsettled | held out | — | — | — | — | 0.0023391 |
-| pyperformance.mdp | cpython | ok | held out | 1.9608 | 1 | 0.35651 | — | 1.9629 |
-| pyperformance.mdp | lucifer | ok | held out | 7.1427 | 3.6427 | 1.2987 | — | 7.1305 |
-| pyperformance.mdp | pypy | ok | held out | 5.5001 | 2.805 | 1 | — | 5.4957 |
-| pyperformance.meteor_contest | cpython | unsettled | held out | — | — | — | — | 0.13321 |
-| pyperformance.meteor_contest | lucifer | unsettled | held out | — | — | — | — | 0.42508 |
-| pyperformance.meteor_contest | pypy | ok | held out | 0.052799 | — | 1 | — | 0.052683 |
-| pyperformance.nbody | cpython | unsettled | held out | — | — | — | — | 0.16317 |
-| pyperformance.nbody | lucifer | ok | held out | 0.07038 | — | — | — | 0.070175 |
-| pyperformance.nbody | pypy | unsettled | held out | — | — | — | — | 0.010437 |
-| pyperformance.networkx | cpython | ok | held out | 0.61256 | 1 | — | — | 0.61289 |
-| pyperformance.networkx | lucifer | ok | held out | 0.74663 | 1.2189 | — | — | 0.75111 |
-| pyperformance.networkx | pypy | unsettled | held out | — | — | — | — | 0.55635 |
-| pyperformance.networkx_connected_components | cpython | ok | held out | 0.57064 | 1 | — | — | 0.5703 |
-| pyperformance.networkx_connected_components | lucifer | ok | held out | 0.65651 | 1.1505 | — | — | 0.64914 |
-| pyperformance.networkx_connected_components | pypy | unsettled | held out | — | — | — | — | 0.56532 |
-| pyperformance.networkx_k_core | cpython | ok | held out | 2.8494 | 1 | — | — | 2.8454 |
-| pyperformance.networkx_k_core | lucifer | ok | held out | 4.1469 | 1.4554 | — | — | 4.099 |
-| pyperformance.networkx_k_core | pypy | unsettled | held out | — | — | — | — | 2.1857 |
-| pyperformance.nqueens | cpython | ok | held out | 0.11074 | 1 | 4.377 | — | 0.11168 |
-| pyperformance.nqueens | lucifer | unsettled | held out | — | — | — | — | 0.13751 |
-| pyperformance.nqueens | pypy | ok | held out | 0.025301 | 0.22847 | 1 | — | 0.025301 |
-| pyperformance.pidigits | cpython | ok | held out | 0.19334 | 1 | — | — | 0.19334 |
-| pyperformance.pidigits | lucifer | unsettled | held out | — | — | — | — | 0.24484 |
-| pyperformance.pidigits | pypy | unsettled | held out | — | — | — | — | 0.14568 |
-| pyperformance.pprint/pprint_pformat | cpython | unsettled | held out | — | — | — | — | 2.2041 |
-| pyperformance.pprint/pprint_pformat | lucifer | ok | held out | 4.7653 | — | — | — | 4.7396 |
-| pyperformance.pprint/pprint_pformat | pypy | unsettled | held out | — | — | — | — | 0.47723 |
-| pyperformance.pprint/pprint_safe_repr | cpython | ok | held out | 1.0993 | 1 | — | — | 1.0993 |
-| pyperformance.pprint/pprint_safe_repr | lucifer | unsettled | held out | — | — | — | — | 2.4995 |
-| pyperformance.pprint/pprint_safe_repr | pypy | unsettled | held out | — | — | — | — | 0.23441 |
-| pyperformance.pyflate | cpython | ok | held out | 0.5759 | 1 | 4.377 | — | 0.57122 |
-| pyperformance.pyflate | lucifer | unsettled | held out | — | — | — | — | 0.75494 |
-| pyperformance.pyflate | pypy | ok | held out | 0.13158 | 0.22847 | 1 | — | 0.13129 |
-| pyperformance.raytrace | cpython | unsettled | held out | — | — | — | — | 0.39982 |
-| pyperformance.raytrace | lucifer | unsettled | held out | — | — | — | — | 0.19533 |
-| pyperformance.raytrace | pypy | ok | held out | 0.013967 | — | 1 | — | 0.013967 |
-| pyperformance.regex_compile | cpython | unsettled | held out | — | — | — | — | 0.19751 |
-| pyperformance.regex_compile | lucifer | unsettled | held out | — | — | — | — | 0.40672 |
-| pyperformance.regex_compile | pypy | pyperf stderr differs from oracle | held out | — | — | — | — | — |
-| pyperformance.richards | cpython | ok | held out | 0.062786 | 1 | 36.481 | — | 0.062786 |
-| pyperformance.richards | lucifer | unsettled | held out | — | — | — | — | 0.013724 |
-| pyperformance.richards | pypy | ok | held out | 0.001721 | 0.027411 | 1 | — | 0.001721 |
-| pyperformance.richards_super | cpython | ok | held out | 0.072833 | 1 | — | — | 0.072833 |
-| pyperformance.richards_super | lucifer | ok | held out | 0.013044 | 0.1791 | — | — | 0.013044 |
-| pyperformance.richards_super | pypy | unsettled | held out | — | — | — | — | 0.001848 |
-| pyperformance.spectral_norm | cpython | ok | held out | 0.14751 | 1 | — | — | 0.14751 |
-| pyperformance.spectral_norm | lucifer | ok | held out | 0.014778 | 0.10019 | — | — | 0.014786 |
-| pyperformance.spectral_norm | pypy | unsettled | held out | — | — | — | — | 0.0055203 |
-| pyperformance.sqlglot_v2 | cpython | unsettled | held out | — | — | — | — | 0.16212 |
-| pyperformance.sqlglot_v2 | lucifer | unsettled | held out | — | — | — | — | 0.33947 |
-| pyperformance.sqlglot_v2 | pypy | unsettled | held out | — | — | — | — | 0.13052 |
-| pyperformance.sqlglot_v2_optimize | cpython | unsettled | held out | — | — | — | — | 0.073612 |
-| pyperformance.sqlglot_v2_optimize | lucifer | unsettled | held out | — | — | — | — | 0.21824 |
-| pyperformance.sqlglot_v2_optimize | pypy | unsettled | held out | — | — | — | — | 0.14811 |
-| pyperformance.sqlglot_v2_parse | cpython | unsettled | held out | — | — | — | — | 0.0017629 |
-| pyperformance.sqlglot_v2_parse | lucifer | unsettled | held out | — | — | — | — | 0.0026113 |
-| pyperformance.sqlglot_v2_parse | pypy | unsettled | held out | — | — | — | — | 0.0013048 |
-| pyperformance.sqlglot_v2_transpile | cpython | unsettled | held out | — | — | — | — | 0.0022267 |
-| pyperformance.sqlglot_v2_transpile | lucifer | unsettled | held out | — | — | — | — | 0.0035512 |
-| pyperformance.sqlglot_v2_transpile | pypy | unsettled | held out | — | — | — | — | 0.002061 |
-| pyperformance.tomli_loads | cpython | ok | held out | 2.5562 | 1 | 2.1634 | — | 2.5223 |
-| pyperformance.tomli_loads | lucifer | ok | held out | 2.4747 | 0.96811 | 2.0944 | — | 2.4808 |
-| pyperformance.tomli_loads | pypy | ok | held out | 1.1816 | 0.46223 | 1 | — | 1.1816 |
-| pyperformance.unpack_sequence | cpython | unsettled | held out | — | — | — | — | 6.5294e-08 |
-| pyperformance.unpack_sequence | lucifer | unsettled | held out | — | — | — | — | 6.7893e-08 |
-| pyperformance.unpack_sequence | pypy | unsettled | held out | — | — | — | — | 1.3949e-10 |
-| pyperformance.xdsl | cpython | unsettled | held out | — | — | — | — | 0.074613 |
-| pyperformance.xdsl | lucifer | unsettled | held out | — | — | — | — | 0.14071 |
-| pyperformance.xdsl | pypy | unsettled | held out | — | — | — | — | 0.010694 |
+Whole-process coverage: cpython 50/50 (0 failed), go 14/14 (0 failed), lucifer 50/50 (0 failed), pypy 49/50 (1 failed).
+
+| program | runtime | status | group | seconds | stdev_s | 95% interval | × stock | × PyPy | × Go | whole_mean_s | whole_stdev_s | whole_median_s | whole_min_s | whole × stock | whole × PyPy | whole × Go |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| awfy.Bounce | cpython | ok | — | 2.2116 | — | 2.0995–2.2687 | 1× (1–1×) | 45.4× (42.9–46.6×) | 56.3× (51.8–57.9×) | 2.225 | 0.017794 | 2.2241 | 2.2002 | 1× (1–1×) | 19.6× (19.2–20.1×) | 51.6× (49.9–53.4×) |
+| awfy.Bounce | go | ok | — | 0.03928 | — | 0.039163–0.040529 | 0.0178× (0.0173–0.0193×) | 0.806× (0.801–0.832×) | 1× (1–1×) | 0.043121 | 0.00085108 | 0.043252 | 0.042034 | 0.0194× (0.0187–0.0201×) | 0.38× (0.366–0.395×) | 1× (1–1×) |
+| awfy.Bounce | lucifer | ok | — | 0.15278 | — | 0.15232–0.15298 | 0.0691× (0.0671–0.0729×) | 3.13× (3.11–3.14×) | 3.89× (3.76–3.91×) | 0.21263 | 0.0040187 | 0.21262 | 0.208 | 0.0956× (0.0924–0.0988×) | 1.88× (1.81–1.94×) | 4.93× (4.7–5.17×) |
+| awfy.Bounce | pypy | ok | — | 0.048739 | — | 0.048695–0.048914 | 0.022× (0.0215–0.0233×) | 1× (1–1×) | 1.24× (1.2–1.25×) | 0.11334 | 0.0011691 | 0.11377 | 0.1115 | 0.0509× (0.0498–0.0521×) | 1× (1–1×) | 2.63× (2.53–2.73×) |
+| awfy.CD | cpython | ok | — | 3.0809 | — | 2.9999–3.1469 | 1× (1–1×) | 9.69× (9.31–10.1×) | 25.7× (24.6–31.1×) | 3.0431 | 0.050085 | 3.0447 | 2.9762 | 1× (1–1×) | 2.31× (2.22–2.39×) | 24.5× (23.5–25.6×) |
+| awfy.CD | go | ok | — | 0.11985 | — | 0.1011–0.12172 | 0.0389× (0.0321–0.0406×) | 0.377× (0.314–0.389×) | 1× (1–1×) | 0.12401 | 0.0022816 | 0.12509 | 0.12112 | 0.0407× (0.039–0.0425×) | 0.0939× (0.0904–0.0976×) | 1× (1–1×) |
+| awfy.CD | lucifer | ok | — | 1.0934 | — | 1.0886–1.1465 | 0.355× (0.346–0.382×) | 3.44× (3.38–3.67×) | 9.12× (8.94–11.3×) | 1.3889 | 0.030931 | 1.4009 | 1.3454 | 0.456× (0.435–0.479×) | 1.05× (1.01–1.1×) | 11.2× (10.6–11.8×) |
+| awfy.CD | pypy | ok | — | 0.31796 | — | 0.31271–0.32216 | 0.103× (0.0994–0.107×) | 1× (1–1×) | 2.65× (2.57–3.19×) | 1.3199 | 0.016377 | 1.319 | 1.2957 | 0.434× (0.419–0.45×) | 1× (1–1×) | 10.6× (10.2–11.1×) |
+| awfy.DeltaBlue | cpython | ok | — | 0.88133 | — | 0.87669–0.89957 | 1× (1–1×) | 9.96× (9.39–11.1×) | 20.1× (18.5–21×) | 0.92237 | 0.008596 | 0.91897 | 0.91253 | 1× (1–1×) | 2.41× (2.37–2.45×) | 18.2× (17.5–18.9×) |
+| awfy.DeltaBlue | go | ok | — | 0.043776 | — | 0.04292–0.047383 | 0.0497× (0.0477–0.054×) | 0.495× (0.459–0.587×) | 1× (1–1×) | 0.050791 | 0.0010483 | 0.050272 | 0.049961 | 0.0551× (0.053–0.0571×) | 0.133× (0.129–0.137×) | 1× (1–1×) |
+| awfy.DeltaBlue | lucifer | ok | — | 0.68763 | — | 0.67377–0.72305 | 0.78× (0.749–0.825×) | 7.77× (7.21–8.96×) | 15.7× (14.2–16.8×) | 0.74364 | 0.028516 | 0.7462 | 0.71038 | 0.806× (0.759–0.855×) | 1.95× (1.84–2.05×) | 14.6× (13.6–15.7×) |
+| awfy.DeltaBlue | pypy | ok | — | 0.088481 | — | 0.080727–0.093409 | 0.1× (0.0897–0.107×) | 1× (1–1×) | 2.02× (1.7–2.18×) | 0.38229 | 0.0017162 | 0.38325 | 0.37962 | 0.414× (0.407–0.422×) | 1× (1–1×) | 7.53× (7.3–7.77×) |
+| awfy.Havlak | cpython | ok | — | 5.0775 | — | 4.5303–5.156 | 1× (1–1×) | 8.81× (7.38–9.07×) | 22.8× (19.6–24.3×) | 4.7752 | 0.27247 | 4.8869 | 4.3028 | 1× (1–1×) | 4.4× (3.97–4.86×) | 21.4× (19.6–23.2×) |
+| awfy.Havlak | go | ok | — | 0.2226 | — | 0.21188–0.23137 | 0.0438× (0.0411–0.0511×) | 0.386× (0.345–0.407×) | 1× (1–1×) | 0.2236 | 0.0023526 | 0.22443 | 0.22012 | 0.0468× (0.0432–0.0511×) | 0.206× (0.198–0.215×) | 1× (1–1×) |
+| awfy.Havlak | lucifer | ok | — | 2.9431 | — | 2.7581–3.247 | 0.58× (0.535–0.717×) | 5.11× (4.49–5.71×) | 13.2× (11.9–15.3×) | 3.4691 | 0.14875 | 3.5201 | 3.2123 | 0.726× (0.642–0.824×) | 3.2× (2.94–3.47×) | 15.5× (14.5–16.6×) |
+| awfy.Havlak | pypy | ok | — | 0.57615 | — | 0.56844–0.61425 | 0.113× (0.11–0.136×) | 1× (1–1×) | 2.59× (2.46–2.9×) | 1.0842 | 0.025965 | 1.0908 | 1.0409 | 0.227× (0.206–0.252×) | 1× (1–1×) | 4.85× (4.64–5.06×) |
+| awfy.Json | cpython | ok | — | 1.0488 | — | 1.0421–1.058 | 1× (1–1×) | 7.34× (6.73–7.73×) | 21.1× (20.7–21.8×) | 1.2176 | 0.014155 | 1.2197 | 1.1966 | 1× (1–1×) | 1.84× (1.72–1.97×) | 24.1× (23.5–24.7×) |
+| awfy.Json | go | ok | — | 0.049702 | — | 0.048541–0.050454 | 0.0474× (0.0459–0.0484×) | 0.348× (0.314–0.368×) | 1× (1–1×) | 0.050484 | 0.00040574 | 0.050345 | 0.050013 | 0.0415× (0.0405–0.0425×) | 0.0761× (0.0716–0.0812×) | 1× (1–1×) |
+| awfy.Json | lucifer | ok | — | 0.4154 | — | 0.41139–0.4268 | 0.396× (0.389–0.41×) | 2.91× (2.66–3.12×) | 8.36× (8.15–8.79×) | 0.67733 | 0.022137 | 0.68401 | 0.63883 | 0.556× (0.526–0.587×) | 1.02× (0.931–1.12×) | 13.4× (12.7–14.1×) |
+| awfy.Json | pypy | ok | — | 0.14287 | — | 0.13692–0.15479 | 0.136× (0.129–0.149×) | 1× (1–1×) | 2.87× (2.71–3.19×) | 0.66315 | 0.028269 | 0.67893 | 0.61913 | 0.545× (0.508–0.582×) | 1× (1–1×) | 13.1× (12.3–14×) |
+| awfy.List | cpython | ok | — | 1.4223 | — | 1.4115–1.4231 | 1× (1–1×) | 4.02× (3.88–4.11×) | 54.9× (53.6–55.5×) | 1.4272 | 0.024955 | 1.4352 | 1.3833 | 1× (1–1×) | 3.5× (3.28–3.75×) | 51.7× (49.7–53.7×) |
+| awfy.List | go | ok | — | 0.025893 | — | 0.025656–0.026324 | 0.0182× (0.018–0.0186×) | 0.0731× (0.0706–0.0761×) | 1× (1–1×) | 0.027608 | 0.00036859 | 0.027777 | 0.027119 | 0.0193× (0.0186–0.0201×) | 0.0678× (0.0638–0.0722×) | 1× (1–1×) |
+| awfy.List | lucifer | ok | — | 0.34162 | — | 0.33969–0.34399 | 0.24× (0.239–0.244×) | 0.964× (0.934–0.995×) | 13.2× (12.9–13.4×) | 0.38985 | 0.0035611 | 0.38902 | 0.38532 | 0.273× (0.264–0.282×) | 0.957× (0.905–1.01×) | 14.1× (13.7–14.5×) |
+| awfy.List | pypy | ok | — | 0.3542 | — | 0.34584–0.36358 | 0.249× (0.243–0.258×) | 1× (1–1×) | 13.7× (13.1–14.2×) | 0.40727 | 0.014985 | 0.4021 | 0.39273 | 0.285× (0.267–0.305×) | 1× (1–1×) | 14.8× (13.8–15.7×) |
+| awfy.Mandelbrot | cpython | ok | — | 1.5556 | — | 1.5259–1.582 | 1× (1–1×) | 29.4× (28.8–30×) | 32.8× (32.1–34×) | 1.7112 | 0.049597 | 1.7431 | 1.6429 | 1× (1–1×) | 19.1× (18–20.2×) | 35.5× (34.1–37×) |
+| awfy.Mandelbrot | go | ok | — | 0.04736 | — | 0.046483–0.047484 | 0.0304× (0.0294–0.0311×) | 0.896× (0.878–0.9×) | 1× (1–1×) | 0.048143 | 0.00020349 | 0.048112 | 0.047958 | 0.0281× (0.027–0.0293×) | 0.537× (0.523–0.552×) | 1× (1–1×) |
+| awfy.Mandelbrot | lucifer | ok | — | 0.05968 | — | 0.059136–0.060165 | 0.0384× (0.0374–0.0394×) | 1.13× (1.12–1.14×) | 1.26× (1.25–1.29×) | 0.13235 | 0.002592 | 0.13195 | 0.12966 | 0.0773× (0.0728–0.0822×) | 1.48× (1.41–1.55×) | 2.75× (2.67–2.83×) |
+| awfy.Mandelbrot | pypy | ok | — | 0.052881 | — | 0.052743–0.05296 | 0.034× (0.0333–0.0347×) | 1× (1–1×) | 1.12× (1.11–1.14×) | 0.089609 | 0.0015288 | 0.088771 | 0.0883 | 0.0524× (0.0495–0.0555×) | 1× (1–1×) | 1.86× (1.81–1.91×) |
+| awfy.NBody | cpython | ok | — | 2.5522 | — | 2.508–2.5679 | 1× (1–1×) | 34.1× (33.3–34.6×) | 124× (121–125×) | 2.566 | 0.057453 | 2.5878 | 2.464 | 1× (1–1×) | 21.5× (19.6–23.6×) | 117× (113–122×) |
+| awfy.NBody | go | ok | — | 0.020551 | — | 0.020535–0.020665 | 0.00805× (0.008–0.00824×) | 0.275× (0.273–0.278×) | 1× (1–1×) | 0.021865 | 0.00013646 | 0.021842 | 0.021698 | 0.00852× (0.00823–0.00883×) | 0.183× (0.17–0.198×) | 1× (1–1×) |
+| awfy.NBody | lucifer | ok | — | 0.39802 | — | 0.39377–0.39966 | 0.156× (0.153–0.159×) | 5.32× (5.23–5.38×) | 19.4× (19.1–19.5×) | 0.50295 | 0.028764 | 0.50137 | 0.46215 | 0.196× (0.177–0.216×) | 4.21× (3.67–4.83×) | 23× (21.2–24.8×) |
+| awfy.NBody | pypy | ok | — | 0.074808 | — | 0.074254–0.075278 | 0.0293× (0.0289–0.03×) | 1× (1–1×) | 3.64× (3.59–3.67×) | 0.11941 | 0.0063414 | 0.11702 | 0.11453 | 0.0465× (0.0423–0.051×) | 1× (1–1×) | 5.46× (5.06–5.87×) |
+| awfy.Permute | cpython | ok | — | 2.6889 | — | 2.6691–2.699 | 1× (1–1×) | 15× (13–15.1×) | 104× (103–105×) | 2.6786 | 0.053445 | 2.6648 | 2.6088 | 1× (1–1×) | 8.7× (8.15–9.3×) | 98.8× (93.8–104×) |
+| awfy.Permute | go | ok | — | 0.025779 | — | 0.025647–0.025972 | 0.00959× (0.0095–0.00973×) | 0.144× (0.125–0.145×) | 1× (1–1×) | 0.027103 | 0.00060821 | 0.026738 | 0.026643 | 0.0101× (0.0096–0.0107×) | 0.088× (0.0822–0.0944×) | 1× (1–1×) |
+| awfy.Permute | lucifer | ok | — | 1.081 | — | 1.0594–1.0887 | 0.402× (0.393–0.408×) | 6.03× (5.15–6.1×) | 41.9× (40.8–42.5×) | 1.141 | 0.015399 | 1.1452 | 1.118 | 0.426× (0.409–0.444×) | 3.71× (3.5–3.93×) | 42.1× (40.3–44×) |
+| awfy.Permute | pypy | ok | — | 0.17923 | — | 0.17853–0.20574 | 0.0667× (0.0661–0.0771×) | 1× (1–1×) | 6.95× (6.87–8.02×) | 0.30791 | 0.010239 | 0.31062 | 0.29559 | 0.115× (0.108–0.123×) | 1× (1–1×) | 11.4× (10.6–12.2×) |
+| awfy.Queens | cpython | ok | — | 1.3021 | — | 1.292–1.317 | 1× (1–1×) | 11.2× (11–11.4×) | 90.2× (87.6–92.2×) | 1.286 | 0.092265 | 1.3186 | 1.1317 | 1× (1–1×) | 8.74× (7.72–9.83×) | 80.7× (72.7–88.9×) |
+| awfy.Queens | go | ok | — | 0.014433 | — | 0.014291–0.014755 | 0.0111× (0.0109–0.0114×) | 0.124× (0.122–0.127×) | 1× (1–1×) | 0.015938 | 0.00014335 | 0.015974 | 0.015695 | 0.0124× (0.0113–0.0138×) | 0.108× (0.104–0.113×) | 1× (1–1×) |
+| awfy.Queens | lucifer | ok | — | 0.38435 | — | 0.35528–0.386 | 0.295× (0.27–0.299×) | 3.3× (3.03–3.33×) | 26.6× (24.1–27×) | 0.3963 | 0.019305 | 0.38944 | 0.3761 | 0.308× (0.266–0.359×) | 2.69× (2.45–2.95×) | 24.9× (23.1–26.7×) |
+| awfy.Queens | pypy | ok | — | 0.11659 | — | 0.11594–0.11715 | 0.0895× (0.088–0.0907×) | 1× (1–1×) | 8.08× (7.86–8.2×) | 0.1471 | 0.0037284 | 0.14593 | 0.14226 | 0.114× (0.102–0.13×) | 1× (1–1×) | 9.23× (8.84–9.63×) |
+| awfy.Richards | cpython | ok | — | 5.7102 | — | 4.989–5.7767 | 1× (1–1×) | 28.8× (24.8–29.4×) | 70.5× (60.6–71.9×) | 5.6512 | 0.17946 | 5.7241 | 5.3677 | 1× (1–1×) | 17.4× (16.4–18.4×) | 68.2× (64.7–71.7×) |
+| awfy.Richards | go | ok | — | 0.080976 | — | 0.080346–0.082282 | 0.0142× (0.0139–0.0165×) | 0.409× (0.399–0.419×) | 1× (1–1×) | 0.082884 | 0.00079889 | 0.082768 | 0.081902 | 0.0147× (0.0139–0.0155×) | 0.255× (0.247–0.263×) | 1× (1–1×) |
+| awfy.Richards | lucifer | ok | — | 1.2248 | — | 1.0547–1.2828 | 0.214× (0.183–0.257×) | 6.18× (5.24–6.54×) | 15.1× (12.8–16×) | 1.3237 | 0.021251 | 1.325 | 1.2907 | 0.234× (0.221–0.249×) | 4.07× (3.91–4.23×) | 16× (15.5–16.5×) |
+| awfy.Richards | pypy | ok | — | 0.19809 | — | 0.1962–0.20131 | 0.0347× (0.034–0.0404×) | 1× (1–1×) | 2.45× (2.38–2.51×) | 0.32535 | 0.0052701 | 0.32349 | 0.32101 | 0.0576× (0.0543–0.0611×) | 1× (1–1×) | 3.93× (3.8–4.05×) |
+| awfy.Sieve | cpython | ok | — | 2.4676 | — | 2.41–2.5203 | 1× (1–1×) | 18.5× (16.7–19.3×) | 68.7× (66.8–70.4×) | 2.5274 | 0.10936 | 2.5053 | 2.4488 | 1× (1–1×) | 15× (13.8–16.2×) | 67.5× (63.5–71.5×) |
+| awfy.Sieve | go | ok | — | 0.035924 | — | 0.035815–0.03606 | 0.0146× (0.0142–0.015×) | 0.269× (0.248–0.276×) | 1× (1–1×) | 0.037451 | 0.00017762 | 0.037362 | 0.037294 | 0.0148× (0.014–0.0158×) | 0.222× (0.215–0.229×) | 1× (1–1×) |
+| awfy.Sieve | lucifer | ok | — | 0.35452 | — | 0.33113–0.35635 | 0.144× (0.131–0.148×) | 2.65× (2.29–2.73×) | 9.87× (9.18–9.95×) | 0.40145 | 0.0096039 | 0.40331 | 0.38547 | 0.159× (0.146–0.173×) | 2.38× (2.25–2.51×) | 10.7× (10.3–11.1×) |
+| awfy.Sieve | pypy | ok | — | 0.13361 | — | 0.13056–0.1447 | 0.0541× (0.0518–0.06×) | 1× (1–1×) | 3.72× (3.62–4.04×) | 0.1689 | 0.003433 | 0.16698 | 0.166 | 0.0668× (0.0618–0.0724×) | 1× (1–1×) | 4.51× (4.37–4.65×) |
+| awfy.Storage | cpython | ok | — | 2.3206 | — | 2.2895–2.3322 | 1× (1–1×) | 6.89× (6.66–6.97×) | 4.37× (4.12–4.99×) | 2.0351 | 0.057436 | 2.0297 | 1.9657 | 1× (1–1×) | 4.29× (4–4.61×) | 4.04× (3.47–4.75×) |
+| awfy.Storage | go | ok | — | 0.5314 | — | 0.46766–0.55577 | 0.229× (0.201–0.243×) | 1.58× (1.36–1.66×) | 1× (1–1×) | 0.50433 | 0.049143 | 0.49231 | 0.45988 | 0.248× (0.21–0.288×) | 1.06× (0.903–1.24×) | 1× (1–1×) |
+| awfy.Storage | lucifer | ok | — | 1.6221 | — | 1.6141–1.6263 | 0.699× (0.692–0.71×) | 4.81× (4.69–4.86×) | 3.05× (2.9–3.48×) | 1.6798 | 0.015206 | 1.6794 | 1.6624 | 0.825× (0.788–0.865×) | 3.55× (3.38–3.72×) | 3.33× (2.94–3.83×) |
+| awfy.Storage | pypy | ok | — | 0.33704 | — | 0.3344–0.34403 | 0.145× (0.143–0.15×) | 1× (1–1×) | 0.634× (0.602–0.736×) | 0.47383 | 0.013715 | 0.47285 | 0.45701 | 0.233× (0.217–0.25×) | 1× (1–1×) | 0.94× (0.808–1.11×) |
+| awfy.Towers | cpython | ok | — | 1.8606 | — | 1.6324–1.8701 | 1× (1–1×) | 6.5× (5.67–6.79×) | 99.2× (85.5–102×) | 1.7034 | 0.13083 | 1.6246 | 1.5912 | 1× (1–1×) | 5.15× (4.53–5.8×) | 83.7× (74.3–93.4×) |
+| awfy.Towers | go | ok | — | 0.018749 | — | 0.018354–0.019085 | 0.0101× (0.00981–0.0117×) | 0.0655× (0.0638–0.0693×) | 1× (1–1×) | 0.020357 | 0.00031175 | 0.020296 | 0.020066 | 0.012× (0.0107–0.0135×) | 0.0615× (0.0587–0.0645×) | 1× (1–1×) |
+| awfy.Towers | lucifer | ok | — | 0.45704 | — | 0.42126–0.45952 | 0.246× (0.225–0.281×) | 1.6× (1.46–1.67×) | 24.4× (22.1–25×) | 0.48218 | 0.028658 | 0.49975 | 0.43713 | 0.283× (0.239–0.336×) | 1.46× (1.31–1.61×) | 23.7× (21.5–25.9×) |
+| awfy.Towers | pypy | ok | — | 0.28621 | — | 0.27543–0.28787 | 0.154× (0.147–0.176×) | 1× (1–1×) | 15.3× (14.4–15.7×) | 0.33104 | 0.0074341 | 0.333 | 0.3202 | 0.194× (0.172–0.221×) | 1× (1–1×) | 16.3× (15.5–17×) |
+| pyperformance.argparse_subparsers | cpython | ok | held out | 0.015763 | 0.0012239 | 0.014739–0.016786 | 1× (1–1×) | 0.648× (0.593–0.706×) | — | 0.14386 | 0.0059432 | 0.14676 | 0.13596 | 1× (1–1×) | 0.485× (0.445–0.527×) | — |
+| pyperformance.argparse_subparsers | lucifer | ok | held out | 0.03143 | 0.0027715 | 0.029113–0.033747 | 1.99× (1.73–2.29×) | 1.29× (1.17–1.42×) | — | 0.8493 | 0.013724 | 0.85621 | 0.83286 | 5.9× (5.5–6.35×) | 2.86× (2.72–3.02×) | — |
+| pyperformance.argparse_subparsers | pypy | ok | held out | 0.024318 | 0.0006436 | 0.02378–0.024856 | 1.54× (1.42–1.69×) | 1× (1–1×) | — | 0.29684 | 0.0077818 | 0.2958 | 0.28772 | 2.06× (1.9–2.25×) | 1× (1–1×) | — |
+| pyperformance.async_generators | cpython | ok | held out | 0.50059 | 0.012357 | 0.49026–0.51092 | 1× (1–1×) | 1.84× (1.71–1.99×) | — | 0.68684 | 0.038832 | 0.70264 | 0.61802 | 1× (1–1×) | 1.23× (1.08–1.39×) | — |
+| pyperformance.async_generators | lucifer | ok | held out | 1.7666 | 0.034109 | 1.7381–1.7951 | 3.53× (3.4–3.66×) | 6.51× (6.06–7×) | — | 2.5518 | 0.13186 | 2.5461 | 2.3614 | 3.72× (3.25–4.25×) | 4.56× (4.05–5.12×) | — |
+| pyperformance.async_generators | pypy | ok | held out | 0.27149 | 0.018208 | 0.25627–0.28671 | 0.542× (0.502–0.585×) | 1× (1–1×) | — | 0.55991 | 0.023709 | 0.54971 | 0.5336 | 0.815× (0.722–0.923×) | 1× (1–1×) | — |
+| pyperformance.base64/ascii85_large | cpython | ok | held out | 1.6109 | 0.021575 | 1.5928–1.6289 | 1× (1–1×) | 5.78× (5.53–6.06×) | — | 2.0388 | 0.084057 | 2.0118 | 1.9728 | 1× (1–1×) | 3.38× (3.14–3.64×) | — |
+| pyperformance.base64/ascii85_large | lucifer | ok | held out | 1.1651 | 0.020478 | 1.1479–1.1822 | 0.723× (0.705–0.742×) | 4.18× (3.98–4.4×) | — | 2.3652 | 0.15649 | 2.3696 | 2.1122 | 1.16× (1.01–1.32×) | 3.92× (3.52–4.34×) | — |
+| pyperformance.base64/ascii85_large | pypy | ok | held out | 0.27847 | 0.011489 | 0.26887–0.28808 | 0.173× (0.165–0.181×) | 1× (1–1×) | — | 0.60284 | 0.011086 | 0.59736 | 0.59202 | 0.296× (0.275–0.319×) | 1× (1–1×) | — |
+| pyperformance.base64/ascii85_small | cpython | ok | held out | 0.026118 | 0.0011616 | 0.025147–0.027089 | 1× (1–1×) | 6.87× (6.06–7.85×) | — | 0.67287 | 0.011665 | 0.67442 | 0.6553 | 1× (1–1×) | 2.13× (2.05–2.22×) | — |
+| pyperformance.base64/ascii85_small | lucifer | ok | held out | 0.040219 | 0.0038787 | 0.036976–0.043461 | 1.54× (1.36–1.73×) | 10.6× (8.91–12.6×) | — | 1.1649 | 0.082864 | 1.1268 | 1.1108 | 1.73× (1.55–1.93×) | 3.69× (3.31–4.09×) | — |
+| pyperformance.base64/ascii85_small | pypy | ok | held out | 0.0038012 | 0.00041855 | 0.0034513–0.0041511 | 0.146× (0.127–0.165×) | 1× (1–1×) | — | 0.31562 | 0.0044341 | 0.31495 | 0.30934 | 0.469× (0.451–0.488×) | 1× (1–1×) | — |
+| pyperformance.base64/base16_large | cpython | ok | held out | 0.0085999 | 0.0016558 | 0.0072156–0.0099841 | 1× (1–1×) | 0.267× (0.204–0.342×) | — | 0.64891 | 0.013394 | 0.6546 | 0.62659 | 1× (1–1×) | 1.93× (1.83–2.04×) | — |
+| pyperformance.base64/base16_large | lucifer | ok | held out | 0.03304 | 0.00026272 | 0.032821–0.03326 | 3.84× (3.29–4.61×) | 1.02× (0.928–1.14×) | — | 1.2323 | 0.046 | 1.2534 | 1.1501 | 1.9× (1.77–2.04×) | 3.66× (3.39–3.95×) | — |
+| pyperformance.base64/base16_large | pypy | ok | held out | 0.032268 | 0.0037217 | 0.029157–0.035379 | 3.75× (2.92–4.9×) | 1× (1–1×) | — | 0.33628 | 0.0079711 | 0.33325 | 0.3286 | 0.518× (0.49–0.548×) | 1× (1–1×) | — |
+| pyperformance.base64/base16_small | cpython | ok | held out | 0.00037459 | 7.4757e-06 | 0.00036834–0.00038084 | 1× (1–1×) | 0.38× (0.283–0.571×) | — | 0.64731 | 0.026108 | 0.65611 | 0.6023 | 1× (1–1×) | 2.11× (1.91–2.32×) | — |
+| pyperformance.base64/base16_small | lucifer | ok | held out | 0.0042192 | 0.0033102 | 0.0014518–0.0069866 | 11.3× (3.81–19×) | 4.29× (1.11–10.5×) | — | 1.1892 | 0.020973 | 1.1912 | 1.1549 | 1.84× (1.71–1.98×) | 3.87× (3.62–4.15×) | — |
+| pyperformance.base64/base16_small | pypy | ok | held out | 0.0009845 | 0.00037992 | 0.00066689–0.0013021 | 2.63× (1.75–3.54×) | 1× (1–1×) | — | 0.30716 | 0.011533 | 0.30677 | 0.29378 | 0.475× (0.431–0.523×) | 1× (1–1×) | — |
+| pyperformance.base64/base32_large | cpython | ok | held out | 0.7782 | 0.013856 | 0.76662–0.78979 | 1× (1–1×) | 7.71× (7.54–7.88×) | — | 1.42 | 0.026597 | 1.4285 | 1.3802 | 1× (1–1×) | 3.52× (3.32–3.75×) | — |
+| pyperformance.base64/base32_large | lucifer | ok | held out | 0.77229 | 0.053203 | 0.72781–0.81677 | 0.992× (0.922–1.07×) | 7.65× (7.16–8.15×) | — | 1.9408 | 0.15223 | 1.9398 | 1.7874 | 1.37× (1.21–1.54×) | 4.82× (4.19–5.49×) | — |
+| pyperformance.base64/base32_large | pypy | ok | held out | 0.10097 | 0.00089783 | 0.10022–0.10172 | 0.13× (0.127–0.133×) | 1× (1–1×) | — | 0.40298 | 0.012311 | 0.40071 | 0.39348 | 0.284× (0.267–0.302×) | 1× (1–1×) | — |
+| pyperformance.base64/base32_small | cpython | ok | held out | 0.012267 | 0.00038523 | 0.011945–0.012589 | 1× (1–1×) | 4.28× (3.4–5.65×) | — | 0.66509 | 0.028613 | 0.6751 | 0.61503 | 1× (1–1×) | 2.07× (1.87–2.29×) | — |
+| pyperformance.base64/base32_small | lucifer | ok | held out | 0.021564 | 0.0044287 | 0.017862–0.025267 | 1.76× (1.42–2.12×) | 7.52× (5.09–11.3×) | — | 1.1074 | 0.052134 | 1.0905 | 1.0465 | 1.67× (1.49–1.86×) | 3.45× (3.1–3.83×) | — |
+| pyperformance.base64/base32_small | pypy | ok | held out | 0.0028678 | 0.00076723 | 0.0022264–0.0035092 | 0.234× (0.177–0.294×) | 1× (1–1×) | — | 0.32095 | 0.012258 | 0.31896 | 0.30967 | 0.483× (0.436–0.534×) | 1× (1–1×) | — |
+| pyperformance.base64/base64_large | cpython | ok | held out | 0.0068164 | 0.00012269 | 0.0067138–0.006919 | 1× (1–1×) | 0.517× (0.498–0.538×) | — | 0.57753 | 0.018275 | 0.56917 | 0.55924 | 1× (1–1×) | 1.84× (1.72–1.96×) | — |
+| pyperformance.base64/base64_large | lucifer | ok | held out | 0.03371 | 0.002051 | 0.031996–0.035425 | 4.95× (4.62–5.28×) | 2.56× (2.37–2.75×) | — | 1.2235 | 0.0071311 | 1.223 | 1.2146 | 2.12× (2.02–2.22×) | 3.89× (3.76–4.02×) | — |
+| pyperformance.base64/base64_large | pypy | ok | held out | 0.013183 | 0.00037322 | 0.012871–0.013495 | 1.93× (1.86–2.01×) | 1× (1–1×) | — | 0.3147 | 0.0067503 | 0.3142 | 0.30437 | 0.545× (0.51–0.582×) | 1× (1–1×) | — |
+| pyperformance.base64/base64_small | cpython | ok | held out | 0.00039115 | 0.00013176 | 0.000281–0.0005013 | 1× (1–1×) | 0.853× (0.485–1.48×) | — | 0.58855 | 0.016097 | 0.59322 | 0.56241 | 1× (1–1×) | 1.95× (1.84–2.06×) | — |
+| pyperformance.base64/base64_small | lucifer | ok | held out | 0.0028988 | 0.0019804 | 0.0012431–0.0045545 | 7.41× (2.48–16.2×) | 6.32× (2.15–13.5×) | — | 1.213 | 0.0041602 | 1.2119 | 1.2089 | 2.06× (1.98–2.14×) | 4.01× (3.91–4.11×) | — |
+| pyperformance.base64/base64_small | pypy | ok | held out | 0.0004584 | 0.00014425 | 0.0003378–0.000579 | 1.17× (0.674–2.06×) | 1× (1–1×) | — | 0.30241 | 0.0051064 | 0.30082 | 0.2975 | 0.514× (0.487–0.543×) | 1× (1–1×) | — |
+| pyperformance.base64/base85_large | cpython | ok | held out | 0.55132 | 0.035623 | 0.52154–0.5811 | 1× (1–1×) | 4.8× (4.46–5.14×) | — | 1.1494 | 0.016107 | 1.1517 | 1.1283 | 1× (1–1×) | 2.51× (2.32–2.72×) | — |
+| pyperformance.base64/base85_large | lucifer | ok | held out | 0.51607 | 0.025877 | 0.49444–0.53771 | 0.936× (0.851–1.03×) | 4.49× (4.23–4.76×) | — | 1.7027 | 0.065203 | 1.7186 | 1.6287 | 1.48× (1.39–1.58×) | 3.72× (3.34–4.15×) | — |
+| pyperformance.base64/base85_large | pypy | ok | held out | 0.11497 | 0.0023189 | 0.11303–0.11691 | 0.209× (0.195–0.224×) | 1× (1–1×) | — | 0.45811 | 0.022406 | 0.45912 | 0.42171 | 0.399× (0.368–0.43×) | 1× (1–1×) | — |
+| pyperformance.base64/base85_small | cpython | ok | held out | 0.0094803 | 0.00036513 | 0.009175–0.0097855 | 1× (1–1×) | 3.5× (2.25–7.29×) | — | 0.58568 | 0.0081453 | 0.58402 | 0.57596 | 1× (1–1×) | 1.66× (1.62–1.71×) | — |
+| pyperformance.base64/base85_small | lucifer | ok | held out | 0.018285 | 0.0024291 | 0.016254–0.020316 | 1.93× (1.66–2.21×) | 6.76× (3.99–15.1×) | — | 1.1751 | 0.073889 | 1.2069 | 1.0775 | 2.01× (1.82–2.2×) | 3.34× (3.06–3.63×) | — |
+| pyperformance.base64/base85_small | pypy | ok | held out | 0.0027063 | 0.001632 | 0.001342–0.0040707 | 0.285× (0.137–0.444×) | 1× (1–1×) | — | 0.35181 | 0.0019734 | 0.35091 | 0.34971 | 0.601× (0.586–0.615×) | 1× (1–1×) | — |
+| pyperformance.base64/urlsafe_base64_small | cpython | ok | held out | 0.00056672 | 4.161e-05 | 0.00053194–0.00060151 | 1× (1–1×) | 0.918× (0.639–1.5×) | — | 0.6307 | 0.041849 | 0.65233 | 0.56879 | 1× (1–1×) | 1.91× (1.64–2.21×) | — |
+| pyperformance.base64/urlsafe_base64_small | lucifer | ok | held out | 0.0041872 | 0.0030577 | 0.0016308–0.0067435 | 7.39× (2.71–12.7×) | 6.78× (1.96–16.8×) | — | 1.1061 | 0.055284 | 1.0845 | 1.0605 | 1.75× (1.52–2.03×) | 3.35× (2.95–3.81×) | — |
+| pyperformance.base64/urlsafe_base64_small | pypy | ok | held out | 0.00061757 | 0.00025746 | 0.00040232–0.00083281 | 1.09× (0.669–1.57×) | 1× (1–1×) | — | 0.3303 | 0.017651 | 0.33458 | 0.29982 | 0.524× (0.452–0.609×) | 1× (1–1×) | — |
+| pyperformance.bpe_tokeniser | cpython | ok | held out | 6.544 | 0.27493 | 6.3142–6.7739 | 1× (1–1×) | 3.57× (3.41–3.73×) | — | 6.9777 | 0.65369 | 7.083 | 6.1724 | 1× (1–1×) | 2.88× (2.38–3.46×) | — |
+| pyperformance.bpe_tokeniser | lucifer | ok | held out | 4.3142 | 0.07376 | 4.2525–4.3759 | 0.659× (0.628–0.693×) | 2.35× (2.3–2.41×) | — | 5.9388 | 0.18863 | 6.0488 | 5.6565 | 0.851× (0.732–1×) | 2.45× (2.2–2.74×) | — |
+| pyperformance.bpe_tokeniser | pypy | ok | held out | 1.8327 | 0.022023 | 1.8143–1.8511 | 0.28× (0.268–0.293×) | 1× (1–1×) | — | 2.4231 | 0.13924 | 2.4769 | 2.2378 | 0.347× (0.289–0.421×) | 1× (1–1×) | — |
+| pyperformance.chaos | cpython | ok | held out | 0.094185 | 0.0057668 | 0.089364–0.099007 | 1× (1–1×) | 13.7× (10.4–19.2×) | — | 0.27021 | 0.0040953 | 0.27147 | 0.26395 | 1× (1–1×) | 0.902× (0.88–0.924×) | — |
+| pyperformance.chaos | lucifer | ok | held out | 0.035846 | 0.0057964 | 0.031–0.040692 | 0.381× (0.313–0.455×) | 5.21× (3.61–7.88×) | — | 0.77564 | 0.01161 | 0.7742 | 0.76476 | 2.87× (2.77–2.98×) | 2.59× (2.53–2.65×) | — |
+| pyperformance.chaos | pypy | ok | held out | 0.0068793 | 0.0020495 | 0.0051659–0.0085927 | 0.073× (0.0522–0.0962×) | 1× (1–1×) | — | 0.29948 | 0.0013532 | 0.29889 | 0.29802 | 1.11× (1.08–1.14×) | 1× (1–1×) | — |
+| pyperformance.comprehensions | cpython | ok | held out | 2.5863e-05 | 2.2833e-06 | 2.3954e-05–2.7771e-05 | 1× (1–1×) | 3.12× (2.84–3.42×) | — | 0.13727 | 0.0036525 | 0.13794 | 0.13129 | 1× (1–1×) | 0.694× (0.627–0.771×) | — |
+| pyperformance.comprehensions | lucifer | ok | held out | 3.135e-05 | 3.1394e-06 | 2.8725e-05–3.3975e-05 | 1.21× (1.03–1.42×) | 3.79× (3.4–4.18×) | — | 0.69206 | 0.0047016 | 0.69359 | 0.68715 | 5.04× (4.84–5.26×) | 3.5× (3.24–3.79×) | — |
+| pyperformance.comprehensions | pypy | ok | held out | 8.2811e-06 | 1.9238e-07 | 8.1203e-06–8.442e-06 | 0.32× (0.292–0.352×) | 1× (1–1×) | — | 0.1979 | 0.011237 | 0.19696 | 0.18719 | 1.44× (1.3–1.6×) | 1× (1–1×) | — |
+| pyperformance.coroutines | cpython | ok | held out | 0.030184 | 0.0010358 | 0.029318–0.03105 | 1× (1–1×) | 1.89× (1.76–2.03×) | — | 0.17969 | 0.0036349 | 0.18099 | 0.1743 | 1× (1–1×) | 0.742× (0.694–0.795×) | — |
+| pyperformance.coroutines | lucifer | ok | held out | 0.046964 | 0.002893 | 0.044546–0.049383 | 1.56× (1.43–1.68×) | 2.94× (2.68–3.22×) | — | 0.74947 | 0.0078862 | 0.7511 | 0.73633 | 4.17× (4.02–4.33×) | 3.1× (2.93–3.28×) | — |
+| pyperformance.coroutines | pypy | ok | held out | 0.015987 | 0.00079512 | 0.015322–0.016652 | 0.53× (0.493–0.568×) | 1× (1–1×) | — | 0.24206 | 0.0084428 | 0.23967 | 0.23633 | 1.35× (1.26–1.44×) | 1× (1–1×) | — |
+| pyperformance.coverage | cpython | ok | held out | 1.0417 | 0.027097 | 1.019–1.0643 | 1× (1–1×) | 5.73× (5.44–6.04×) | — | 1.278 | 0.013022 | 1.2742 | 1.2627 | 1× (1–1×) | 2.45× (2.24–2.7×) | — |
+| pyperformance.coverage | lucifer | ok | held out | 2.8711 | 0.19515 | 2.7079–3.0343 | 2.76× (2.54–2.98×) | 15.8× (14.5–17.2×) | — | 3.7885 | 0.20786 | 3.8844 | 3.4454 | 2.96× (2.73–3.21×) | 7.26× (6.26–8.44×) | — |
+| pyperformance.coverage | pypy | ok | held out | 0.18177 | 0.0066714 | 0.1762–0.18735 | 0.175× (0.166–0.184×) | 1× (1–1×) | — | 0.52199 | 0.034138 | 0.50306 | 0.49242 | 0.408× (0.371–0.447×) | 1× (1–1×) | — |
+| pyperformance.crypto_pyaes | cpython | ok | held out | 0.13789 | 0.0042482 | 0.13434–0.14144 | 1× (1–1×) | 26× (21.9–31.6×) | — | 0.28955 | 0.0033773 | 0.28986 | 0.28492 | 1× (1–1×) | 1.17× (1.13–1.2×) | — |
+| pyperformance.crypto_pyaes | lucifer | ok | held out | 0.082375 | 0.0063594 | 0.077058–0.087691 | 0.597× (0.545–0.653×) | 15.5× (12.5–19.6×) | — | 0.7644 | 0.018033 | 0.76235 | 0.74507 | 2.64× (2.53–2.76×) | 3.08× (2.95–3.22×) | — |
+| pyperformance.crypto_pyaes | pypy | ok | held out | 0.0053105 | 0.00099738 | 0.0044766–0.0061443 | 0.0385× (0.0317–0.0457×) | 1× (1–1×) | — | 0.24811 | 0.0027442 | 0.2472 | 0.24591 | 0.857× (0.833–0.881×) | 1× (1–1×) | — |
+| pyperformance.deepcopy/deepcopy | cpython | ok | held out | 0.00047468 | 1.0244e-05 | 0.00046611–0.00048324 | 1× (1–1×) | 4.78× (4.62–4.94×) | — | 0.14037 | 0.0041656 | 0.14059 | 0.13419 | 1× (1–1×) | 0.645× (0.584–0.714×) | — |
+| pyperformance.deepcopy/deepcopy | lucifer | ok | held out | 0.00052194 | 2.6168e-05 | 0.00050006–0.00054382 | 1.1× (1.03–1.17×) | 5.26× (4.96–5.56×) | — | 0.69832 | 0.012076 | 0.70241 | 0.67759 | 4.98× (4.7–5.28×) | 3.21× (2.95–3.5×) | — |
+| pyperformance.deepcopy/deepcopy | pypy | ok | held out | 9.9318e-05 | 1.7973e-06 | 9.7815e-05–0.00010082 | 0.209× (0.202–0.216×) | 1× (1–1×) | — | 0.21768 | 0.011169 | 0.22222 | 0.19778 | 1.55× (1.4–1.71×) | 1× (1–1×) | — |
+| pyperformance.deepcopy/deepcopy_memo | cpython | ok | held out | 5.1774e-05 | 6.2898e-06 | 4.6516e-05–5.7033e-05 | 1× (1–1×) | 3.08× (2.16–4.71×) | — | 0.13454 | 0.010175 | 0.12883 | 0.12811 | 1× (1–1×) | 0.621× (0.549–0.697×) | — |
+| pyperformance.deepcopy/deepcopy_memo | lucifer | ok | held out | 3.9897e-05 | 1.4081e-05 | 2.8124e-05–5.1669e-05 | 0.771× (0.493–1.11×) | 2.37× (1.31–4.27×) | — | 0.70459 | 0.0077491 | 0.70431 | 0.69472 | 5.24× (4.72–5.86×) | 3.25× (3.13–3.38×) | — |
+| pyperformance.deepcopy/deepcopy_memo | pypy | ok | held out | 1.6812e-05 | 5.6255e-06 | 1.2109e-05–2.1515e-05 | 0.325× (0.212–0.463×) | 1× (1–1×) | — | 0.21653 | 0.0043086 | 0.21711 | 0.20944 | 1.61× (1.43–1.82×) | 1× (1–1×) | — |
+| pyperformance.deepcopy/deepcopy_reduce | cpython | ok | held out | 5.3491e-06 | 1.8525e-06 | 3.8004e-06–6.8978e-06 | 1× (1–1×) | 0.106× (0.0665–0.156×) | — | 0.13559 | 0.0018415 | 0.13572 | 0.13313 | 1× (1–1×) | 0.666× (0.62–0.717×) | — |
+| pyperformance.deepcopy/deepcopy_reduce | lucifer | ok | held out | 1.152e-05 | 7.7509e-06 | 5.0398e-06–1.8e-05 | 2.15× (0.731–4.74×) | 0.227× (0.0882–0.407×) | — | 0.67598 | 0.048064 | 0.69983 | 0.59577 | 4.99× (4.47–5.52×) | 3.32× (2.87–3.83×) | — |
+| pyperformance.deepcopy/deepcopy_reduce | pypy | ok | held out | 5.0648e-05 | 7.7287e-06 | 4.4186e-05–5.7109e-05 | 9.47× (6.41–15×) | 1× (1–1×) | — | 0.20364 | 0.0091754 | 0.20045 | 0.19499 | 1.5× (1.39–1.61×) | 1× (1–1×) | — |
+| pyperformance.deltablue | cpython | ok | held out | 0.0048087 | 0.00055323 | 0.0043462–0.0052712 | 1× (1–1×) | 4.89× (3.21–8.59×) | — | 0.14433 | 0.0059677 | 0.14232 | 0.13823 | 1× (1–1×) | 0.655× (0.579–0.742×) | — |
+| pyperformance.deltablue | lucifer | ok | held out | 0.0047886 | 0.00074239 | 0.0041679–0.0054092 | 0.996× (0.791–1.24×) | 4.87× (3.08–8.81×) | — | 0.72093 | 0.006226 | 0.72092 | 0.71483 | 5× (4.7–5.32×) | 3.27× (3.02–3.56×) | — |
+| pyperformance.deltablue | pypy | ok | held out | 0.00098385 | 0.00044266 | 0.00061377–0.0013539 | 0.205× (0.116–0.312×) | 1× (1–1×) | — | 0.22041 | 0.012848 | 0.22669 | 0.20448 | 1.53× (1.35–1.73×) | 1× (1–1×) | — |
+| pyperformance.fannkuch | cpython | ok | held out | 0.61834 | 0.030221 | 0.59308–0.64361 | 1× (1–1×) | 7.67× (7.24–8.1×) | — | 0.7719 | 0.0053043 | 0.77326 | 0.76595 | 1× (1–1×) | 2.44× (2.38–2.5×) | — |
+| pyperformance.fannkuch | lucifer | ok | held out | 0.52836 | 0.0085092 | 0.52124–0.53547 | 0.854× (0.81–0.903×) | 6.55× (6.36–6.74×) | — | 1.2974 | 0.026423 | 1.31 | 1.2683 | 1.68× (1.62–1.74×) | 4.1× (3.93–4.28×) | — |
+| pyperformance.fannkuch | pypy | ok | held out | 0.08066 | 0.0014867 | 0.079417–0.081903 | 0.13× (0.123–0.138×) | 1× (1–1×) | — | 0.31629 | 0.0043987 | 0.31775 | 0.30858 | 0.41× (0.399–0.42×) | 1× (1–1×) | — |
+| pyperformance.generators | cpython | ok | held out | 0.041129 | 0.00080634 | 0.040455–0.041803 | 1× (1–1×) | 1.56× (1.48–1.65×) | — | 0.29383 | 0.0060614 | 0.29212 | 0.28583 | 1× (1–1×) | 0.615× (0.577–0.656×) | — |
+| pyperformance.generators | lucifer | ok | held out | 0.066125 | 0.0011992 | 0.065123–0.067128 | 1.61× (1.56–1.66×) | 2.51× (2.39–2.65×) | — | 0.91319 | 0.023792 | 0.91216 | 0.87518 | 3.11× (2.93–3.29×) | 1.91× (1.78–2.05×) | — |
+| pyperformance.generators | pypy | ok | held out | 0.026328 | 0.0011417 | 0.025373–0.027282 | 0.64× (0.607–0.674×) | 1× (1–1×) | — | 0.47784 | 0.014943 | 0.48346 | 0.45133 | 1.63× (1.52–1.73×) | 1× (1–1×) | — |
+| pyperformance.go | cpython | ok | held out | 0.15074 | 0.0062708 | 0.1455–0.15598 | 1× (1–1×) | 1.3× (1.03–1.73×) | — | 0.28004 | 0.0041407 | 0.27927 | 0.27466 | 1× (1–1×) | 0.342× (0.329–0.356×) | — |
+| pyperformance.go | lucifer | ok | held out | 0.11031 | 0.0049916 | 0.10614–0.11449 | 0.732× (0.68–0.787×) | 0.953× (0.752–1.27×) | — | 0.81643 | 0.0083291 | 0.81577 | 0.80644 | 2.92× (2.83–3.01×) | 0.997× (0.965–1.03×) | — |
+| pyperformance.go | pypy | ok | held out | 0.11569 | 0.030348 | 0.090322–0.14107 | 0.767× (0.579–0.97×) | 1× (1–1×) | — | 0.81862 | 0.013376 | 0.81402 | 0.80313 | 2.92× (2.81–3.04×) | 1× (1–1×) | — |
+| pyperformance.hexiom | cpython | ok | held out | 0.0083574 | 0.00026034 | 0.0081398–0.008575 | 1× (1–1×) | 2.95× (2.62–3.34×) | — | 0.14089 | 0.0029843 | 0.13966 | 0.1384 | 1× (1–1×) | 0.528× (0.509–0.547×) | — |
+| pyperformance.hexiom | lucifer | ok | held out | 0.005573 | 0.00083305 | 0.0048766–0.0062694 | 0.667× (0.569–0.77×) | 1.97× (1.57–2.44×) | — | 0.65997 | 0.020645 | 0.64949 | 0.63798 | 4.68× (4.39–5×) | 2.47× (2.35–2.59×) | — |
+| pyperformance.hexiom | pypy | ok | held out | 0.0028353 | 0.00032064 | 0.0025673–0.0031034 | 0.339× (0.299–0.381×) | 1× (1–1×) | — | 0.26686 | 0.0020557 | 0.26678 | 0.26481 | 1.89× (1.83–1.96×) | 1× (1–1×) | — |
+| pyperformance.mdp | cpython | ok | held out | 2.2984 | 0.38909 | 1.9731–2.6237 | 1× (1–1×) | 0.418× (0.347–0.493×) | — | 3.0742 | 0.085733 | 3.1171 | 2.9533 | 1× (1–1×) | 0.455× (0.421–0.493×) | — |
+| pyperformance.mdp | lucifer | ok | held out | 7.838 | 0.38171 | 7.5189–8.1571 | 3.41× (2.87–4.13×) | 1.42× (1.32–1.53×) | — | 8.7277 | 0.57074 | 8.5297 | 8.1314 | 2.84× (2.52–3.18×) | 1.29× (1.14–1.46×) | — |
+| pyperformance.mdp | pypy | ok | held out | 5.5046 | 0.22482 | 5.3167–5.6926 | 2.4× (2.03–2.89×) | 1× (1–1×) | — | 6.7504 | 0.23802 | 6.8127 | 6.3338 | 2.2× (2.03–2.37×) | 1× (1–1×) | — |
+| pyperformance.meteor_contest | cpython | ok | held out | 0.17962 | 0.0078215 | 0.17308–0.18616 | 1× (1–1×) | 3.27× (3–3.56×) | — | 0.33336 | 0.014539 | 0.32768 | 0.32136 | 1× (1–1×) | 1.22× (1.13–1.32×) | — |
+| pyperformance.meteor_contest | lucifer | ok | held out | 0.41772 | 0.0085992 | 0.41053–0.42491 | 2.33× (2.21–2.46×) | 7.59× (7.11–8.13×) | — | 1.2756 | 0.063494 | 1.3005 | 1.1631 | 3.83× (3.41–4.3×) | 4.67× (4.29–5.07×) | — |
+| pyperformance.meteor_contest | pypy | ok | held out | 0.055011 | 0.0032477 | 0.052296–0.057726 | 0.306× (0.281–0.334×) | 1× (1–1×) | — | 0.27309 | 0.0048563 | 0.27445 | 0.26668 | 0.819× (0.76–0.885×) | 1× (1–1×) | — |
+| pyperformance.nbody | cpython | ok | held out | 0.20444 | 0.0025392 | 0.20232–0.20656 | 1× (1–1×) | 18.9× (18.4–19.3×) | — | 0.33724 | 0.012275 | 0.33769 | 0.31974 | 1× (1–1×) | 1.66× (1.56–1.77×) | — |
+| pyperformance.nbody | lucifer | ok | held out | 0.083605 | 0.00022597 | 0.083416–0.083794 | 0.409× (0.404–0.414×) | 7.71× (7.6–7.82×) | — | 0.819 | 0.019853 | 0.82568 | 0.7938 | 2.43× (2.25–2.62×) | 4.03× (3.84–4.24×) | — |
+| pyperformance.nbody | pypy | ok | held out | 0.010843 | 0.00015537 | 0.010713–0.010973 | 0.053× (0.0519–0.0542×) | 1× (1–1×) | — | 0.20303 | 0.0030987 | 0.20413 | 0.19969 | 0.602× (0.565–0.642×) | 1× (1–1×) | — |
+| pyperformance.networkx | cpython | ok | held out | 0.74652 | 0.026904 | 0.72403–0.76901 | 1× (1–1×) | 1.33× (1.18–1.51×) | — | 7.64 | 0.23329 | 7.6928 | 7.3037 | 1× (1–1×) | 1.87× (1.78–1.97×) | — |
+| pyperformance.networkx | lucifer | ok | held out | 0.74009 | 0.032428 | 0.71298–0.7672 | 0.991× (0.927–1.06×) | 1.32× (1.16–1.51×) | — | 11.331 | 0.18063 | 11.408 | 11.073 | 1.48× (1.4–1.57×) | 2.78× (2.68–2.87×) | — |
+| pyperformance.networkx | pypy | ok | held out | 0.56242 | 0.064012 | 0.5089–0.61593 | 0.753× (0.662–0.851×) | 1× (1–1×) | — | 4.0805 | 0.046321 | 4.0958 | 4.0119 | 0.534× (0.507–0.563×) | 1× (1–1×) | — |
+| pyperformance.networkx_connected_components | cpython | ok | held out | 0.6162 | 0.018684 | 0.60058–0.63182 | 1× (1–1×) | 1.01× (0.908–1.14×) | — | 7.4285 | 0.20514 | 7.5115 | 7.0852 | 1× (1–1×) | 1.83× (1.72–1.95×) | — |
+| pyperformance.networkx_connected_components | lucifer | ok | held out | 0.64386 | 0.015429 | 0.63096–0.65676 | 1.04× (0.999–1.09×) | 1.06× (0.953–1.19×) | — | 10.841 | 0.63644 | 11.261 | 10.14 | 1.46× (1.31–1.62×) | 2.68× (2.42–2.95×) | — |
+| pyperformance.networkx_connected_components | pypy | ok | held out | 0.60753 | 0.064873 | 0.55329–0.66176 | 0.986× (0.876–1.1×) | 1× (1–1×) | — | 4.051 | 0.087553 | 4.0841 | 3.9086 | 0.545× (0.513–0.58×) | 1× (1–1×) | — |
+| pyperformance.networkx_k_core | cpython | ok | held out | 3.2695 | 0.074908 | 3.2068–3.3321 | 1× (1–1×) | 1.36× (1.28–1.45×) | — | 10.514 | 0.16853 | 10.482 | 10.305 | 1× (1–1×) | 1.76× (1.64–1.9×) | — |
+| pyperformance.networkx_k_core | lucifer | ok | held out | 4.2528 | 0.18691 | 4.0966–4.4091 | 1.3× (1.23–1.37×) | 1.77× (1.63–1.93×) | — | 15.58 | 0.37279 | 15.692 | 14.931 | 1.48× (1.41–1.56×) | 2.61× (2.4–2.85×) | — |
+| pyperformance.networkx_k_core | pypy | ok | held out | 2.4009 | 0.13254 | 2.2901–2.5117 | 0.734× (0.687–0.783×) | 1× (1–1×) | — | 5.9636 | 0.26776 | 6.07 | 5.6549 | 0.567× (0.525–0.611×) | 1× (1–1×) | — |
+| pyperformance.nqueens | cpython | ok | held out | 0.14298 | 0.0025835 | 0.14082–0.14514 | 1× (1–1×) | 5.35× (5.11–5.6×) | — | 0.2785 | 0.0097871 | 0.27555 | 0.27 | 1× (1–1×) | 1.16× (1.09–1.23×) | — |
+| pyperformance.nqueens | lucifer | ok | held out | 0.14786 | 0.0010197 | 0.14701–0.14871 | 1.03× (1.01–1.06×) | 5.53× (5.33–5.73×) | — | 0.77065 | 0.010966 | 0.77041 | 0.75421 | 2.77× (2.6–2.94×) | 3.2× (3.09–3.31×) | — |
+| pyperformance.nqueens | pypy | ok | held out | 0.026747 | 0.00096837 | 0.025937–0.027556 | 0.187× (0.179–0.196×) | 1× (1–1×) | — | 0.24106 | 0.0032267 | 0.24188 | 0.23671 | 0.866× (0.816–0.92×) | 1× (1–1×) | — |
+| pyperformance.pidigits | cpython | ok | held out | 0.19616 | 0.014238 | 0.18426–0.20807 | 1× (1–1×) | 1.25× (1.08–1.45×) | — | 0.32222 | 0.0090398 | 0.32193 | 0.31194 | 1× (1–1×) | 0.841× (0.785–0.901×) | — |
+| pyperformance.pidigits | lucifer | ok | held out | 0.28215 | 0.0054818 | 0.27757–0.28673 | 1.44× (1.33–1.56×) | 1.8× (1.63–2×) | — | 0.98428 | 0.028811 | 0.99707 | 0.93365 | 3.05× (2.84–3.28×) | 2.57× (2.39–2.75×) | — |
+| pyperformance.pidigits | pypy | ok | held out | 0.15705 | 0.016186 | 0.14351–0.17058 | 0.801× (0.69–0.926×) | 1× (1–1×) | — | 0.38321 | 0.010406 | 0.38561 | 0.36523 | 1.19× (1.11–1.27×) | 1× (1–1×) | — |
+| pyperformance.pprint/pprint_pformat | cpython | ok | held out | 2.5735 | 0.05946 | 2.5238–2.6232 | 1× (1–1×) | 5.2× (5–5.41×) | — | 2.5552 | 0.19753 | 2.6298 | 2.3068 | 1× (1–1×) | 3.2× (2.85–3.57×) | — |
+| pyperformance.pprint/pprint_pformat | lucifer | ok | held out | 5.687 | 0.10569 | 5.5986–5.7753 | 2.21× (2.13–2.29×) | 11.5× (11.1–11.9×) | — | 5.9265 | 0.070813 | 5.9523 | 5.8317 | 2.32× (2.08–2.6×) | 7.43× (7.21–7.67×) | — |
+| pyperformance.pprint/pprint_pformat | pypy | ok | held out | 0.49507 | 0.012071 | 0.48498–0.50516 | 0.192× (0.185–0.2×) | 1× (1–1×) | — | 0.79736 | 0.010446 | 0.79687 | 0.78325 | 0.312× (0.28–0.351×) | 1× (1–1×) | — |
+| pyperformance.pprint/pprint_safe_repr | cpython | ok | held out | 1.1598 | 0.047346 | 1.1202–1.1993 | 1× (1–1×) | 4.53× (4.2–4.89×) | — | 1.3352 | 0.091202 | 1.3784 | 1.1852 | 1× (1–1×) | 2.51× (2.22–2.82×) | — |
+| pyperformance.pprint/pprint_safe_repr | lucifer | ok | held out | 2.8701 | 0.056366 | 2.8229–2.9172 | 2.47× (2.35–2.6×) | 11.2× (10.6–11.9×) | — | 3.655 | 0.08955 | 3.6461 | 3.546 | 2.74× (2.45–3.08×) | 6.87× (6.44–7.34×) | — |
+| pyperformance.pprint/pprint_safe_repr | pypy | ok | held out | 0.25582 | 0.012802 | 0.24512–0.26652 | 0.221× (0.204–0.238×) | 1× (1–1×) | — | 0.53168 | 0.015067 | 0.52731 | 0.51994 | 0.398× (0.354–0.45×) | 1× (1–1×) | — |
+| pyperformance.pyflate | cpython | ok | held out | 0.59361 | 0.024772 | 0.5729–0.61432 | 1× (1–1×) | 4.34× (3.91–4.84×) | — | 0.78626 | 0.012536 | 0.79159 | 0.76392 | 1× (1–1×) | 1.78× (1.71–1.85×) | — |
+| pyperformance.pyflate | lucifer | ok | held out | 0.73917 | 0.021402 | 0.72128–0.75707 | 1.25× (1.17–1.32×) | 5.41× (4.92–5.96×) | — | 1.9765 | 0.10007 | 2.0034 | 1.8393 | 2.51× (2.31–2.73×) | 4.47× (4.12–4.85×) | — |
+| pyperformance.pyflate | pypy | ok | held out | 0.13676 | 0.011632 | 0.12703–0.14648 | 0.23× (0.207–0.256×) | 1× (1–1×) | — | 0.44182 | 0.0066187 | 0.44205 | 0.4348 | 0.562× (0.541–0.584×) | 1× (1–1×) | — |
+| pyperformance.raytrace | cpython | ok | held out | 0.45188 | 0.0047264 | 0.44793–0.45583 | 1× (1–1×) | 38.7× (36–41.7×) | — | 0.53807 | 0.014691 | 0.5403 | 0.51411 | 1× (1–1×) | 1.18× (1.12–1.24×) | — |
+| pyperformance.raytrace | lucifer | ok | held out | 0.20804 | 0.01766 | 0.19327–0.2228 | 0.46× (0.424–0.497×) | 17.8× (15.5–20.4×) | — | 1.074 | 0.0094073 | 1.0757 | 1.0588 | 2× (1.91–2.09×) | 2.35× (2.28–2.43×) | — |
+| pyperformance.raytrace | pypy | ok | held out | 0.011675 | 0.00090317 | 0.01092–0.01243 | 0.0258× (0.024–0.0277×) | 1× (1–1×) | — | 0.45665 | 0.0072391 | 0.45974 | 0.4473 | 0.849× (0.805–0.896×) | 1× (1–1×) | — |
+| pyperformance.regex_compile | cpython | ok | held out | 0.18313 | 0.011241 | 0.17373–0.19252 | 1× (1–1×) | — | — | 0.44285 | 0.0022095 | 0.44277 | 0.44 | 1× (1–1×) | — | — |
+| pyperformance.regex_compile | lucifer | ok | held out | 0.46198 | 0.031263 | 0.43584–0.48812 | 2.52× (2.26–2.81×) | — | — | 2.349 | 0.026856 | 2.3543 | 2.3116 | 5.3× (5.2–5.41×) | — | — |
+| pyperformance.regex_compile | pypy | pyperf stderr differs from oracle | held out | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| pyperformance.richards | cpython | ok | held out | 0.069074 | 0.0055714 | 0.064416–0.073732 | 1× (1–1×) | 31.1× (24–42.1×) | — | 0.20087 | 0.011763 | 0.19544 | 0.19095 | 1× (1–1×) | 0.701× (0.639–0.765×) | — |
+| pyperformance.richards | lucifer | ok | held out | 0.01524 | 0.00041799 | 0.01489–0.015589 | 0.221× (0.202–0.242×) | 6.87× (5.55–8.9×) | — | 0.76902 | 0.049127 | 0.79015 | 0.68128 | 3.83× (3.29–4.46×) | 2.68× (2.43–2.95×) | — |
+| pyperformance.richards | pypy | ok | held out | 0.002218 | 0.00055675 | 0.0017525–0.0026834 | 0.0321× (0.0238–0.0417×) | 1× (1–1×) | — | 0.28656 | 0.0040468 | 0.28508 | 0.28257 | 1.43× (1.31–1.57×) | 1× (1–1×) | — |
+| pyperformance.richards_super | cpython | ok | held out | 0.074862 | 0.0013186 | 0.07376–0.075965 | 1× (1–1×) | 40.6× (38.6–42.7×) | — | 0.20783 | 0.0075079 | 0.20534 | 0.20108 | 1× (1–1×) | 0.671× (0.627–0.718×) | — |
+| pyperformance.richards_super | lucifer | ok | held out | 0.013206 | 6.8895e-05 | 0.013148–0.013264 | 0.176× (0.173–0.18×) | 7.16× (6.89–7.45×) | — | 0.78852 | 0.011759 | 0.79367 | 0.77077 | 3.79× (3.56–4.05×) | 2.55× (2.44–2.65×) | — |
+| pyperformance.richards_super | pypy | ok | held out | 0.0018446 | 7.6985e-05 | 0.0017802–0.001909 | 0.0246× (0.0234–0.0259×) | 1× (1–1×) | — | 0.30957 | 0.0056835 | 0.3115 | 0.30333 | 1.49× (1.39–1.6×) | 1× (1–1×) | — |
+| pyperformance.spectral_norm | cpython | ok | held out | 0.1605 | 0.010788 | 0.15148–0.16952 | 1× (1–1×) | 26× (21.2–32.4×) | — | 0.29212 | 0.014013 | 0.29932 | 0.27469 | 1× (1–1×) | 1.4× (1.19–1.66×) | — |
+| pyperformance.spectral_norm | lucifer | ok | held out | 0.017587 | 0.00026217 | 0.017368–0.017806 | 0.11× (0.102–0.118×) | 2.84× (2.43–3.4×) | — | 0.76884 | 0.0051891 | 0.76967 | 0.76114 | 2.63× (2.46–2.82×) | 3.69× (3.31–4.15×) | — |
+| pyperformance.spectral_norm | pypy | ok | held out | 0.0061826 | 0.0011384 | 0.0052308–0.0071343 | 0.0385× (0.0309–0.0471×) | 1× (1–1×) | — | 0.2085 | 0.017542 | 0.21573 | 0.18875 | 0.714× (0.603–0.838×) | 1× (1–1×) | — |
+| pyperformance.sqlglot_v2 | cpython | ok | held out | 0.15817 | 0.0093916 | 0.15032–0.16602 | 1× (1–1×) | 1.35× (1.09–1.73×) | — | 0.44517 | 0.14872 | 0.35458 | 0.32637 | 1× (1–1×) | 0.7× (0.385–1.06×) | — |
+| pyperformance.sqlglot_v2 | lucifer | ok | held out | 0.36725 | 0.032464 | 0.34011–0.39439 | 2.32× (2.05–2.62×) | 3.14× (2.46–4.11×) | — | 1.5967 | 0.011105 | 1.5945 | 1.5854 | 3.59× (2.51–6.18×) | 2.51× (2.34–2.71×) | — |
+| pyperformance.sqlglot_v2 | pypy | ok | held out | 0.11712 | 0.025413 | 0.095869–0.13836 | 0.74× (0.577–0.92×) | 1× (1–1×) | — | 0.63561 | 0.033094 | 0.61863 | 0.603 | 1.43× (0.944–2.6×) | 1× (1–1×) | — |
+| pyperformance.sqlglot_v2_optimize | cpython | ok | held out | 0.083417 | 0.0055273 | 0.078796–0.088038 | 1× (1–1×) | 0.614× (0.492–0.789×) | — | 0.28168 | 0.012456 | 0.27728 | 0.27126 | 1× (1–1×) | 0.449× (0.406–0.496×) | — |
+| pyperformance.sqlglot_v2_optimize | lucifer | ok | held out | 0.21753 | 0.011107 | 0.20824–0.22681 | 2.61× (2.37–2.88×) | 1.6× (1.3–2.03×) | — | 1.1865 | 0.043401 | 1.1622 | 1.1518 | 4.21× (3.81–4.66×) | 1.89× (1.73–2.07×) | — |
+| pyperformance.sqlglot_v2_optimize | pypy | ok | held out | 0.1359 | 0.029028 | 0.11163–0.16016 | 1.63× (1.27–2.03×) | 1× (1–1×) | — | 0.62734 | 0.022425 | 0.62581 | 0.60472 | 2.23× (2.02–2.46×) | 1× (1–1×) | — |
+| pyperformance.sqlglot_v2_parse | cpython | ok | held out | 0.0020823 | 0.00016064 | 0.001948–0.0022165 | 1× (1–1×) | 1.85× (1.41–2.56×) | — | 0.17722 | 0.0082392 | 0.17443 | 0.17101 | 1× (1–1×) | 0.715× (0.667–0.764×) | — |
+| pyperformance.sqlglot_v2_parse | lucifer | ok | held out | 0.002358 | 0.00019522 | 0.0021948–0.0025212 | 1.13× (0.99–1.29×) | 2.1× (1.58–2.91×) | — | 0.76861 | 0.05502 | 0.76282 | 0.70246 | 4.34× (3.74–5.01×) | 3.1× (2.8–3.41×) | — |
+| pyperformance.sqlglot_v2_parse | pypy | ok | held out | 0.0011254 | 0.00031112 | 0.00086529–0.0013855 | 0.54× (0.39–0.711×) | 1× (1–1×) | — | 0.24777 | 0.0020416 | 0.24797 | 0.24446 | 1.4× (1.31–1.5×) | 1× (1–1×) | — |
+| pyperformance.sqlglot_v2_transpile | cpython | ok | held out | 0.0024127 | 0.00020628 | 0.0022402–0.0025851 | 1× (1–1×) | 1.01× (0.8–1.31×) | — | 0.18817 | 0.001462 | 0.18849 | 0.18572 | 1× (1–1×) | 0.651× (0.636–0.667×) | — |
+| pyperformance.sqlglot_v2_transpile | lucifer | ok | held out | 0.0037063 | 0.00024794 | 0.0034991–0.0039136 | 1.54× (1.35–1.75×) | 1.55× (1.25–1.98×) | — | 0.81981 | 0.015217 | 0.81358 | 0.80208 | 4.36× (4.22–4.5×) | 2.84× (2.73–2.94×) | — |
+| pyperformance.sqlglot_v2_transpile | pypy | ok | held out | 0.0023887 | 0.0004908 | 0.0019784–0.002799 | 0.99× (0.765–1.25×) | 1× (1–1×) | — | 0.28905 | 0.0033395 | 0.28901 | 0.28481 | 1.54× (1.5–1.57×) | 1× (1–1×) | — |
+| pyperformance.tomli_loads | cpython | ok | held out | 2.9009 | 0.19619 | 2.7369–3.0649 | 1× (1–1×) | 2.32× (2.08–2.59×) | — | 3.1699 | 0.15377 | 3.1838 | 2.9153 | 1× (1–1×) | 1.56× (1.44–1.69×) | — |
+| pyperformance.tomli_loads | lucifer | ok | held out | 2.5 | 0.1512 | 2.3736–2.6264 | 0.862× (0.774–0.96×) | 2× (1.81–2.22×) | — | 3.6391 | 0.057116 | 3.6124 | 3.6002 | 1.15× (1.06–1.25×) | 1.8× (1.73–1.87×) | — |
+| pyperformance.tomli_loads | pypy | ok | held out | 1.2479 | 0.079246 | 1.1816–1.3141 | 0.43× (0.386–0.48×) | 1× (1–1×) | — | 2.0272 | 0.033066 | 2.0384 | 1.9752 | 0.64× (0.591–0.694×) | 1× (1–1×) | — |
+| pyperformance.unpack_sequence | cpython | ok | held out | 7.2215e-08 | 1.3486e-09 | 7.1088e-08–7.3343e-08 | 1× (1–1×) | 519× (439–631×) | — | 0.12822 | 0.0046163 | 0.12734 | 0.12435 | 1× (1–1×) | 0.68× (0.624–0.741×) | — |
+| pyperformance.unpack_sequence | lucifer | ok | held out | 7.2158e-08 | 1.977e-08 | 5.563e-08–8.8686e-08 | 0.999× (0.758–1.25×) | 519× (343–763×) | — | 0.64309 | 0.044185 | 0.62116 | 0.60512 | 5.02× (4.39–5.7×) | 3.41× (2.99–3.86×) | — |
+| pyperformance.unpack_sequence | pypy | ok | held out | 1.3915e-10 | 2.7458e-11 | 1.1619e-10–1.621e-10 | 0.00193× (0.00158–0.00228×) | 1× (1–1×) | — | 0.18865 | 0.0062641 | 0.185 | 0.18322 | 1.47× (1.35–1.6×) | 1× (1–1×) | — |
 
 ## 2. Application paths
 
-Flask reports the median of three fresh servers at each layout. Its profiling row uses a separate warm server. Counts are per completed request or pyperf operation. The six percentages partition leaf cycle samples. Shared-client layouts are diagnostic, and failed requests disqualify a gate.
+Flask reports requests/s across three fresh servers at each layout with 10 s warm-up and 10 s measurement. Its profiling row uses a separate warm server. Shared-client layouts are diagnostic. Pyperformance reports seconds per operation after pyperf warm-up.
 
-| program | runtime | status | ops_per_s | over_cpython | final_ops_per_s | rps | rps_min | rps_max | rps_over_cpython | scaling | p99_ms | errors |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| flask.1 | cpython | ok | — | — | — | 2224.8 | 2224.1 | 2250.2 | 1 | 1 | 7092.2 | 0 |
-| flask.1 | lucifer | ok | — | — | — | 588 | 587.9 | 598.1 | 0.26429 | 1 | 7964.3 | 0 |
-| flask.1 | pypy | ok | — | — | — | 8483.4 | 8077.8 | 8582.5 | 3.8131 | 1 | 155.26 | 0 |
-| flask.1.profile | cpython | ok | — | — | — | — | — | — | — | — | — | 0 |
-| flask.1.profile | lucifer | ok | — | — | — | — | — | — | — | — | — | 0 |
-| flask.1.profile | pypy | ok | — | — | — | — | — | — | — | — | — | 0 |
-| flask.8 | cpython | ok | — | — | — | 8100 | 7939.2 | 8542.1 | 1 | 3.6408 | 34.096 | 0 |
-| flask.8 | lucifer | ok | — | — | — | 3454.9 | 3438.4 | 3551.7 | 0.42653 | 5.8757 | 50.144 | 0 |
-| flask.8 | pypy | ok | — | — | — | 2882.7 | 2802.9 | 2883.7 | 0.35589 | 0.3398 | 73.515 | 0 |
-| flask.8.profile | cpython | ok | — | — | — | — | — | — | — | — | — | 0 |
-| flask.8.profile | lucifer | ok | — | — | — | — | — | — | — | — | — | 0 |
-| flask.8.profile | pypy | hardware counts unavailable | — | — | — | — | — | — | — | — | — | 0 |
-| pyperformance.chameleon | cpython | unsettled | — | — | 49.977 | — | — | — | — | — | — | — |
-| pyperformance.chameleon | lucifer | unsettled | — | — | 28.18 | — | — | — | — | — | — | — |
-| pyperformance.chameleon | pypy | unsettled | — | — | 227.31 | — | — | — | — | — | — | — |
-| pyperformance.django_template | cpython | unsettled | — | — | 19.04 | — | — | — | — | — | — | — |
-| pyperformance.django_template | lucifer | unsettled | — | — | 13.49 | — | — | — | — | — | — | — |
-| pyperformance.django_template | pypy | unsettled | — | — | 134.72 | — | — | — | — | — | — | — |
-| pyperformance.docutils | cpython | ok | 0.29072 | 1 | 0.29011 | — | — | — | — | — | — | — |
-| pyperformance.docutils | lucifer | ok | 0.12326 | 2.3587 | 0.12378 | — | — | — | — | — | — | — |
-| pyperformance.docutils | pypy | unsettled | — | — | 0.27704 | — | — | — | — | — | — | — |
-| pyperformance.fastapi | cpython | unsettled | — | — | 2.7916 | — | — | — | — | — | — | — |
-| pyperformance.fastapi | lucifer | unsettled | — | — | 1.0611 | — | — | — | — | — | — | — |
-| pyperformance.fastapi | pypy | pyperf worker exit 1 | — | — | — | — | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_text | cpython | unsettled | — | — | 29.713 | — | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_text | lucifer | unsettled | — | — | 14.704 | — | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_text | pypy | unsettled | — | — | 29.8 | — | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_xml | cpython | unsettled | — | — | 11.901 | — | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_xml | lucifer | unsettled | — | — | 3.7627 | — | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_xml | pypy | unsettled | — | — | 24.945 | — | — | — | — | — | — | — |
-| pyperformance.html5lib | cpython | unsettled | — | — | 12.461 | — | — | — | — | — | — | — |
-| pyperformance.html5lib | lucifer | unsettled | — | — | 6.0376 | — | — | — | — | — | — | — |
-| pyperformance.html5lib | pypy | unsettled | — | — | 27.02 | — | — | — | — | — | — | — |
-| pyperformance.mako | cpython | ok | 56.29 | 1 | 56.295 | — | — | — | — | — | — | — |
-| pyperformance.mako | lucifer | unsettled | — | — | 24.901 | — | — | — | — | — | — | — |
-| pyperformance.mako | pypy | unsettled | — | — | 113.06 | — | — | — | — | — | — | — |
-| pyperformance.sphinx | cpython | unsettled | — | — | 0.67212 | — | — | — | — | — | — | — |
-| pyperformance.sphinx | lucifer | ok | 0.26498 | — | 0.26498 | — | — | — | — | — | — | — |
-| pyperformance.sphinx | pypy | unsettled | — | — | 0.37467 | — | — | — | — | — | — | — |
-| pyperformance.tornado_http | cpython | ok | 5.9675 | 1 | 5.9675 | — | — | — | — | — | — | — |
-| pyperformance.tornado_http | lucifer | unsettled | — | — | 1.6002 | — | — | — | — | — | — | — |
-| pyperformance.tornado_http | pypy | unsettled | — | — | 2.2765 | — | — | — | — | — | — | — |
+Whole-process coverage: cpython 11/12 (1 failed), lucifer 11/12 (1 failed), pypy 10/12 (2 failed).
+
+| program | runtime | status | seconds | stdev_s | rps | 95% interval | × stock | scaling | p99_ms | errors | whole_mean_s | whole_stdev_s | whole_median_s | whole_min_s | whole × stock |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| flask.1 | cpython | request errors | — | — | 2220.6 | 2196.3–2244.9 | 1× (1–1×) | 1 | 6840.1 | 1 | 0.33125 | 0.011777 | 0.33568 | 0.31089 | 1× (1–1×) |
+| flask.1 | lucifer | ok | — | — | 589.63 | 553.12–626.14 | 0.266× (0.246–0.285×) | 1 | 7945.1 | 0 | 0.92871 | 0.028246 | 0.93461 | 0.8989 | 2.8× (2.58–3.04×) |
+| flask.1 | pypy | ok | — | — | 8215.7 | 7971.5–8460 | 3.7× (3.55–3.85×) | 1 | 161.75 | 0 | 0.76996 | 0.011711 | 0.77275 | 0.75684 | 2.32× (2.18–2.48×) |
+| flask.1.profile | cpython | ok | — | — | — | — | — | — | — | 0 | — | — | — | — | — |
+| flask.1.profile | lucifer | ok | — | — | — | — | — | — | — | 0 | — | — | — | — | — |
+| flask.1.profile | pypy | ok | — | — | — | — | — | — | — | 0 | — | — | — | — | — |
+| flask.8 | cpython | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| flask.8 | lucifer | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| flask.8 | pypy | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| flask.8.profile | cpython | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| flask.8.profile | lucifer | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| flask.8.profile | pypy | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| flask.8.shared | cpython | ok | — | — | 8484.8 | 8372.1–8597.5 | 1× (1–1×) | — | 34.317 | 0 | 0.3259 | 0.016354 | 0.3185 | 0.31115 | 1× (1–1×) |
+| flask.8.shared | lucifer | ok | — | — | 3551.6 | 3243.4–3859.7 | 0.419× (0.377–0.461×) | — | 65.182 | 0 | 0.86323 | 0.024407 | 0.86949 | 0.82836 | 2.65× (2.41–2.92×) |
+| flask.8.shared | pypy | ok | — | — | 2875.2 | 2676.2–3074.2 | 0.339× (0.311–0.367×) | — | 70.859 | 0 | 0.7686 | 0.046257 | 0.7625 | 0.72301 | 2.36× (2.05–2.7×) |
+| flask.8.shared.profile | cpython | ok | — | — | — | — | — | — | — | 0 | — | — | — | — | — |
+| flask.8.shared.profile | lucifer | ok | — | — | — | — | — | — | — | 0 | — | — | — | — | — |
+| flask.8.shared.profile | pypy | ok | — | — | — | — | — | — | — | 0 | — | — | — | — | — |
+| pyperformance.chameleon | cpython | ok | 0.021993 | 0.00057647 | — | 0.021511–0.022475 | 1× (1–1×) | — | — | — | 0.37402 | 0.012246 | 0.37268 | 0.36424 | 1× (1–1×) |
+| pyperformance.chameleon | lucifer | ok | 0.044696 | 0.0037392 | — | 0.04157–0.047822 | 2.03× (1.85–2.22×) | — | — | — | 1.6313 | 0.036477 | 1.6169 | 1.609 | 4.36× (4.07–4.67×) |
+| pyperformance.chameleon | pypy | ok | 0.004963 | 0.00090101 | — | 0.0042098–0.0057163 | 0.226× (0.187–0.266×) | — | — | — | 0.56713 | 0.0074208 | 0.5659 | 0.55952 | 1.52× (1.43–1.61×) |
+| pyperformance.django_template | cpython | ok | 0.064702 | 0.00062053 | — | 0.064183–0.06522 | 1× (1–1×) | — | — | — | 0.4102 | 0.0046355 | 0.41033 | 0.40437 | 1× (1–1×) |
+| pyperformance.django_template | lucifer | ok | 0.071441 | 0.0074267 | — | 0.065232–0.07765 | 1.1× (1–1.21×) | — | — | — | 1.4267 | 0.036177 | 1.4431 | 1.3625 | 3.48× (3.32–3.64×) |
+| pyperformance.django_template | pypy | ok | 0.0083287 | 0.0009656 | — | 0.0075214–0.009136 | 0.129× (0.115–0.142×) | — | — | — | 0.51357 | 0.0067047 | 0.51796 | 0.50471 | 1.25× (1.21–1.29×) |
+| pyperformance.docutils | cpython | ok | 3.8473 | 0.045686 | — | 3.8091–3.8855 | 1× (1–1×) | — | — | — | 4.0671 | 0.07904 | 4.0654 | 3.9444 | 1× (1–1×) |
+| pyperformance.docutils | lucifer | ok | 8.4067 | 0.51656 | — | 7.9748–8.8385 | 2.19× (2.05–2.32×) | — | — | — | 13.544 | 0.60857 | 13.784 | 12.494 | 3.33× (3.07–3.6×) |
+| pyperformance.docutils | pypy | ok | 3.3525 | 0.40302 | — | 3.0155–3.6894 | 0.871× (0.776–0.969×) | — | — | — | 9.3868 | 0.2949 | 9.3558 | 8.9702 | 2.31× (2.17–2.46×) |
+| pyperformance.fastapi | cpython | ok | 0.4066 | 0.016528 | — | 0.39278–0.42041 | 1× (1–1×) | — | — | — | 1.4095 | 0.076798 | 1.4138 | 1.3046 | 1× (1–1×) |
+| pyperformance.fastapi | lucifer | ok | 0.98889 | 0.087204 | — | 0.91599–1.0618 | 2.43× (2.18–2.7×) | — | — | — | 3.4529 | 0.024769 | 3.4613 | 3.4204 | 2.45× (2.27–2.65×) |
+| pyperformance.fastapi | pypy | pyperf worker exit 1 | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| pyperformance.genshi/genshi_text | cpython | ok | 0.040639 | 0.0036593 | — | 0.03758–0.043698 | 1× (1–1×) | — | — | — | 0.20922 | 0.0016668 | 0.20831 | 0.20755 | 1× (1–1×) |
+| pyperformance.genshi/genshi_text | lucifer | ok | 0.074123 | 0.005068 | — | 0.069886–0.07836 | 1.82× (1.6–2.09×) | — | — | — | 0.87614 | 0.042272 | 0.89008 | 0.8058 | 4.19× (3.9–4.48×) |
+| pyperformance.genshi/genshi_text | pypy | ok | 0.036424 | 0.0052893 | — | 0.032003–0.040846 | 0.896× (0.732–1.09×) | — | — | — | 0.34109 | 0.003802 | 0.34203 | 0.33605 | 1.63× (1.59–1.67×) |
+| pyperformance.genshi/genshi_xml | cpython | ok | 0.079838 | 0.0042042 | — | 0.076323–0.083353 | 1× (1–1×) | — | — | — | 0.24338 | 0.012634 | 0.23792 | 0.23169 | 1× (1–1×) |
+| pyperformance.genshi/genshi_xml | lucifer | ok | 0.24867 | 0.018509 | — | 0.23319–0.26414 | 3.11× (2.8–3.46×) | — | — | — | 1.1186 | 0.084394 | 1.0729 | 1.036 | 4.6× (3.91–5.37×) |
+| pyperformance.genshi/genshi_xml | pypy | ok | 0.046106 | 0.0086219 | — | 0.038898–0.053314 | 0.577× (0.467–0.699×) | — | — | — | 0.34792 | 0.019504 | 0.33655 | 0.32991 | 1.43× (1.25–1.63×) |
+| pyperformance.html5lib | cpython | ok | 0.094254 | 0.007398 | — | 0.088069–0.10044 | 1× (1–1×) | — | — | — | 0.27525 | 0.0034598 | 0.27597 | 0.26989 | 1× (1–1×) |
+| pyperformance.html5lib | lucifer | ok | 0.17912 | 0.010272 | — | 0.17054–0.18771 | 1.9× (1.7–2.13×) | — | — | — | 1.1453 | 0.025594 | 1.1456 | 1.107 | 4.16× (3.98–4.34×) |
+| pyperformance.html5lib | pypy | ok | 0.043688 | 0.011184 | — | 0.034338–0.053038 | 0.464× (0.342–0.602×) | — | — | — | 0.50434 | 0.014735 | 0.49829 | 0.49195 | 1.83× (1.74–1.93×) |
+| pyperformance.mako | cpython | ok | 0.019967 | 0.0010609 | — | 0.01908–0.020854 | 1× (1–1×) | — | — | — | 0.22371 | 0.012578 | 0.21663 | 0.21528 | 1× (1–1×) |
+| pyperformance.mako | lucifer | ok | 0.036671 | 0.0011459 | — | 0.035713–0.037629 | 1.84× (1.71–1.97×) | — | — | — | 1.0575 | 0.017018 | 1.0659 | 1.0325 | 4.73× (4.33–5.18×) |
+| pyperformance.mako | pypy | ok | 0.0092349 | 0.0011428 | — | 0.0082794–0.01019 | 0.463× (0.397–0.534×) | — | — | — | 0.33485 | 0.0062384 | 0.33344 | 0.32666 | 1.5× (1.37–1.65×) |
+| pyperformance.sphinx | cpython | ok | 1.5949 | 0.024325 | — | 1.5746–1.6152 | 1× (1–1×) | — | — | — | 2.2032 | 0.11098 | 2.2047 | 2.0736 | 1× (1–1×) |
+| pyperformance.sphinx | lucifer | ok | 3.8237 | 0.11033 | — | 3.7315–3.916 | 2.4× (2.31–2.49×) | — | — | — | 8.4205 | 0.29966 | 8.5517 | 7.8856 | 3.82× (3.44–4.26×) |
+| pyperformance.sphinx | pypy | ok | 2.9365 | 0.31035 | — | 2.6771–3.196 | 1.84× (1.66–2.03×) | — | — | — | 7.1837 | 0.078013 | 7.1687 | 7.0824 | 3.26× (3.03–3.52×) |
+| pyperformance.tornado_http | cpython | ok | 0.18559 | 0.0045113 | — | 0.18182–0.18936 | 1× (1–1×) | — | — | — | 0.45339 | 0.0033261 | 0.45384 | 0.44908 | 1× (1–1×) |
+| pyperformance.tornado_http | lucifer | ok | 0.60065 | 0.067515 | — | 0.54421–0.6571 | 3.24× (2.87–3.61×) | — | — | — | 1.952 | 0.029709 | 1.9564 | 1.9064 | 4.31× (4.19–4.43×) |
+| pyperformance.tornado_http | pypy | ok | 0.40576 | 0.09683 | — | 0.3248–0.48671 | 2.19× (1.72–2.68×) | — | — | — | 1.0163 | 0.024812 | 1.0088 | 0.99677 | 2.24× (2.15–2.33×) |
 
 ### Warm CPU attribution
 
 | program | runtime | profile_status | profile_units | instructions_per_unit | cycles_per_unit | compiled_pct | interpreter_pct | runtime_c_pct | native_pct | kernel_pct | unknown_pct |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| flask.1.profile | cpython | ok | 10824 | 1.4847e+06 | 1.936e+06 | 0 | 29.585 | 63.2 | 0.19113 | 7.024 | 0 |
-| flask.1.profile | lucifer | ok | 2788 | 4.1733e+06 | 7.5156e+06 | 30.404 | 6.2765 | 55.572 | 0 | 7.7467 | 0 |
-| flask.1.profile | pypy | ok | 40723 | 3.7598e+05 | 4.8847e+05 | 0 | 0.56301 | 55.38 | 0 | 20.505 | 23.552 |
-| flask.8.profile | cpython | ok | 42006 | 1.5198e+06 | 2.8815e+06 | 0 | 26.809 | 64.597 | 0.35005 | 8.2268 | 0.01743 |
-| flask.8.profile | lucifer | ok | 17470 | 3.2626e+06 | 7.2114e+06 | 30.054 | 3.9041 | 53.293 | 0.17042 | 12.528 | 0.050999 |
-| flask.8.profile | pypy | hardware counts unavailable | 14348 | 5.8498e+05 | — | 0 | 0.76495 | 60.74 | 0 | 19.99 | 18.505 |
-| pyperformance.chameleon | cpython | ok | 42 | 1.7017e+08 | 8.6333e+07 | 0 | 28.407 | 71.013 | 0 | 0.58 | 0 |
-| pyperformance.chameleon | lucifer | ok | 24 | 2.6805e+08 | 1.4794e+08 | 42.798 | 0.59061 | 55.43 | 0 | 1.1812 | 0 |
-| pyperformance.chameleon | pypy | ok | 120 | 3.135e+07 | 1.8318e+07 | 0 | 0 | 65.698 | 0 | 1.9185 | 32.383 |
-| pyperformance.django_template | cpython | ok | 14 | 3.989e+08 | 2.3225e+08 | 0 | 42.071 | 56.635 | 0 | 1.2937 | 0 |
-| pyperformance.django_template | lucifer | ok | 12 | 4.4008e+08 | 2.9249e+08 | 28.171 | 2.3915 | 68.241 | 0 | 1.1963 | 0 |
-| pyperformance.django_template | pypy | ok | 108 | 5.6284e+07 | 3.032e+07 | 0 | 0.64004 | 53.341 | 0 | 1.2806 | 44.738 |
-| pyperformance.docutils | cpython | ok | 1 | 1.9057e+10 | 1.4537e+10 | 0 | 23.861 | 74.259 | 0 | 1.8796 | 0 |
-| pyperformance.docutils | lucifer | ok | 1 | 3.7694e+10 | 3.2497e+10 | 33.572 | 1.892 | 63.111 | 0 | 1.4252 | 0 |
-| pyperformance.docutils | pypy | ok | 1 | 1.4976e+10 | 1.3985e+10 | 0 | 3.7688 | 74.831 | 0 | 1.5005 | 19.9 |
-| pyperformance.fastapi | cpython | ok | 3 | 2.0533e+09 | 1.5405e+09 | 0 | 47.777 | 44.4 | 0.40511 | 6.7182 | 0.69989 |
-| pyperformance.fastapi | lucifer | ok | 1 | 3.1004e+09 | 3.8005e+09 | 30.706 | 7.9036 | 55.398 | 0 | 5.6772 | 0.31438 |
-| pyperformance.genshi/genshi_text | cpython | ok | 24 | 3.0089e+08 | 1.539e+08 | 0 | 41.978 | 55.742 | 0 | 2.2797 | 0 |
-| pyperformance.genshi/genshi_text | lucifer | ok | 10 | 4.3364e+08 | 2.4231e+08 | 30.206 | 3.5626 | 64.502 | 0 | 1.7293 | 0 |
-| pyperformance.genshi/genshi_text | pypy | ok | 18 | 2.2389e+08 | 1.534e+08 | 0 | 0 | 81.67 | 0 | 1.5318 | 16.798 |
-| pyperformance.genshi/genshi_xml | cpython | ok | 9 | 5.7539e+08 | 3.1572e+08 | 0 | 44.191 | 54.325 | 0 | 1.4849 | 0 |
-| pyperformance.genshi/genshi_xml | lucifer | ok | 3 | 1.2367e+09 | 9.4336e+08 | 38.912 | 2.8651 | 56.645 | 0 | 1.5788 | 0 |
-| pyperformance.genshi/genshi_xml | pypy | ok | 19 | 2.5918e+08 | 1.6861e+08 | 0 | 0 | 58.078 | 0 | 0 | 41.922 |
-| pyperformance.html5lib | cpython | ok | 9 | 4.69e+08 | 3.4096e+08 | 0 | 43.514 | 54.426 | 1.3733 | 0.68644 | 0 |
-| pyperformance.html5lib | lucifer | ok | 5 | 8.857e+08 | 7.2013e+08 | 24.993 | 10.631 | 62.616 | 0 | 1.76 | 0 |
-| pyperformance.html5lib | pypy | ok | 19 | 1.7437e+08 | 1.3134e+08 | 0 | 0 | 87.228 | 0 | 0 | 12.772 |
-| pyperformance.mako | cpython | ok | 48 | 1.5942e+08 | 8.2243e+07 | 0 | 26.295 | 73.172 | 0 | 0.53346 | 0 |
-| pyperformance.mako | lucifer | ok | 24 | 3.597e+08 | 1.6376e+08 | 29.837 | 0 | 69.626 | 0 | 0.53654 | 0 |
-| pyperformance.mako | pypy | ok | 90 | 6.0856e+07 | 3.5363e+07 | 0 | 0.66079 | 80.042 | 0 | 0.66008 | 18.637 |
-| pyperformance.sphinx | cpython | ok | 1 | 8.4259e+09 | 6.1431e+09 | 0 | 26.376 | 69.164 | 2.059 | 2.4017 | 0 |
-| pyperformance.sphinx | lucifer | ok | 1 | 1.9883e+10 | 1.6069e+10 | 31.574 | 3.4812 | 63.204 | 0.52351 | 1.2169 | 0 |
-| pyperformance.sphinx | pypy | ok | 1 | 1.1548e+10 | 1.0312e+10 | 0 | 3.4558 | 81.715 | 0 | 0.60351 | 14.225 |
-| pyperformance.tornado_http | cpython | ok | 5 | 5.2769e+08 | 7.0916e+08 | 0 | 34.855 | 43.545 | 4.4206 | 17.179 | 0 |
-| pyperformance.tornado_http | lucifer | ok | 2 | 1.9756e+09 | 2.2432e+09 | 15.641 | 8.9915 | 65.284 | 0 | 10.084 | 0 |
-| pyperformance.tornado_http | pypy | ok | 2 | 1.2331e+09 | 1.6604e+09 | 0 | 7.9802 | 74.728 | 0 | 12.207 | 5.0846 |
+| flask.1.profile | cpython | ok | 11180 | 1.4879e+06 | 1.8417e+06 | 0 | 28.81 | 64.317 | 0.60676 | 6.2664 | 0 |
+| flask.1.profile | lucifer | ok | 2874 | 4.1391e+06 | 7.3895e+06 | 34.136 | 4.6227 | 51.717 | 0.18103 | 9.3438 | 0 |
+| flask.1.profile | pypy | ok | 41286 | 3.8149e+05 | 4.9126e+05 | 0 | 0.92585 | 54.001 | 0 | 19.43 | 25.643 |
+| flask.8.profile | cpython | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — |
+| flask.8.profile | lucifer | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — |
+| flask.8.profile | pypy | insufficient disjoint CPUs | — | — | — | — | — | — | — | — | — |
+| flask.8.shared.profile | cpython | ok | 38176 | 1.5337e+06 | 2.9996e+06 | 0 | 27.448 | 62.067 | 0.44021 | 9.9867 | 0.058715 |
+| flask.8.shared.profile | lucifer | ok | 16835 | 3.2884e+06 | 7.3265e+06 | 28.684 | 4.1818 | 53.6 | 0.13434 | 13.351 | 0.049974 |
+| flask.8.shared.profile | pypy | ok | 14299 | 5.789e+05 | 1.0841e+06 | 0 | 1.2486 | 61.653 | 0 | 18.647 | 18.451 |
+| pyperformance.chameleon | cpython | ok | 36 | 1.702e+08 | 9.2707e+07 | 0 | 35.467 | 64.533 | 0 | 0 | 0 |
+| pyperformance.chameleon | lucifer | ok | 18 | 2.6205e+08 | 1.7275e+08 | 46.177 | 0 | 53.144 | 0 | 0.6791 | 0 |
+| pyperformance.chameleon | pypy | ok | 168 | 3.1331e+07 | 2.1422e+07 | 0 | 0 | 68.623 | 0 | 1.4385 | 29.939 |
+| pyperformance.django_template | cpython | ok | 14 | 3.9505e+08 | 2.7519e+08 | 0 | 50.012 | 49.988 | 0 | 0 | 0 |
+| pyperformance.django_template | lucifer | ok | 12 | 4.4608e+08 | 2.7583e+08 | 31.79 | 3.1779 | 63.963 | 0 | 1.0693 | 0 |
+| pyperformance.django_template | pypy | ok | 108 | 5.7725e+07 | 3.8594e+07 | 0 | 0 | 53.336 | 0 | 3.6371 | 43.027 |
+| pyperformance.docutils | cpython | ok | 1 | 1.9213e+10 | 1.5428e+10 | 0 | 24.918 | 73.039 | 0 | 2.0431 | 0 |
+| pyperformance.docutils | lucifer | ok | 1 | 3.7666e+10 | 3.6276e+10 | 32.996 | 0.75258 | 64.767 | 0 | 1.4847 | 0 |
+| pyperformance.docutils | pypy | ok | 1 | 1.416e+10 | 1.3737e+10 | 0 | 4.1313 | 76.245 | 0 | 1.7019 | 17.921 |
+| pyperformance.fastapi | cpython | ok | 2 | 2.0552e+09 | 1.7126e+09 | 0 | 47.649 | 45.595 | 1.7007 | 3.966 | 1.0895 |
+| pyperformance.fastapi | lucifer | ok | 1 | 2.7067e+09 | 3.8415e+09 | 35.76 | 6.1329 | 50.573 | 0.57908 | 6.6744 | 0.28042 |
+| pyperformance.genshi/genshi_text | cpython | ok | 18 | 3.0126e+08 | 1.6421e+08 | 0 | 46.669 | 53.331 | 0 | 0 | 0 |
+| pyperformance.genshi/genshi_text | lucifer | ok | 11 | 4.356e+08 | 2.9818e+08 | 29.606 | 3.3211 | 67.073 | 0 | 0 | 0 |
+| pyperformance.genshi/genshi_text | pypy | ok | 23 | 2.3901e+08 | 1.6252e+08 | 0 | 0.5641 | 82.337 | 0 | 3.0066 | 14.092 |
+| pyperformance.genshi/genshi_xml | cpython | ok | 10 | 5.7627e+08 | 3.5438e+08 | 0 | 40.39 | 59.539 | 0.070965 | 0 | 0 |
+| pyperformance.genshi/genshi_xml | lucifer | ok | 4 | 1.2381e+09 | 1.0678e+09 | 34.567 | 1.9737 | 62.785 | 0 | 0.67395 | 0 |
+| pyperformance.genshi/genshi_xml | pypy | ok | 12 | 2.5442e+08 | 2.0326e+08 | 0 | 1.8361 | 56.665 | 0 | 5.1976 | 36.302 |
+| pyperformance.html5lib | cpython | ok | 8 | 4.733e+08 | 3.5724e+08 | 0 | 37.248 | 60.533 | 0.73958 | 1.4792 | 0 |
+| pyperformance.html5lib | lucifer | ok | 5 | 1.0267e+09 | 9.2257e+08 | 29.244 | 8.3832 | 59.574 | 0.45746 | 2.3407 | 0 |
+| pyperformance.html5lib | pypy | ok | 19 | 1.7627e+08 | 1.4311e+08 | 0 | 3.9859 | 74.946 | 0 | 0.87166 | 20.196 |
+| pyperformance.mako | cpython | ok | 42 | 1.5936e+08 | 8.2402e+07 | 0 | 26.854 | 72.537 | 0 | 0.60869 | 0 |
+| pyperformance.mako | lucifer | ok | 24 | 3.5959e+08 | 1.5206e+08 | 29.954 | 0 | 69.153 | 0 | 0.8927 | 0 |
+| pyperformance.mako | pypy | ok | 84 | 6.2812e+07 | 3.7137e+07 | 0 | 2.7118 | 78.997 | 0 | 4.6347 | 13.657 |
+| pyperformance.sphinx | cpython | ok | 1 | 8.6171e+09 | 6.858e+09 | 0 | 22.312 | 72.479 | 3.3791 | 1.8301 | 0 |
+| pyperformance.sphinx | lucifer | ok | 1 | 1.8432e+10 | 1.4685e+10 | 30.77 | 2.9164 | 63.095 | 1.4319 | 1.7871 | 0 |
+| pyperformance.sphinx | pypy | ok | 1 | 1.2581e+10 | 1.2282e+10 | 0 | 3.5929 | 82.442 | 0 | 2.6738 | 11.292 |
+| pyperformance.tornado_http | cpython | ok | 5 | 5.2811e+08 | 7.7847e+08 | 0 | 32.437 | 48.264 | 0.23513 | 19.064 | 0 |
+| pyperformance.tornado_http | lucifer | ok | 2 | 2.026e+09 | 2.2278e+09 | 23.068 | 5.8335 | 61.766 | 0 | 9.3326 | 0 |
+| pyperformance.tornado_http | pypy | ok | 3 | 8.1159e+08 | 1.2459e+09 | 0 | 5.8134 | 73.802 | 0 | 14.852 | 5.5328 |
 
 ## 3. Short programs
 
-Whole-process wall time at the corpus's fixed work and output checks. The CLI, startup and additional fresh-process workers have separate denominators.
+Hyperfine measures process launch through exit with 1 warm-up and 5 measured runs. Whole-process columns report hyperfine’s mean, sample standard deviation, median and minimum, in seconds.
 
-| program | runtime | status | seconds | over_cpython |
-|---|---|---|---|---|
-| cli.black | cpython | ok | 0.4662 | 1 |
-| cli.black | lucifer | ok | 2.0065 | 4.304 |
-| cli.black | pypy | ok | 1.6662 | 3.5739 |
-| cli.isort | cpython | ok | 0.13918 | 1 |
-| cli.isort | lucifer | ok | 0.47381 | 3.4042 |
-| cli.isort | pypy | ok | 0.26522 | 1.9055 |
-| cli.markdown | cpython | ok | 0.11636 | 1 |
-| cli.markdown | lucifer | ok | 0.50879 | 4.3728 |
-| cli.markdown | pypy | ok | 0.20822 | 1.7895 |
-| cli.pycodestyle | cpython | ok | 0.81894 | 1 |
-| cli.pycodestyle | lucifer | ok | 3.2888 | 4.0159 |
-| cli.pycodestyle | pypy | ok | 1.9154 | 2.3389 |
-| cli.pyflakes | cpython | ok | 0.71848 | 1 |
-| cli.pyflakes | lucifer | ok | 1.5091 | 2.1004 |
-| cli.pyflakes | pypy | ok | 1.6837 | 2.3435 |
-| cli.pygments | cpython | ok | 0.27264 | 1 |
-| cli.pygments | lucifer | ok | 2.0191 | 7.4057 |
-| cli.pygments | pypy | ok | 0.92931 | 3.4085 |
-| pyperformance.2to3 | cpython | ok | 0.38832 | 1 |
-| pyperformance.2to3 | lucifer | ok | 2.0454 | 5.2674 |
-| pyperformance.2to3 | pypy | ok | 1.441 | 3.7108 |
-| startup.import_stdlib | cpython | ok | 0.10609 | 1 |
-| startup.import_stdlib | lucifer | ok | 0.28093 | 2.6482 |
-| startup.import_stdlib | pypy | ok | 0.13893 | 1.3096 |
-| startup.python_startup | cpython | ok | 0.01554 | 1 |
-| startup.python_startup | lucifer | ok | 0.030496 | 1.9623 |
-| startup.python_startup | pypy | ok | 0.024532 | 1.5786 |
-| startup.python_startup_no_site | cpython | ok | 0.01037 | 1 |
-| startup.python_startup_no_site | lucifer | ok | 0.018889 | 1.8215 |
-| startup.python_startup_no_site | pypy | ok | 0.022614 | 2.1807 |
+Whole-process coverage: cpython 10/10 (0 failed), lucifer 10/10 (0 failed), pypy 10/10 (0 failed).
+
+| program | runtime | status | whole_mean_s | whole_stdev_s | whole_median_s | whole_min_s | whole × stock |
+|---|---|---|---|---|---|---|---|
+| cli.black | cpython | ok | 0.46745 | 0.012181 | 0.47128 | 0.45423 | 1× (1–1×) |
+| cli.black | lucifer | ok | 2.237 | 0.077867 | 2.2685 | 2.0978 | 4.79× (4.44–5.16×) |
+| cli.black | pypy | ok | 1.7376 | 0.10056 | 1.703 | 1.6667 | 3.72× (3.34–4.12×) |
+| cli.isort | cpython | ok | 0.13889 | 0.0025181 | 0.13852 | 0.13652 | 1× (1–1×) |
+| cli.isort | lucifer | ok | 0.56026 | 0.0065126 | 0.56159 | 0.5519 | 4.03× (3.89–4.19×) |
+| cli.isort | pypy | ok | 0.27345 | 0.0097024 | 0.27521 | 0.26179 | 1.97× (1.84–2.1×) |
+| cli.markdown | cpython | ok | 0.12098 | 0.0009595 | 0.12104 | 0.11977 | 1× (1–1×) |
+| cli.markdown | lucifer | ok | 0.6237 | 0.012955 | 0.62585 | 0.60407 | 5.16× (4.97–5.34×) |
+| cli.markdown | pypy | ok | 0.21028 | 0.0029664 | 0.21039 | 0.20705 | 1.74× (1.69–1.79×) |
+| cli.pycodestyle | cpython | ok | 0.89616 | 0.022588 | 0.90069 | 0.87064 | 1× (1–1×) |
+| cli.pycodestyle | lucifer | ok | 3.7106 | 0.13119 | 3.6894 | 3.53 | 4.14× (3.84–4.46×) |
+| cli.pycodestyle | pypy | ok | 2.0947 | 0.055411 | 2.1159 | 2.0174 | 2.34× (2.19–2.49×) |
+| cli.pyflakes | cpython | ok | 0.75955 | 0.01531 | 0.76509 | 0.73928 | 1× (1–1×) |
+| cli.pyflakes | lucifer | ok | 1.621 | 0.054751 | 1.6351 | 1.5252 | 2.13× (1.99–2.28×) |
+| cli.pyflakes | pypy | ok | 1.8575 | 0.035412 | 1.8591 | 1.8094 | 2.45× (2.33–2.57×) |
+| cli.pygments | cpython | ok | 0.28892 | 0.0081025 | 0.29244 | 0.27898 | 1× (1–1×) |
+| cli.pygments | lucifer | ok | 2.3089 | 0.12647 | 2.2714 | 2.1908 | 7.99× (7.2–8.84×) |
+| cli.pygments | pypy | ok | 0.93865 | 0.032499 | 0.92427 | 0.91386 | 3.25× (3–3.51×) |
+| pyperformance.2to3 | cpython | ok | 0.4188 | 0.05043 | 0.4081 | 0.37552 | 1× (1–1×) |
+| pyperformance.2to3 | lucifer | ok | 2.304 | 0.2152 | 2.1802 | 2.136 | 5.5× (4.23–7.22×) |
+| pyperformance.2to3 | pypy | ok | 1.5898 | 0.031825 | 1.5871 | 1.5418 | 3.8× (3.22–4.57×) |
+| startup.import_stdlib | cpython | ok | 0.11498 | 0.0052641 | 0.11392 | 0.10961 | 1× (1–1×) |
+| startup.import_stdlib | lucifer | ok | 0.29355 | 0.0070787 | 0.2914 | 0.28721 | 2.55× (2.34–2.79×) |
+| startup.import_stdlib | pypy | ok | 0.16679 | 0.0012823 | 0.16643 | 0.1653 | 1.45× (1.36–1.55×) |
+| startup.python_startup | cpython | ok | 0.014848 | 0.00047083 | 0.014759 | 0.014284 | 1× (1–1×) |
+| startup.python_startup | lucifer | ok | 0.029629 | 0.0012997 | 0.030049 | 0.027344 | 2× (1.82–2.19×) |
+| startup.python_startup | pypy | ok | 0.026955 | 0.00075436 | 0.027184 | 0.025669 | 1.82× (1.69–1.96×) |
+| startup.python_startup_no_site | cpython | ok | 0.011033 | 0.0005294 | 0.011186 | 0.01027 | 1× (1–1×) |
+| startup.python_startup_no_site | lucifer | ok | 0.024963 | 0.0022293 | 0.026325 | 0.022517 | 2.26× (1.9–2.67×) |
+| startup.python_startup_no_site | pypy | ok | 0.024388 | 0.00086534 | 0.024476 | 0.023178 | 2.21× (1.99–2.45×) |
 
 ## 4. Native and mixed workloads
 
-Median time over the final five values. The stock native share includes callees up to Python re-entry. Score native-majority, mixed and boxed boundary calls separately.
+Pyperf reports mean seconds per operation after warm-up. The stock native share includes callees up to Python re-entry. The boundary programs measure boxed calls into a native module.
 
-| program | runtime | status | seconds | over_cpython | group | stock_native_pct |
-|---|---|---|---|---|---|---|
-| boundary.cmath.isclose | cpython | ok | 9.5564e-08 | 1 | — | — |
-| boundary.cmath.isclose | lucifer | ok | 1.9082e-07 | 1.9968 | — | — |
-| boundary.cmath.isclose | pypy | ok | 5.0566e-08 | 0.52913 | — | — |
-| boundary.cmath.isfinite | cpython | ok | 5.3079e-08 | 1 | — | — |
-| boundary.cmath.isfinite | lucifer | ok | 1.3949e-07 | 2.6279 | — | — |
-| boundary.cmath.isfinite | pypy | ok | 3.1153e-09 | 0.058692 | — | — |
-| pyperformance.argparse | cpython | ok | 0.0013358 | 1 | mixed | 7.5372 |
-| pyperformance.argparse | lucifer | ok | 0.0034811 | 2.6061 | mixed | 7.5372 |
-| pyperformance.argparse | pypy | ok | 0.0014185 | 1.062 | mixed | 7.5372 |
-| pyperformance.async_tree | cpython | ok | 0.3452 | 1 | mixed | 18.455 |
-| pyperformance.async_tree | lucifer | ok | 0.77436 | 2.2432 | mixed | 18.455 |
-| pyperformance.async_tree | pypy | ok | 0.48188 | 1.396 | mixed | 18.455 |
-| pyperformance.async_tree_cpu_io_mixed | cpython | ok | 0.67147 | 1 | native majority | 51.163 |
-| pyperformance.async_tree_cpu_io_mixed | lucifer | ok | 3.4428 | 5.1273 | native majority | 51.163 |
-| pyperformance.async_tree_cpu_io_mixed | pypy | ok | 0.91311 | 1.3599 | native majority | 51.163 |
-| pyperformance.async_tree_cpu_io_mixed_tg | cpython | ok | 0.64702 | 1 | native majority | 50.042 |
-| pyperformance.async_tree_cpu_io_mixed_tg | lucifer | ok | 3.4171 | 5.2814 | native majority | 50.042 |
-| pyperformance.async_tree_cpu_io_mixed_tg | pypy | ok | 0.85522 | 1.3218 | native majority | 50.042 |
-| pyperformance.async_tree_eager | cpython | ok | 0.16685 | 1 | mixed | 19.848 |
-| pyperformance.async_tree_eager | lucifer | ok | 0.41798 | 2.5051 | mixed | 19.848 |
-| pyperformance.async_tree_eager | pypy | ok | 0.52171 | 3.1269 | mixed | 19.848 |
-| pyperformance.async_tree_eager_cpu_io_mixed | cpython | ok | 0.54422 | 1 | native majority | 57.524 |
-| pyperformance.async_tree_eager_cpu_io_mixed | lucifer | ok | 3.1964 | 5.8733 | native majority | 57.524 |
-| pyperformance.async_tree_eager_cpu_io_mixed | pypy | ok | 0.91548 | 1.6822 | native majority | 57.524 |
-| pyperformance.async_tree_eager_cpu_io_mixed_tg | cpython | ok | 0.63622 | 1 | native majority | 54.286 |
-| pyperformance.async_tree_eager_cpu_io_mixed_tg | lucifer | ok | 3.4046 | 5.3512 | native majority | 54.286 |
-| pyperformance.async_tree_eager_cpu_io_mixed_tg | pypy | ok | 0.82808 | 1.3016 | native majority | 54.286 |
-| pyperformance.async_tree_eager_io | cpython | ok | 0.7066 | 1 | mixed | 28.869 |
-| pyperformance.async_tree_eager_io | lucifer | ok | 1.4368 | 2.0333 | mixed | 28.869 |
-| pyperformance.async_tree_eager_io | pypy | ok | 0.67954 | 0.96171 | mixed | 28.869 |
-| pyperformance.async_tree_eager_io_tg | cpython | ok | 0.70528 | 1 | mixed | 21.112 |
-| pyperformance.async_tree_eager_io_tg | lucifer | ok | 1.6134 | 2.2877 | mixed | 21.112 |
-| pyperformance.async_tree_eager_io_tg | pypy | ok | 0.61553 | 0.87275 | mixed | 21.112 |
-| pyperformance.async_tree_eager_memoization | cpython | ok | 0.28193 | 1 | mixed | 22.507 |
-| pyperformance.async_tree_eager_memoization | lucifer | ok | 1.0453 | 3.7075 | mixed | 22.507 |
-| pyperformance.async_tree_eager_memoization | pypy | ok | 0.56357 | 1.999 | mixed | 22.507 |
-| pyperformance.async_tree_eager_memoization_tg | cpython | ok | 0.35069 | 1 | mixed | 24.447 |
-| pyperformance.async_tree_eager_memoization_tg | lucifer | ok | 1.2618 | 3.598 | mixed | 24.447 |
-| pyperformance.async_tree_eager_memoization_tg | pypy | ok | 0.53804 | 1.5343 | mixed | 24.447 |
-| pyperformance.async_tree_eager_tg | cpython | ok | 0.26806 | 1 | mixed | 7.3352 |
-| pyperformance.async_tree_eager_tg | lucifer | ok | 0.72993 | 2.723 | mixed | 7.3352 |
-| pyperformance.async_tree_eager_tg | pypy | ok | 0.43209 | 1.6119 | mixed | 7.3352 |
-| pyperformance.async_tree_io | cpython | ok | 0.77751 | 1 | mixed | 27.001 |
-| pyperformance.async_tree_io | lucifer | ok | 1.5014 | 1.9311 | mixed | 27.001 |
-| pyperformance.async_tree_io | pypy | ok | 0.68337 | 0.87892 | mixed | 27.001 |
-| pyperformance.async_tree_io_tg | cpython | ok | 0.72363 | 1 | mixed | 20.556 |
-| pyperformance.async_tree_io_tg | lucifer | ok | 1.4876 | 2.0557 | mixed | 20.556 |
-| pyperformance.async_tree_io_tg | pypy | ok | 0.61833 | 0.85448 | mixed | 20.556 |
-| pyperformance.async_tree_memoization | cpython | ok | 0.43638 | 1 | mixed | 27.245 |
-| pyperformance.async_tree_memoization | lucifer | ok | 1.0492 | 2.4044 | mixed | 27.245 |
-| pyperformance.async_tree_memoization | pypy | ok | 0.57686 | 1.3219 | mixed | 27.245 |
-| pyperformance.async_tree_memoization_tg | cpython | ok | 0.38797 | 1 | mixed | 20.112 |
-| pyperformance.async_tree_memoization_tg | lucifer | ok | 0.90525 | 2.3333 | mixed | 20.112 |
-| pyperformance.async_tree_memoization_tg | pypy | ok | 0.53796 | 1.3866 | mixed | 20.112 |
-| pyperformance.async_tree_tg | cpython | ok | 0.31718 | 1 | mixed | 19.719 |
-| pyperformance.async_tree_tg | lucifer | ok | 0.78957 | 2.4894 | mixed | 19.719 |
-| pyperformance.async_tree_tg | pypy | ok | 0.42677 | 1.3455 | mixed | 19.719 |
-| pyperformance.asyncio_tcp | cpython | ok | 0.50894 | 1 | mixed | 10.944 |
-| pyperformance.asyncio_tcp | lucifer | ok | 0.62489 | 1.2278 | mixed | 10.944 |
-| pyperformance.asyncio_tcp | pypy | ok | 2.8958 | 5.6899 | mixed | 10.944 |
-| pyperformance.asyncio_tcp_ssl | cpython | ok | 1.8072 | 1 | native majority | 76.711 |
-| pyperformance.asyncio_tcp_ssl | lucifer | ok | 10.922 | 6.0438 | native majority | 76.711 |
-| pyperformance.asyncio_tcp_ssl | pypy | ok | 9.6699 | 5.3508 | native majority | 76.711 |
-| pyperformance.asyncio_websockets | cpython | ok | 0.52546 | 1 | native majority | 97.497 |
-| pyperformance.asyncio_websockets | lucifer | ok | 0.56921 | 1.0833 | native majority | 97.497 |
-| pyperformance.asyncio_websockets | pypy | ok | 0.60021 | 1.1423 | native majority | 97.497 |
-| pyperformance.concurrent_imap/bench_mp_pool | cpython | ok | 0.021204 | 1 | mixed | 40.293 |
-| pyperformance.concurrent_imap/bench_mp_pool | lucifer | ok | 0.087 | 4.1029 | mixed | 40.293 |
-| pyperformance.concurrent_imap/bench_mp_pool | pypy | ok | 0.031316 | 1.4768 | mixed | 40.293 |
-| pyperformance.concurrent_imap/bench_thread_pool | cpython | ok | 0.0021148 | 1 | mixed | 40.293 |
-| pyperformance.concurrent_imap/bench_thread_pool | lucifer | ok | 0.0090215 | 4.2659 | mixed | 40.293 |
-| pyperformance.concurrent_imap/bench_thread_pool | pypy | ok | 0.0057429 | 2.7156 | mixed | 40.293 |
-| pyperformance.coverage | cpython | ok | 0.8335 | 1 | mixed | 6.7638 |
-| pyperformance.coverage | lucifer | ok | 2.4882 | 2.9853 | mixed | 6.7638 |
-| pyperformance.coverage | pypy | ok | 0.20248 | 0.24293 | mixed | 6.7638 |
-| pyperformance.dask | cpython | excluded by corpus lock or missing oracle check | — | — | unmeasured guard | — |
-| pyperformance.dask | lucifer | excluded by corpus lock or missing oracle check | — | — | unmeasured guard | — |
-| pyperformance.dask | pypy | excluded by corpus lock or missing oracle check | — | — | unmeasured guard | — |
-| pyperformance.dulwich_log | cpython | ok | 0.092522 | 1 | mixed | 22.632 |
-| pyperformance.dulwich_log | lucifer | ok | 0.29561 | 3.195 | mixed | 22.632 |
-| pyperformance.dulwich_log | pypy | ok | 0.057288 | 0.61918 | mixed | 22.632 |
-| pyperformance.float | cpython | ok | 0.082882 | 1 | mixed | 12.259 |
-| pyperformance.float | lucifer | ok | 0.038714 | 0.4671 | mixed | 12.259 |
-| pyperformance.float | pypy | ok | 0.013475 | 0.16258 | mixed | 12.259 |
-| pyperformance.gc_collect | cpython | ok | 0.0024426 | 1 | native majority | 93.078 |
-| pyperformance.gc_collect | lucifer | ok | 0.0033686 | 1.3791 | native majority | 93.078 |
-| pyperformance.gc_collect | pypy | ok | 0.0066807 | 2.7351 | native majority | 93.078 |
-| pyperformance.gc_traversal | cpython | ok | 0.0032336 | 1 | native majority | 95.152 |
-| pyperformance.gc_traversal | lucifer | ok | 0.0065602 | 2.0287 | native majority | 95.152 |
-| pyperformance.gc_traversal | pypy | ok | 0.0085757 | 2.6521 | native majority | 95.152 |
-| pyperformance.json_dumps | cpython | ok | 0.01589 | 1 | native majority | 66.745 |
-| pyperformance.json_dumps | lucifer | ok | 0.045476 | 2.8619 | native majority | 66.745 |
-| pyperformance.json_dumps | pypy | ok | 0.0071881 | 0.45237 | native majority | 66.745 |
-| pyperformance.json_loads | cpython | ok | 4.0128e-05 | 1 | native majority | 91.286 |
-| pyperformance.json_loads | lucifer | ok | 0.00010438 | 2.6012 | native majority | 91.286 |
-| pyperformance.json_loads | pypy | ok | 9.7977e-06 | 0.24416 | native majority | 91.286 |
-| pyperformance.logging/logging_format | cpython | ok | 1.0742e-05 | 1 | mixed | 7.0332 |
-| pyperformance.logging/logging_format | lucifer | ok | 1.4552e-05 | 1.3547 | mixed | 7.0332 |
-| pyperformance.logging/logging_format | pypy | ok | 3.4741e-06 | 0.32342 | mixed | 7.0332 |
-| pyperformance.logging/logging_silent | cpython | ok | 1.1074e-07 | 1 | mixed | 7.0332 |
-| pyperformance.logging/logging_silent | lucifer | ok | 1.3634e-07 | 1.2312 | mixed | 7.0332 |
-| pyperformance.logging/logging_silent | pypy | ok | 4.9626e-09 | 0.044815 | mixed | 7.0332 |
-| pyperformance.logging/logging_simple | cpython | ok | 1.053e-05 | 1 | mixed | 7.0332 |
-| pyperformance.logging/logging_simple | lucifer | ok | 1.2089e-05 | 1.148 | mixed | 7.0332 |
-| pyperformance.logging/logging_simple | pypy | ok | 2.9938e-06 | 0.28432 | mixed | 7.0332 |
-| pyperformance.pathlib | cpython | ok | 0.023065 | 1 | mixed | 41.941 |
-| pyperformance.pathlib | lucifer | ok | 0.031095 | 1.3481 | mixed | 41.941 |
-| pyperformance.pathlib | pypy | ok | 0.012679 | 0.54972 | mixed | 41.941 |
-| pyperformance.pickle | cpython | ok | 1.4588e-05 | 1 | native majority | 99.46 |
-| pyperformance.pickle | lucifer | ok | 2.4298e-05 | 1.6655 | native majority | 99.46 |
-| pyperformance.pickle | pypy | ok | 2.789e-05 | 1.9118 | native majority | 99.46 |
-| pyperformance.pickle_dict | cpython | ok | 3.9553e-05 | 1 | native majority | 98.896 |
-| pyperformance.pickle_dict | lucifer | ok | 5.0505e-05 | 1.2769 | native majority | 98.896 |
-| pyperformance.pickle_dict | pypy | ok | 0.00015085 | 3.8139 | native majority | 98.896 |
-| pyperformance.pickle_list | cpython | ok | 6.2061e-06 | 1 | native majority | 99.459 |
-| pyperformance.pickle_list | lucifer | ok | 8.8387e-06 | 1.4242 | native majority | 99.459 |
-| pyperformance.pickle_list | pypy | ok | 2.2862e-05 | 3.6838 | native majority | 99.459 |
-| pyperformance.pickle_pure_python | cpython | ok | 0.00047198 | 1 | mixed | 9.5007 |
-| pyperformance.pickle_pure_python | lucifer | ok | 0.00075129 | 1.5918 | mixed | 9.5007 |
-| pyperformance.pickle_pure_python | pypy | ok | 3.8093e-05 | 0.080709 | mixed | 9.5007 |
-| pyperformance.regex_dna | cpython | ok | 0.18781 | 1 | native majority | 99.58 |
-| pyperformance.regex_dna | lucifer | ok | 0.17309 | 0.92161 | native majority | 99.58 |
-| pyperformance.regex_dna | pypy | ok | 0.097109 | 0.51705 | native majority | 99.58 |
-| pyperformance.regex_effbot | cpython | ok | 0.0027575 | 1 | native majority | 94.938 |
-| pyperformance.regex_effbot | lucifer | ok | 0.0046132 | 1.673 | native majority | 94.938 |
-| pyperformance.regex_effbot | pypy | ok | 0.0027025 | 0.98007 | native majority | 94.938 |
-| pyperformance.regex_v8 | cpython | ok | 0.021605 | 1 | native majority | 85.272 |
-| pyperformance.regex_v8 | lucifer | ok | 0.092426 | 4.278 | native majority | 85.272 |
-| pyperformance.regex_v8 | pypy | ok | 0.021322 | 0.98688 | native majority | 85.272 |
-| pyperformance.scimark/scimark_fft | cpython | ok | 0.46671 | 1 | mixed | 18.893 |
-| pyperformance.scimark/scimark_fft | lucifer | ok | 0.054981 | 0.11781 | mixed | 18.893 |
-| pyperformance.scimark/scimark_fft | pypy | ok | 0.0086035 | 0.018434 | mixed | 18.893 |
-| pyperformance.scimark/scimark_lu | cpython | ok | 0.17194 | 1 | mixed | 18.893 |
-| pyperformance.scimark/scimark_lu | lucifer | ok | 0.028775 | 0.16736 | mixed | 18.893 |
-| pyperformance.scimark/scimark_lu | pypy | ok | 0.0018902 | 0.010994 | mixed | 18.893 |
-| pyperformance.scimark/scimark_monte_carlo | cpython | ok | 0.11246 | 1 | mixed | 18.893 |
-| pyperformance.scimark/scimark_monte_carlo | lucifer | ok | 0.030562 | 0.27176 | mixed | 18.893 |
-| pyperformance.scimark/scimark_monte_carlo | pypy | ok | 0.002872 | 0.025537 | mixed | 18.893 |
-| pyperformance.scimark/scimark_sor | cpython | ok | 0.15435 | 1 | mixed | 18.893 |
-| pyperformance.scimark/scimark_sor | lucifer | ok | 0.0057391 | 0.037182 | mixed | 18.893 |
-| pyperformance.scimark/scimark_sor | pypy | ok | 0.00098489 | 0.0063807 | mixed | 18.893 |
-| pyperformance.scimark/scimark_sparse_mat_mult | cpython | ok | 0.0085064 | 1 | mixed | 18.893 |
-| pyperformance.scimark/scimark_sparse_mat_mult | lucifer | ok | 0.00065313 | 0.076781 | mixed | 18.893 |
-| pyperformance.scimark/scimark_sparse_mat_mult | pypy | ok | 0.00024443 | 0.028735 | mixed | 18.893 |
-| pyperformance.sqlalchemy_declarative | cpython | ok | 0.1756 | 1 | mixed | 9.7645 |
-| pyperformance.sqlalchemy_declarative | lucifer | ok | 0.54336 | 3.0943 | mixed | 9.7645 |
-| pyperformance.sqlalchemy_declarative | pypy | pyperf worker exit 1 | — | — | mixed | 9.7645 |
-| pyperformance.sqlalchemy_imperative | cpython | ok | 0.029829 | 1 | mixed | 10.898 |
-| pyperformance.sqlalchemy_imperative | lucifer | ok | 0.06054 | 2.0296 | mixed | 10.898 |
-| pyperformance.sqlalchemy_imperative | pypy | ok | 0.017682 | 0.59277 | mixed | 10.898 |
-| pyperformance.sqlite_synth | cpython | ok | 2.6976e-06 | 1 | native majority | 85.122 |
-| pyperformance.sqlite_synth | lucifer | ok | 6.0756e-06 | 2.2522 | native majority | 85.122 |
-| pyperformance.sqlite_synth | pypy | ok | 4.896e-06 | 1.8149 | native majority | 85.122 |
-| pyperformance.sympy/sympy_expand | cpython | ok | 0.57433 | 1 | mixed | 6.124 |
-| pyperformance.sympy/sympy_expand | lucifer | ok | 1.3434 | 2.3391 | mixed | 6.124 |
-| pyperformance.sympy/sympy_expand | pypy | ok | 0.15454 | 0.26908 | mixed | 6.124 |
-| pyperformance.sympy/sympy_integrate | cpython | ok | 0.02009 | 1 | mixed | 6.124 |
-| pyperformance.sympy/sympy_integrate | lucifer | ok | 0.089694 | 4.4645 | mixed | 6.124 |
-| pyperformance.sympy/sympy_integrate | pypy | ok | 0.083968 | 4.1795 | mixed | 6.124 |
-| pyperformance.sympy/sympy_str | cpython | ok | 0.3111 | 1 | mixed | 6.124 |
-| pyperformance.sympy/sympy_str | lucifer | ok | 0.86472 | 2.7795 | mixed | 6.124 |
-| pyperformance.sympy/sympy_str | pypy | ok | 0.15126 | 0.4862 | mixed | 6.124 |
-| pyperformance.sympy/sympy_sum | cpython | ok | 0.19751 | 1 | mixed | 6.124 |
-| pyperformance.sympy/sympy_sum | lucifer | ok | 0.56797 | 2.8757 | mixed | 6.124 |
-| pyperformance.sympy/sympy_sum | pypy | ok | 0.14258 | 0.7219 | mixed | 6.124 |
-| pyperformance.telco | cpython | ok | 0.011757 | 1 | native majority | 63.908 |
-| pyperformance.telco | lucifer | ok | 0.032228 | 2.7412 | native majority | 63.908 |
-| pyperformance.telco | pypy | ok | 0.0090313 | 0.76816 | native majority | 63.908 |
-| pyperformance.typing_runtime_protocols | cpython | ok | 0.0002476 | 1 | mixed | 18.016 |
-| pyperformance.typing_runtime_protocols | lucifer | ok | 0.00067432 | 2.7234 | mixed | 18.016 |
-| pyperformance.typing_runtime_protocols | pypy | ok | 0.00075335 | 3.0426 | mixed | 18.016 |
-| pyperformance.unpickle | cpython | ok | 2.2683e-05 | 1 | native majority | 91.529 |
-| pyperformance.unpickle | lucifer | ok | 4.5786e-05 | 2.0185 | native majority | 91.529 |
-| pyperformance.unpickle | pypy | ok | 4.3085e-05 | 1.8995 | native majority | 91.529 |
-| pyperformance.unpickle_list | cpython | ok | 5.4994e-06 | 1 | native majority | 93.222 |
-| pyperformance.unpickle_list | lucifer | ok | 8.7432e-06 | 1.5899 | native majority | 93.222 |
-| pyperformance.unpickle_list | pypy | ok | 1.5891e-05 | 2.8897 | native majority | 93.222 |
-| pyperformance.unpickle_pure_python | cpython | ok | 0.00031194 | 1 | mixed | 12.844 |
-| pyperformance.unpickle_pure_python | lucifer | ok | 0.00059014 | 1.8918 | mixed | 12.844 |
-| pyperformance.unpickle_pure_python | pypy | ok | 4.7981e-05 | 0.15382 | mixed | 12.844 |
-| pyperformance.xml_etree | pypy | pyperf benchmark names differ from oracle | — | — | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_generate | cpython | ok | 0.13269 | 1 | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_generate | lucifer | ok | 0.38882 | 2.9302 | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_iterparse | cpython | ok | 0.11685 | 1 | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_iterparse | lucifer | ok | 0.25511 | 2.1833 | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_parse | cpython | ok | 0.17488 | 1 | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_parse | lucifer | ok | 0.26343 | 1.5064 | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_process | cpython | ok | 0.090501 | 1 | native majority | 54.822 |
-| pyperformance.xml_etree/xml_etree_process | lucifer | ok | 0.25377 | 2.8041 | native majority | 54.822 |
+Whole-process coverage: cpython 50/51 (1 failed), lucifer 50/51 (1 failed), pypy 48/51 (3 failed).
 
-## 5. Time to steady state
+| program | runtime | status | group | seconds | stdev_s | 95% interval | × stock | stock_native_pct | whole_mean_s | whole_stdev_s | whole_median_s | whole_min_s | whole × stock |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| boundary.cmath.isclose | cpython | ok | — | 1.0379e-07 | 5.6486e-09 | 9.9065e-08–1.0851e-07 | 1× (1–1×) | — | 0.028125 | 0.00092628 | 0.02766 | 0.027175 | 1× (1–1×) |
+| boundary.cmath.isclose | lucifer | ok | — | 2.7069e-07 | 1.5335e-08 | 2.5787e-07–2.8351e-07 | 2.61× (2.38–2.86×) | — | 0.06393 | 0.0067019 | 0.063321 | 0.055696 | 2.27× (1.9–2.68×) |
+| boundary.cmath.isclose | pypy | ok | — | 4.624e-08 | 1.4035e-09 | 4.5067e-08–4.7413e-08 | 0.446× (0.415–0.479×) | — | 0.034706 | 0.00037095 | 0.034579 | 0.034231 | 1.23× (1.17–1.3×) |
+| boundary.cmath.isfinite | cpython | ok | — | 5.8024e-08 | 4.4699e-09 | 5.4287e-08–6.176e-08 | 1× (1–1×) | — | 0.02404 | 0.0017213 | 0.023878 | 0.022031 | 1× (1–1×) |
+| boundary.cmath.isfinite | lucifer | ok | — | 2.7067e-07 | 7.1935e-09 | 2.6466e-07–2.7669e-07 | 4.66× (4.29–5.1×) | — | 0.056878 | 0.0033074 | 0.056418 | 0.052878 | 2.37× (2.02–2.78×) |
+| boundary.cmath.isfinite | pypy | ok | — | 3.1473e-09 | 4.3069e-11 | 3.1113e-09–3.1833e-09 | 0.0542× (0.0504–0.0586×) | — | 0.028139 | 0.00025257 | 0.028214 | 0.027855 | 1.17× (1.06–1.3×) |
+| pyperformance.argparse | cpython | ok | mixed | 0.0012942 | 0.00011989 | 0.001194–0.0013944 | 1× (1–1×) | 5.4027 | 0.12741 | 0.0010969 | 0.12724 | 0.12618 | 1× (1–1×) |
+| pyperformance.argparse | lucifer | ok | mixed | 0.003313 | 0.00027486 | 0.0030832–0.0035427 | 2.56× (2.21–2.97×) | 5.4027 | 0.74735 | 0.02142 | 0.75069 | 0.71527 | 5.87× (5.6–6.14×) |
+| pyperformance.argparse | pypy | ok | mixed | 0.0014082 | 0.00068435 | 0.00083612–0.0019804 | 1.09× (0.6–1.66×) | 5.4027 | 0.18323 | 0.0021778 | 0.18235 | 0.18094 | 1.44× (1.4–1.48×) |
+| pyperformance.async_tree | cpython | ok | mixed | 0.39475 | 0.015986 | 0.38138–0.40811 | 1× (1–1×) | 19.635 | 0.61708 | 0.029725 | 0.60448 | 0.58875 | 1× (1–1×) |
+| pyperformance.async_tree | lucifer | ok | mixed | 0.84088 | 0.045168 | 0.80311–0.87864 | 2.13× (1.97–2.3×) | 19.635 | 2.026 | 0.019438 | 2.0341 | 1.996 | 3.28× (3.06–3.53×) |
+| pyperformance.async_tree | pypy | ok | mixed | 0.52835 | 0.085779 | 0.45664–0.60006 | 1.34× (1.12–1.57×) | 19.635 | 0.95333 | 0.020368 | 0.95883 | 0.92786 | 1.54× (1.42–1.69×) |
+| pyperformance.async_tree_cpu_io_mixed | cpython | ok | native majority | 0.76437 | 0.046215 | 0.72574–0.80301 | 1× (1–1×) | 54.507 | 0.96507 | 0.015563 | 0.96742 | 0.9391 | 1× (1–1×) |
+| pyperformance.async_tree_cpu_io_mixed | lucifer | ok | native majority | 3.5894 | 0.12289 | 3.4867–3.6921 | 4.7× (4.34–5.09×) | 54.507 | 5.064 | 0.24953 | 5.1877 | 4.6296 | 5.25× (4.83–5.68×) |
+| pyperformance.async_tree_cpu_io_mixed | pypy | ok | native majority | 1.0281 | 0.024471 | 1.0076–1.0486 | 1.35× (1.25–1.44×) | 54.507 | 1.552 | 0.005063 | 1.5504 | 1.5489 | 1.61× (1.57–1.65×) |
+| pyperformance.async_tree_cpu_io_mixed_tg | cpython | ok | mixed | 0.67009 | 0.024331 | 0.64975–0.69043 | 1× (1–1×) | 49.397 | 0.9951 | 0.0090442 | 0.9991 | 0.97905 | 1× (1–1×) |
+| pyperformance.async_tree_cpu_io_mixed_tg | lucifer | ok | mixed | 3.9685 | 0.18686 | 3.8123–4.1247 | 5.92× (5.52–6.35×) | 49.397 | 4.9808 | 0.20116 | 4.9945 | 4.6966 | 5.01× (4.7–5.32×) |
+| pyperformance.async_tree_cpu_io_mixed_tg | pypy | ok | mixed | 0.92693 | 0.02886 | 0.9028–0.95106 | 1.38× (1.31–1.46×) | 49.397 | 1.3979 | 0.01927 | 1.4053 | 1.3725 | 1.4× (1.37–1.45×) |
+| pyperformance.async_tree_eager | cpython | ok | mixed | 0.18541 | 0.0049562 | 0.18126–0.18955 | 1× (1–1×) | 20.727 | 0.35121 | 0.0067829 | 0.35222 | 0.34229 | 1× (1–1×) |
+| pyperformance.async_tree_eager | lucifer | ok | mixed | 0.48106 | 0.034782 | 0.45198–0.51013 | 2.59× (2.38–2.81×) | 20.727 | 1.3439 | 0.062147 | 1.3393 | 1.2706 | 3.83× (3.52–4.15×) |
+| pyperformance.async_tree_eager | pypy | ok | mixed | 0.52911 | 0.075805 | 0.46573–0.59248 | 2.85× (2.46–3.27×) | 20.727 | 0.94696 | 0.031081 | 0.94696 | 0.90423 | 2.7× (2.53–2.88×) |
+| pyperformance.async_tree_eager_cpu_io_mixed | cpython | ok | native majority | 0.60122 | 0.030365 | 0.57583–0.6266 | 1× (1–1×) | 56.769 | 0.75202 | 0.014171 | 0.74848 | 0.73296 | 1× (1–1×) |
+| pyperformance.async_tree_eager_cpu_io_mixed | lucifer | ok | native majority | 3.6226 | 0.089026 | 3.5482–3.697 | 6.03× (5.66–6.42×) | 56.769 | 4.647 | 0.18292 | 4.7387 | 4.381 | 6.18× (5.74–6.64×) |
+| pyperformance.async_tree_eager_cpu_io_mixed | pypy | ok | native majority | 1.0208 | 0.030541 | 0.99522–1.0463 | 1.7× (1.59–1.82×) | 56.769 | 1.5756 | 0.0063498 | 1.5749 | 1.5684 | 2.1× (2.04–2.16×) |
+| pyperformance.async_tree_eager_cpu_io_mixed_tg | cpython | ok | native majority | 0.66147 | 0.036202 | 0.6312–0.69174 | 1× (1–1×) | 54.816 | 0.93784 | 0.037883 | 0.94915 | 0.89725 | 1× (1–1×) |
+| pyperformance.async_tree_eager_cpu_io_mixed_tg | lucifer | ok | native majority | 3.8075 | 0.13135 | 3.6977–3.9173 | 5.76× (5.35–6.21×) | 54.816 | 4.9942 | 0.034492 | 4.9971 | 4.9412 | 5.33× (5.03–5.65×) |
+| pyperformance.async_tree_eager_cpu_io_mixed_tg | pypy | ok | native majority | 0.93989 | 0.024547 | 0.91937–0.96042 | 1.42× (1.33–1.52×) | 54.816 | 1.4101 | 0.028647 | 1.4098 | 1.3772 | 1.5× (1.4–1.62×) |
+| pyperformance.async_tree_eager_io | cpython | ok | mixed | 0.83923 | 0.049386 | 0.79794–0.88052 | 1× (1–1×) | 22.98 | 1.1621 | 0.038025 | 1.1747 | 1.0971 | 1× (1–1×) |
+| pyperformance.async_tree_eager_io | lucifer | ok | mixed | 1.4866 | 0.083166 | 1.4171–1.5561 | 1.77× (1.61–1.95×) | 22.98 | 2.6097 | 0.062015 | 2.5885 | 2.5385 | 2.25× (2.09–2.41×) |
+| pyperformance.async_tree_eager_io | pypy | ok | mixed | 0.67006 | 0.045864 | 0.63172–0.7084 | 0.798× (0.717–0.888×) | 22.98 | 1.1845 | 0.065943 | 1.1605 | 1.1303 | 1.02× (0.912–1.14×) |
+| pyperformance.async_tree_eager_io_tg | cpython | ok | mixed | 0.79729 | 0.056107 | 0.75038–0.8442 | 1× (1–1×) | 12.063 | 1.0441 | 0.023321 | 1.0368 | 1.0198 | 1× (1–1×) |
+| pyperformance.async_tree_eager_io_tg | lucifer | ok | mixed | 1.6861 | 0.042557 | 1.6505–1.7217 | 2.11× (1.96–2.29×) | 12.063 | 2.9393 | 0.027942 | 2.9434 | 2.9046 | 2.82× (2.71–2.93×) |
+| pyperformance.async_tree_eager_io_tg | pypy | ok | mixed | 0.59276 | 0.047296 | 0.55322–0.63231 | 0.743× (0.655–0.843×) | 12.063 | 1.0989 | 0.017257 | 1.0932 | 1.0848 | 1.05× (1–1.1×) |
+| pyperformance.async_tree_eager_memoization | cpython | ok | mixed | 0.30239 | 0.013626 | 0.291–0.31378 | 1× (1–1×) | 20.979 | 0.51491 | 0.018167 | 0.51511 | 0.48916 | 1× (1–1×) |
+| pyperformance.async_tree_eager_memoization | lucifer | ok | mixed | 1.2706 | 0.01304 | 1.2597–1.2815 | 4.2× (4.01–4.4×) | 20.979 | 2.1266 | 0.10665 | 2.1676 | 1.9367 | 4.13× (3.71–4.59×) |
+| pyperformance.async_tree_eager_memoization | pypy | ok | mixed | 0.55075 | 0.035418 | 0.52114–0.58036 | 1.82× (1.66–1.99×) | 20.979 | 0.98941 | 0.01621 | 0.98927 | 0.96423 | 1.92× (1.8–2.05×) |
+| pyperformance.async_tree_eager_memoization_tg | cpython | ok | mixed | 0.41568 | 0.024506 | 0.39519–0.43617 | 1× (1–1×) | 17.297 | 0.68231 | 0.02159 | 0.67875 | 0.65995 | 1× (1–1×) |
+| pyperformance.async_tree_eager_memoization_tg | lucifer | ok | mixed | 1.4259 | 0.024215 | 1.4056–1.4461 | 3.43× (3.22–3.66×) | 17.297 | 2.4963 | 0.015256 | 2.4936 | 2.4761 | 3.66× (3.49–3.84×) |
+| pyperformance.async_tree_eager_memoization_tg | pypy | ok | mixed | 0.50058 | 0.059048 | 0.45121–0.54994 | 1.2× (1.03–1.39×) | 17.297 | 1.0144 | 0.056576 | 0.9828 | 0.97314 | 1.49× (1.33–1.65×) |
+| pyperformance.async_tree_eager_tg | cpython | ok | mixed | 0.31404 | 0.028759 | 0.29–0.33808 | 1× (1–1×) | 24.917 | 0.528 | 0.014034 | 0.52666 | 0.5153 | 1× (1–1×) |
+| pyperformance.async_tree_eager_tg | lucifer | ok | mixed | 0.83856 | 0.012242 | 0.82833–0.8488 | 2.67× (2.45–2.93×) | 24.917 | 1.8905 | 0.012734 | 1.888 | 1.8759 | 3.58× (3.44–3.73×) |
+| pyperformance.async_tree_eager_tg | pypy | ok | mixed | 0.47671 | 0.042982 | 0.44077–0.51264 | 1.52× (1.3–1.77×) | 24.917 | 0.94307 | 0.0078566 | 0.94262 | 0.93165 | 1.79× (1.71–1.87×) |
+| pyperformance.async_tree_io | cpython | ok | mixed | 0.75759 | 0.027181 | 0.73487–0.78032 | 1× (1–1×) | 23.731 | 1.0596 | 0.023795 | 1.0541 | 1.0262 | 1× (1–1×) |
+| pyperformance.async_tree_io | lucifer | ok | mixed | 1.4665 | 0.078029 | 1.4013–1.5318 | 1.94× (1.8–2.08×) | 23.731 | 2.7826 | 0.1602 | 2.8707 | 2.5445 | 2.63× (2.37–2.89×) |
+| pyperformance.async_tree_io | pypy | ok | mixed | 0.70207 | 0.091587 | 0.6255–0.77864 | 0.927× (0.802–1.06×) | 23.731 | 1.2282 | 0.082373 | 1.2757 | 1.1158 | 1.16× (1.03–1.29×) |
+| pyperformance.async_tree_io_tg | cpython | ok | mixed | 0.73934 | 0.021076 | 0.72172–0.75696 | 1× (1–1×) | 20.859 | 1.1787 | 0.0096437 | 1.179 | 1.1683 | 1× (1–1×) |
+| pyperformance.async_tree_io_tg | lucifer | ok | mixed | 1.5684 | 0.082784 | 1.4992–1.6377 | 2.12× (1.98–2.27×) | 20.859 | 2.5246 | 0.030093 | 2.5327 | 2.4839 | 2.14× (2.09–2.2×) |
+| pyperformance.async_tree_io_tg | pypy | ok | mixed | 0.58969 | 0.054731 | 0.54393–0.63545 | 0.798× (0.719–0.88×) | 20.859 | 1.1311 | 0.05433 | 1.1138 | 1.0814 | 0.96× (0.893–1.03×) |
+| pyperformance.async_tree_memoization | cpython | ok | mixed | 0.47207 | 0.021941 | 0.45372–0.49041 | 1× (1–1×) | 22.735 | 0.69229 | 0.018056 | 0.69245 | 0.6669 | 1× (1–1×) |
+| pyperformance.async_tree_memoization | lucifer | ok | mixed | 1.0963 | 0.034844 | 1.0672–1.1255 | 2.32× (2.18–2.48×) | 22.735 | 2.2434 | 0.02362 | 2.244 | 2.211 | 3.24× (3.1–3.39×) |
+| pyperformance.async_tree_memoization | pypy | ok | mixed | 0.60369 | 0.099422 | 0.52057–0.68681 | 1.28× (1.06–1.51×) | 22.735 | 1.0953 | 0.030399 | 1.1079 | 1.0427 | 1.58× (1.48–1.69×) |
+| pyperformance.async_tree_memoization_tg | cpython | ok | mixed | 0.43393 | 0.026254 | 0.41199–0.45588 | 1× (1–1×) | 22.971 | 0.73854 | 0.012029 | 0.73335 | 0.72853 | 1× (1–1×) |
+| pyperformance.async_tree_memoization_tg | lucifer | ok | mixed | 1.0334 | 0.037371 | 1.0021–1.0646 | 2.38× (2.2–2.58×) | 22.971 | 2.0574 | 0.1187 | 2.0762 | 1.9291 | 2.79× (2.53–3.05×) |
+| pyperformance.async_tree_memoization_tg | pypy | ok | mixed | 0.56105 | 0.053307 | 0.51648–0.60562 | 1.29× (1.13–1.47×) | 22.971 | 1.0955 | 0.034425 | 1.1061 | 1.036 | 1.48× (1.4–1.57×) |
+| pyperformance.async_tree_tg | cpython | ok | mixed | 0.33454 | 0.019996 | 0.31783–0.35126 | 1× (1–1×) | 20.933 | 0.56835 | 0.011656 | 0.5733 | 0.55188 | 1× (1–1×) |
+| pyperformance.async_tree_tg | lucifer | ok | mixed | 0.89062 | 0.040407 | 0.85684–0.9244 | 2.66× (2.44–2.91×) | 20.933 | 1.824 | 0.043782 | 1.8046 | 1.7868 | 3.21× (3.04–3.39×) |
+| pyperformance.async_tree_tg | pypy | ok | mixed | 0.48451 | 0.050474 | 0.44231–0.52671 | 1.45× (1.26–1.66×) | 20.933 | 0.94548 | 0.012584 | 0.94265 | 0.92784 | 1.66× (1.6–1.74×) |
+| pyperformance.asyncio_tcp | cpython | ok | mixed | 0.50604 | 0.010465 | 0.49729–0.51479 | 1× (1–1×) | 16.47 | 0.66871 | 0.031324 | 0.64844 | 0.64415 | 1× (1–1×) |
+| pyperformance.asyncio_tcp | lucifer | ok | mixed | 0.66544 | 0.011877 | 0.65551–0.67537 | 1.31× (1.27–1.36×) | 16.47 | 1.5527 | 0.045778 | 1.5366 | 1.5098 | 2.32× (2.11–2.56×) |
+| pyperformance.asyncio_tcp | pypy | ok | mixed | 3.003 | 0.11702 | 2.9052–3.1009 | 5.93× (5.64–6.24×) | 16.47 | 4.0145 | 0.085606 | 4.0338 | 3.8674 | 6× (5.52–6.54×) |
+| pyperformance.asyncio_tcp_ssl | cpython | ok | native majority | 1.8571 | 0.077731 | 1.7921–1.9221 | 1× (1–1×) | 79.004 | 2.1267 | 0.064942 | 2.1531 | 2.0169 | 1× (1–1×) |
+| pyperformance.asyncio_tcp_ssl | lucifer | ok | native majority | 11.987 | 0.10714 | 11.898–12.077 | 6.45× (6.19–6.74×) | 79.004 | 13.243 | 0.31326 | 13.248 | 12.86 | 6.23× (5.82–6.66×) |
+| pyperformance.asyncio_tcp_ssl | pypy | ok | native majority | 10.07 | 0.59662 | 9.5717–10.569 | 5.42× (4.98–5.9×) | 79.004 | 10.572 | 0.22889 | 10.673 | 10.178 | 4.97× (4.66–5.31×) |
+| pyperformance.asyncio_websockets | cpython | ok | native majority | 0.53408 | 0.031332 | 0.50788–0.56027 | 1× (1–1×) | 96.787 | 0.71837 | 0.0048626 | 0.71959 | 0.71298 | 1× (1–1×) |
+| pyperformance.asyncio_websockets | lucifer | ok | native majority | 0.63703 | 0.017171 | 0.62267–0.65138 | 1.19× (1.11–1.28×) | 96.787 | 1.4145 | 0.061984 | 1.3924 | 1.3551 | 1.97× (1.85–2.09×) |
+| pyperformance.asyncio_websockets | pypy | ok | native majority | 0.60367 | 0.026437 | 0.58157–0.62578 | 1.13× (1.04–1.23×) | 96.787 | 0.93048 | 0.018179 | 0.9249 | 0.9133 | 1.3× (1.25–1.34×) |
+| pyperformance.concurrent_imap/bench_mp_pool | cpython | ok | mixed | 0.021408 | 0.00070455 | 0.020819–0.021997 | 1× (1–1×) | 27.125 | 0.35576 | 0.008023 | 0.3547 | 0.34915 | 1× (1–1×) |
+| pyperformance.concurrent_imap/bench_mp_pool | lucifer | ok | mixed | 0.10492 | 0.0088631 | 0.097515–0.11233 | 4.9× (4.43–5.4×) | 27.125 | 1.3632 | 0.015606 | 1.3681 | 1.3446 | 3.83× (3.67–4×) |
+| pyperformance.concurrent_imap/bench_mp_pool | pypy | ok | mixed | 0.033981 | 0.0048409 | 0.029934–0.038028 | 1.59× (1.36–1.83×) | 27.125 | 0.22736 | 0.0021635 | 0.22749 | 0.22421 | 0.639× (0.614–0.665×) |
+| pyperformance.concurrent_imap/bench_thread_pool | cpython | ok | mixed | 0.0022968 | 0.00047375 | 0.0019008–0.0026929 | 1× (1–1×) | 27.125 | 0.19256 | 0.0026781 | 0.19337 | 0.18807 | 1× (1–1×) |
+| pyperformance.concurrent_imap/bench_thread_pool | lucifer | ok | mixed | 0.0087871 | 0.001564 | 0.0074795–0.010095 | 3.83× (2.78–5.31×) | 27.125 | 0.81425 | 0.023845 | 0.81424 | 0.78748 | 4.23× (4.01–4.46×) |
+| pyperformance.concurrent_imap/bench_thread_pool | pypy | ok | mixed | 0.0058713 | 0.0040385 | 0.002495–0.0092476 | 2.56× (0.927–4.87×) | 27.125 | 0.20249 | 0.0017944 | 0.20297 | 0.19963 | 1.05× (1.02–1.08×) |
+| pyperformance.dask | cpython | excluded by corpus lock or missing oracle check | unmeasured guard | — | — | — | — | — | — | — | — | — | — |
+| pyperformance.dask | lucifer | excluded by corpus lock or missing oracle check | unmeasured guard | — | — | — | — | — | — | — | — | — | — |
+| pyperformance.dask | pypy | excluded by corpus lock or missing oracle check | unmeasured guard | — | — | — | — | — | — | — | — | — | — |
+| pyperformance.dulwich_log | cpython | ok | mixed | 0.096978 | 0.0041626 | 0.093498–0.10046 | 1× (1–1×) | 26.503 | 0.26823 | 0.004947 | 0.26968 | 0.2626 | 1× (1–1×) |
+| pyperformance.dulwich_log | lucifer | ok | mixed | 0.32348 | 0.039871 | 0.29015–0.35682 | 3.34× (2.89–3.82×) | 26.503 | 1.468 | 0.022393 | 1.4745 | 1.4437 | 5.47× (5.25–5.71×) |
+| pyperformance.dulwich_log | pypy | ok | mixed | 0.058491 | 0.010567 | 0.049657–0.067325 | 0.603× (0.494–0.72×) | 26.503 | 0.50546 | 0.029351 | 0.51507 | 0.45473 | 1.88× (1.71–2.07×) |
+| pyperformance.float | cpython | ok | mixed | 0.09968 | 0.0086115 | 0.092481–0.10688 | 1× (1–1×) | 13.073 | 0.27363 | 0.015107 | 0.27711 | 0.24887 | 1× (1–1×) |
+| pyperformance.float | lucifer | ok | mixed | 0.037075 | 0.003383 | 0.034247–0.039903 | 0.372× (0.32–0.431×) | 13.073 | 0.68437 | 0.014661 | 0.68212 | 0.66682 | 2.5× (2.28–2.76×) |
+| pyperformance.float | pypy | ok | mixed | 0.016734 | 0.0074427 | 0.010512–0.022956 | 0.168× (0.0984–0.248×) | 13.073 | 0.20825 | 0.0037872 | 0.21015 | 0.20362 | 0.761× (0.696–0.836×) |
+| pyperformance.gc_collect | cpython | ok | native majority | 0.0032046 | 0.00011058 | 0.0031122–0.0032971 | 1× (1–1×) | 91.687 | 0.15573 | 0.0033726 | 0.15404 | 0.15264 | 1× (1–1×) |
+| pyperformance.gc_collect | lucifer | ok | native majority | 0.003463 | 0.00021134 | 0.0032863–0.0036397 | 1.08× (0.997–1.17×) | 91.687 | 0.62266 | 0.022167 | 0.62186 | 0.60456 | 4× (3.72–4.29×) |
+| pyperformance.gc_collect | pypy | ok | native majority | 0.0069366 | 0.00034991 | 0.0066441–0.0072292 | 2.16× (2.02–2.32×) | 91.687 | 0.22562 | 0.0014996 | 0.22519 | 0.22363 | 1.45× (1.4–1.5×) |
+| pyperformance.gc_traversal | cpython | ok | native majority | 0.0039598 | 0.00026268 | 0.0037402–0.0041794 | 1× (1–1×) | 95.502 | 0.17143 | 0.0015056 | 0.17104 | 0.16962 | 1× (1–1×) |
+| pyperformance.gc_traversal | lucifer | ok | native majority | 0.0064764 | 0.0001102 | 0.0063843–0.0065686 | 1.64× (1.53–1.76×) | 95.502 | 0.63395 | 0.018592 | 0.62715 | 0.61931 | 3.7× (3.53–3.88×) |
+| pyperformance.gc_traversal | pypy | ok | native majority | 0.0097222 | 0.00013957 | 0.0096055–0.0098388 | 2.46× (2.3–2.63×) | 95.502 | 0.23951 | 0.003668 | 0.23972 | 0.23445 | 1.4× (1.36–1.44×) |
+| pyperformance.json_dumps | cpython | ok | native majority | 0.017906 | 0.0013093 | 0.016812–0.019001 | 1× (1–1×) | 70.535 | 0.15463 | 0.0072277 | 0.15648 | 0.14205 | 1× (1–1×) |
+| pyperformance.json_dumps | lucifer | ok | native majority | 0.052044 | 0.002267 | 0.050149–0.053939 | 2.91× (2.64–3.21×) | 70.535 | 0.71885 | 0.011937 | 0.72456 | 0.70446 | 4.65× (4.3–5.04×) |
+| pyperformance.json_dumps | pypy | ok | native majority | 0.0074573 | 0.00014488 | 0.0073362–0.0075784 | 0.416× (0.386–0.451×) | 70.535 | 0.20739 | 0.0098788 | 0.20537 | 0.19738 | 1.34× (1.19–1.51×) |
+| pyperformance.json_loads | cpython | ok | native majority | 4.8367e-05 | 9.9567e-07 | 4.7534e-05–4.9199e-05 | 1× (1–1×) | 88.879 | 0.13588 | 0.0012041 | 0.13567 | 0.13493 | 1× (1–1×) |
+| pyperformance.json_loads | lucifer | ok | native majority | 0.0001058 | 1.1929e-06 | 0.0001048–0.00010679 | 2.19× (2.13–2.25×) | 88.879 | 0.6379 | 0.011988 | 0.63467 | 0.6235 | 4.69× (4.54–4.86×) |
+| pyperformance.json_loads | pypy | ok | native majority | 9.8776e-06 | 1.3337e-06 | 8.7626e-06–1.0993e-05 | 0.204× (0.178–0.231×) | 88.879 | 0.18861 | 0.0036872 | 0.18918 | 0.18311 | 1.39× (1.34–1.44×) |
+| pyperformance.logging/logging_format | cpython | ok | mixed | 1.0927e-05 | 4.2728e-07 | 1.057e-05–1.1285e-05 | 1× (1–1×) | 6.3277 | 0.14752 | 0.0035584 | 0.14897 | 0.14117 | 1× (1–1×) |
+| pyperformance.logging/logging_format | lucifer | ok | mixed | 1.3131e-05 | 7.6264e-07 | 1.2493e-05–1.3768e-05 | 1.2× (1.11–1.3×) | 6.3277 | 0.65074 | 0.028768 | 0.65371 | 0.61439 | 4.41× (4.05–4.8×) |
+| pyperformance.logging/logging_format | pypy | ok | mixed | 3.7431e-06 | 2.486e-07 | 3.5353e-06–3.9509e-06 | 0.343× (0.313–0.374×) | 6.3277 | 0.17882 | 0.0055576 | 0.17702 | 0.17375 | 1.21× (1.13–1.3×) |
+| pyperformance.logging/logging_silent | cpython | ok | mixed | 1.1354e-07 | 7.3387e-09 | 1.074e-07–1.1967e-07 | 1× (1–1×) | 6.3277 | 0.12761 | 0.00087128 | 0.12757 | 0.12628 | 1× (1–1×) |
+| pyperformance.logging/logging_silent | lucifer | ok | mixed | 1.6049e-07 | 1.9796e-07 | 0–3.2599e-07 | 1.41× (0–3.04×) | 6.3277 | 0.63235 | 0.016025 | 0.62789 | 0.61556 | 4.96× (4.76–5.15×) |
+| pyperformance.logging/logging_silent | pypy | ok | mixed | 1.5852e-07 | 4.3964e-07 | 0–5.2607e-07 | 1.4× (0–4.9×) | 6.3277 | 0.18736 | 0.0099356 | 0.18301 | 0.18089 | 1.47× (1.36–1.58×) |
+| pyperformance.logging/logging_simple | cpython | ok | mixed | 1.1411e-05 | 5.0161e-07 | 1.0992e-05–1.183e-05 | 1× (1–1×) | 6.3277 | 0.12674 | 0.0017325 | 0.12683 | 0.12492 | 1× (1–1×) |
+| pyperformance.logging/logging_simple | lucifer | ok | mixed | 1.1526e-05 | 7.6257e-07 | 1.0889e-05–1.2164e-05 | 1.01× (0.92–1.11×) | 6.3277 | 0.66634 | 0.044674 | 0.69472 | 0.61042 | 5.26× (4.74–5.79×) |
+| pyperformance.logging/logging_simple | pypy | ok | mixed | 3.893e-06 | 1.0279e-06 | 3.0337e-06–4.7524e-06 | 0.341× (0.256–0.432×) | 6.3277 | 0.18711 | 0.0034136 | 0.18665 | 0.18427 | 1.48× (1.42–1.54×) |
+| pyperformance.pathlib | cpython | ok | mixed | 0.026833 | 0.0013181 | 0.025732–0.027935 | 1× (1–1×) | 40.212 | 0.31669 | 0.01316 | 0.32183 | 0.2961 | 1× (1–1×) |
+| pyperformance.pathlib | lucifer | ok | mixed | 0.031018 | 0.00075823 | 0.030385–0.031652 | 1.16× (1.09–1.23×) | 40.212 | 1.0164 | 0.022993 | 1.0056 | 0.99806 | 3.21× (2.97–3.48×) |
+| pyperformance.pathlib | pypy | ok | mixed | 0.012728 | 0.00017068 | 0.012585–0.01287 | 0.474× (0.451–0.5×) | 40.212 | 0.42863 | 0.0029763 | 0.42956 | 0.42514 | 1.35× (1.28–1.44×) |
+| pyperformance.pickle | cpython | ok | native majority | 1.6763e-05 | 1.2207e-06 | 1.5743e-05–1.7784e-05 | 1× (1–1×) | 99.025 | 0.15462 | 0.0079042 | 0.15317 | 0.14782 | 1× (1–1×) |
+| pyperformance.pickle | lucifer | ok | native majority | 2.7076e-05 | 1.5615e-06 | 2.5771e-05–2.8382e-05 | 1.62× (1.45–1.8×) | 99.025 | 0.7069 | 0.017266 | 0.71528 | 0.67772 | 4.57× (4.17–5.03×) |
+| pyperformance.pickle | pypy | ok | native majority | 2.6217e-05 | 2.8978e-06 | 2.3794e-05–2.8639e-05 | 1.56× (1.34–1.82×) | 99.025 | 0.22686 | 0.0041231 | 0.22692 | 0.22099 | 1.47× (1.35–1.6×) |
+| pyperformance.pickle_dict | cpython | ok | native majority | 4.2508e-05 | 2.9292e-06 | 4.0059e-05–4.4956e-05 | 1× (1–1×) | 99.558 | 0.16523 | 0.0024044 | 0.16498 | 0.16204 | 1× (1–1×) |
+| pyperformance.pickle_dict | lucifer | ok | native majority | 5.0694e-05 | 4.8018e-06 | 4.6679e-05–5.4708e-05 | 1.19× (1.04–1.37×) | 99.558 | 0.70764 | 0.010432 | 0.71171 | 0.68904 | 4.28× (4.13–4.44×) |
+| pyperformance.pickle_dict | pypy | ok | native majority | 0.00015238 | 5.7781e-06 | 0.00014755–0.00015721 | 3.58× (3.28–3.92×) | 99.558 | 0.21827 | 0.005715 | 0.21687 | 0.21353 | 1.32× (1.26–1.39×) |
+| pyperformance.pickle_list | cpython | ok | native majority | 7.3451e-06 | 1.7454e-07 | 7.1992e-06–7.4911e-06 | 1× (1–1×) | 99.899 | 0.15171 | 0.0053005 | 0.15076 | 0.14518 | 1× (1–1×) |
+| pyperformance.pickle_list | lucifer | ok | native majority | 9.5236e-06 | 9.5937e-08 | 9.4434e-06–9.6038e-06 | 1.3× (1.26–1.33×) | 99.899 | 0.69254 | 0.043342 | 0.70653 | 0.61637 | 4.56× (4.04–5.14×) |
+| pyperformance.pickle_list | pypy | ok | native majority | 2.3192e-05 | 6.3753e-07 | 2.2659e-05–2.3725e-05 | 3.16× (3.02–3.3×) | 99.899 | 0.19803 | 0.0026874 | 0.19689 | 0.1955 | 1.31× (1.23–1.39×) |
+| pyperformance.pickle_pure_python | cpython | ok | mixed | 0.00047238 | 1.4723e-05 | 0.00046007–0.00048469 | 1× (1–1×) | 13.069 | 0.15459 | 0.013135 | 0.14792 | 0.14341 | 1× (1–1×) |
+| pyperformance.pickle_pure_python | lucifer | ok | mixed | 0.00069714 | 6.237e-05 | 0.000645–0.00074929 | 1.48× (1.33–1.63×) | 13.069 | 0.71283 | 0.038057 | 0.69908 | 0.67602 | 4.61× (3.89–5.5×) |
+| pyperformance.pickle_pure_python | pypy | ok | mixed | 3.1606e-05 | 8.5847e-06 | 2.4429e-05–3.8783e-05 | 0.0669× (0.0504–0.0843×) | 13.069 | 0.24027 | 0.01191 | 0.24494 | 0.22451 | 1.55× (1.32–1.84×) |
+| pyperformance.regex_dna | cpython | ok | native majority | 0.21505 | 0.0016333 | 0.21368–0.21641 | 1× (1–1×) | 100 | 0.54582 | 0.0047579 | 0.54472 | 0.54095 | 1× (1–1×) |
+| pyperformance.regex_dna | lucifer | ok | native majority | 0.17903 | 0.0053619 | 0.17455–0.18352 | 0.833× (0.807–0.859×) | 100 | 1.0092 | 0.021979 | 0.99932 | 0.98861 | 1.85× (1.78–1.92×) |
+| pyperformance.regex_dna | pypy | ok | native majority | 0.09689 | 0.0058084 | 0.092034–0.10175 | 0.451× (0.425–0.476×) | 100 | 0.46846 | 0.0042221 | 0.47025 | 0.46185 | 0.858× (0.84–0.877×) |
+| pyperformance.regex_effbot | cpython | ok | native majority | 0.0032751 | 8.3652e-05 | 0.0032051–0.003345 | 1× (1–1×) | 95.551 | 0.17202 | 0.0021369 | 0.17169 | 0.16932 | 1× (1–1×) |
+| pyperformance.regex_effbot | lucifer | ok | native majority | 0.004767 | 0.00021482 | 0.0045874–0.0049466 | 1.46× (1.37–1.54×) | 95.551 | 0.80584 | 0.029604 | 0.82229 | 0.76983 | 4.68× (4.4–4.97×) |
+| pyperformance.regex_effbot | pypy | ok | native majority | 0.0028317 | 8.5014e-05 | 0.0027606–0.0029028 | 0.865× (0.825–0.906×) | 95.551 | 0.2375 | 0.013732 | 0.24066 | 0.21901 | 1.38× (1.26–1.5×) |
+| pyperformance.regex_v8 | cpython | ok | native majority | 0.025961 | 0.00032412 | 0.02569–0.026232 | 1× (1–1×) | 89.113 | 0.19902 | 0.0023748 | 0.19774 | 0.197 | 1× (1–1×) |
+| pyperformance.regex_v8 | lucifer | ok | native majority | 0.11054 | 0.0056369 | 0.10582–0.11525 | 4.26× (4.03–4.49×) | 89.113 | 1.3627 | 0.0095296 | 1.3625 | 1.3531 | 6.85× (6.69–7.01×) |
+| pyperformance.regex_v8 | pypy | ok | native majority | 0.023386 | 0.002102 | 0.021629–0.025143 | 0.901× (0.825–0.979×) | 89.113 | 0.33843 | 0.015378 | 0.34432 | 0.31158 | 1.7× (1.58–1.82×) |
+| pyperformance.scimark/scimark_fft | cpython | ok | mixed | 0.47704 | 0.010311 | 0.46842–0.48566 | 1× (1–1×) | 18.931 | 0.62268 | 0.032494 | 0.6151 | 0.59163 | 1× (1–1×) |
+| pyperformance.scimark/scimark_fft | lucifer | ok | mixed | 0.062106 | 0.0020675 | 0.060378–0.063835 | 0.13× (0.124–0.136×) | 18.931 | 0.76664 | 0.0092328 | 0.76279 | 0.76002 | 1.23× (1.14–1.34×) |
+| pyperformance.scimark/scimark_fft | pypy | ok | mixed | 0.010516 | 0.001095 | 0.0096003–0.011431 | 0.022× (0.0198–0.0244×) | 18.931 | 0.22642 | 0.016675 | 0.21963 | 0.21066 | 0.364× (0.31–0.424×) |
+| pyperformance.scimark/scimark_lu | cpython | ok | mixed | 0.16407 | 0.0094946 | 0.15613–0.172 | 1× (1–1×) | 18.931 | 0.33984 | 0.00309 | 0.34058 | 0.33485 | 1× (1–1×) |
+| pyperformance.scimark/scimark_lu | lucifer | ok | mixed | 0.033998 | 0.003884 | 0.030751–0.037245 | 0.207× (0.179–0.239×) | 18.931 | 0.79255 | 0.045422 | 0.8086 | 0.73323 | 2.33× (2.14–2.53×) |
+| pyperformance.scimark/scimark_lu | pypy | ok | mixed | 0.0020517 | 0.00070902 | 0.001459–0.0026445 | 0.0125× (0.00848–0.0169×) | 18.931 | 0.23409 | 0.013304 | 0.23894 | 0.2114 | 0.689× (0.633–0.746×) |
+| pyperformance.scimark/scimark_monte_carlo | cpython | ok | mixed | 0.095081 | 0.0029107 | 0.092648–0.097515 | 1× (1–1×) | 18.931 | 0.25369 | 0.013042 | 0.26148 | 0.23638 | 1× (1–1×) |
+| pyperformance.scimark/scimark_monte_carlo | lucifer | ok | mixed | 0.037466 | 0.00099572 | 0.036634–0.038298 | 0.394× (0.376–0.413×) | 18.931 | 0.7556 | 0.0037941 | 0.75642 | 0.75199 | 2.98× (2.78–3.2×) |
+| pyperformance.scimark/scimark_monte_carlo | pypy | ok | mixed | 0.0031329 | 0.00081184 | 0.0024542–0.0038116 | 0.0329× (0.0252–0.0411×) | 18.931 | 0.26481 | 0.017998 | 0.27418 | 0.23671 | 1.04× (0.898–1.21×) |
+| pyperformance.scimark/scimark_sor | cpython | ok | mixed | 0.15446 | 0.0026666 | 0.15223–0.15669 | 1× (1–1×) | 18.931 | 0.30868 | 0.018739 | 0.31649 | 0.27795 | 1× (1–1×) |
+| pyperformance.scimark/scimark_sor | lucifer | ok | mixed | 0.0081385 | 0.0023289 | 0.0061914–0.010086 | 0.0527× (0.0395–0.0663×) | 18.931 | 0.63528 | 0.0060556 | 0.63828 | 0.62577 | 2.06× (1.89–2.25×) |
+| pyperformance.scimark/scimark_sor | pypy | ok | mixed | 0.0012684 | 0.0003751 | 0.00095482–0.001582 | 0.00821× (0.00609–0.0104×) | 18.931 | 0.20417 | 0.013688 | 0.20836 | 0.18764 | 0.661× (0.564–0.775×) |
+| pyperformance.scimark/scimark_sparse_mat_mult | cpython | ok | mixed | 0.0081503 | 0.0019334 | 0.006534–0.0097666 | 1× (1–1×) | 18.931 | 0.15598 | 0.0011284 | 0.15628 | 0.15401 | 1× (1–1×) |
+| pyperformance.scimark/scimark_sparse_mat_mult | lucifer | ok | mixed | 0.00087228 | 0.00029576 | 0.00062502–0.0011195 | 0.107× (0.064–0.171×) | 18.931 | 0.6918 | 0.037672 | 0.71321 | 0.63297 | 4.44× (4.1–4.78×) |
+| pyperformance.scimark/scimark_sparse_mat_mult | pypy | ok | mixed | 0.00043134 | 0.00030606 | 0.00017546–0.00068721 | 0.0529× (0.018–0.105×) | 18.931 | 0.20632 | 0.009729 | 0.20176 | 0.19541 | 1.32× (1.23–1.41×) |
+| pyperformance.sqlalchemy_declarative | cpython | ok | mixed | 0.18403 | 0.0072076 | 0.17801–0.19006 | 1× (1–1×) | 7.5095 | 0.53824 | 0.01449 | 0.53193 | 0.52373 | 1× (1–1×) |
+| pyperformance.sqlalchemy_declarative | lucifer | ok | mixed | 0.55827 | 0.050845 | 0.51576–0.60078 | 3.03× (2.71–3.37×) | 7.5095 | 1.8252 | 0.072877 | 1.7964 | 1.7619 | 3.39× (3.12–3.68×) |
+| pyperformance.sqlalchemy_declarative | pypy | pyperf worker exit 1 | mixed | — | — | — | — | 7.5095 | — | — | — | — | — |
+| pyperformance.sqlalchemy_imperative | cpython | ok | mixed | 0.02768 | 0.0017412 | 0.026224–0.029136 | 1× (1–1×) | 11.307 | 0.38926 | 0.0068 | 0.38586 | 0.38287 | 1× (1–1×) |
+| pyperformance.sqlalchemy_imperative | lucifer | ok | mixed | 0.057371 | 0.0040034 | 0.054024–0.060718 | 2.07× (1.85–2.32×) | 11.307 | 1.3756 | 0.020289 | 1.3805 | 1.3492 | 3.53× (3.4–3.68×) |
+| pyperformance.sqlalchemy_imperative | pypy | ok | mixed | 0.021865 | 0.0057058 | 0.017095–0.026635 | 0.79× (0.587–1.02×) | 11.307 | 0.64917 | 0.012239 | 0.65327 | 0.62745 | 1.67× (1.59–1.74×) |
+| pyperformance.sqlite_synth | cpython | ok | native majority | 2.6908e-06 | 1.0148e-07 | 2.606e-06–2.7756e-06 | 1× (1–1×) | 82.15 | 0.12901 | 0.0030188 | 0.12976 | 0.12492 | 1× (1–1×) |
+| pyperformance.sqlite_synth | lucifer | ok | native majority | 8.9733e-06 | 2.7534e-06 | 6.6714e-06–1.1275e-05 | 3.33× (2.4–4.33×) | 82.15 | 0.68821 | 0.0072675 | 0.68959 | 0.67996 | 5.33× (5.12–5.57×) |
+| pyperformance.sqlite_synth | pypy | ok | native majority | 1.7719e-05 | 3.3214e-05 | 0–4.5487e-05 | 6.58× (0–17.5×) | 82.15 | 0.20854 | 0.001861 | 0.20951 | 0.20648 | 1.62× (1.55–1.68×) |
+| pyperformance.sympy/sympy_expand | cpython | ok | mixed | 0.56485 | 0.013929 | 0.5532–0.57649 | 1× (1–1×) | 5.2758 | 1.0532 | 0.011002 | 1.0539 | 1.0374 | 1× (1–1×) |
+| pyperformance.sympy/sympy_expand | lucifer | ok | mixed | 1.3073 | 0.102 | 1.222–1.3925 | 2.31× (2.12–2.52×) | 5.2758 | 3.7431 | 0.18675 | 3.6194 | 3.5903 | 3.55× (3.29–3.82×) |
+| pyperformance.sympy/sympy_expand | pypy | ok | mixed | 0.19274 | 0.011915 | 0.18278–0.20271 | 0.341× (0.317–0.366×) | 5.2758 | 1.9299 | 0.090841 | 1.8726 | 1.8522 | 1.83× (1.7–1.96×) |
+| pyperformance.sympy/sympy_integrate | cpython | ok | mixed | 0.023913 | 0.0019973 | 0.022244–0.025583 | 1× (1–1×) | 5.2758 | 0.55436 | 0.010368 | 0.55675 | 0.5392 | 1× (1–1×) |
+| pyperformance.sympy/sympy_integrate | lucifer | ok | mixed | 0.088519 | 0.0060106 | 0.083494–0.093544 | 3.7× (3.26–4.21×) | 5.2758 | 1.8371 | 0.031068 | 1.8233 | 1.8161 | 3.31× (3.17–3.46×) |
+| pyperformance.sympy/sympy_integrate | pypy | ok | mixed | 0.09132 | 0.0092399 | 0.083595–0.099045 | 3.82× (3.27–4.45×) | 5.2758 | 1.2454 | 0.061985 | 1.2707 | 1.1587 | 2.25× (2.06–2.44×) |
+| pyperformance.sympy/sympy_str | cpython | ok | mixed | 0.32671 | 0.013328 | 0.31557–0.33785 | 1× (1–1×) | 5.2758 | 0.84175 | 0.01572 | 0.84008 | 0.82493 | 1× (1–1×) |
+| pyperformance.sympy/sympy_str | lucifer | ok | mixed | 0.85319 | 0.036464 | 0.82271–0.88368 | 2.61× (2.44–2.8×) | 5.2758 | 3.3093 | 0.14916 | 3.378 | 3.0443 | 3.93× (3.63–4.25×) |
+| pyperformance.sympy/sympy_str | pypy | ok | mixed | 0.15877 | 0.030861 | 0.13297–0.18457 | 0.486× (0.394–0.585×) | 5.2758 | 2.4019 | 0.022843 | 2.4026 | 2.3702 | 2.85× (2.76–2.96×) |
+| pyperformance.sympy/sympy_sum | cpython | ok | mixed | 0.20681 | 0.0013089 | 0.20572–0.20791 | 1× (1–1×) | 5.2758 | 0.88521 | 0.0061876 | 0.8868 | 0.87548 | 1× (1–1×) |
+| pyperformance.sympy/sympy_sum | lucifer | ok | mixed | 0.55849 | 0.038386 | 0.5264–0.59059 | 2.7× (2.53–2.87×) | 5.2758 | 3.0306 | 0.13126 | 2.9694 | 2.9276 | 3.42× (3.21–3.64×) |
+| pyperformance.sympy/sympy_sum | pypy | ok | mixed | 0.1857 | 0.04154 | 0.15097–0.22043 | 0.898× (0.726–1.07×) | 5.2758 | 2.4102 | 0.065124 | 2.409 | 2.3315 | 2.72× (2.61–2.84×) |
+| pyperformance.telco | cpython | ok | native majority | 0.013206 | 0.00088692 | 0.012464–0.013947 | 1× (1–1×) | 64.108 | 0.14008 | 0.0023343 | 0.1415 | 0.13751 | 1× (1–1×) |
+| pyperformance.telco | lucifer | ok | native majority | 0.033221 | 0.0011393 | 0.032268–0.034173 | 2.52× (2.31–2.74×) | 64.108 | 0.70193 | 0.0084998 | 0.70491 | 0.68753 | 5.01× (4.84–5.19×) |
+| pyperformance.telco | pypy | ok | native majority | 0.010338 | 0.00014104 | 0.01022–0.010456 | 0.783× (0.733–0.839×) | 64.108 | 0.44281 | 0.027957 | 0.44691 | 0.39716 | 3.16× (2.85–3.48×) |
+| pyperformance.typing_runtime_protocols | cpython | ok | mixed | 0.00030007 | 6.6014e-06 | 0.00029455–0.00030559 | 1× (1–1×) | 14.764 | 0.13853 | 0.0031806 | 0.13958 | 0.13296 | 1× (1–1×) |
+| pyperformance.typing_runtime_protocols | lucifer | ok | mixed | 0.00078941 | 3.3499e-05 | 0.0007614–0.00081742 | 2.63× (2.49–2.78×) | 14.764 | 0.62963 | 0.01164 | 0.63081 | 0.61375 | 4.55× (4.32–4.79×) |
+| pyperformance.typing_runtime_protocols | pypy | ok | mixed | 0.00066538 | 0.00017614 | 0.00051812–0.00081264 | 2.22× (1.7–2.76×) | 14.764 | 0.20395 | 0.01464 | 0.20017 | 0.19015 | 1.47× (1.3–1.65×) |
+| pyperformance.unpickle | cpython | ok | native majority | 2.4073e-05 | 9.28e-07 | 2.3297e-05–2.4848e-05 | 1× (1–1×) | 89.602 | 0.1291 | 0.0015472 | 0.12893 | 0.12742 | 1× (1–1×) |
+| pyperformance.unpickle | lucifer | ok | native majority | 5.2524e-05 | 5.309e-07 | 5.208e-05–5.2967e-05 | 2.18× (2.1–2.27×) | 89.602 | 0.65937 | 0.041191 | 0.65888 | 0.61728 | 5.11× (4.64–5.59×) |
+| pyperformance.unpickle | pypy | ok | native majority | 4.4136e-05 | 1.4989e-06 | 4.2883e-05–4.5389e-05 | 1.83× (1.73–1.95×) | 89.602 | 0.21066 | 0.003871 | 0.20882 | 0.20715 | 1.63× (1.57–1.69×) |
+| pyperformance.unpickle_list | cpython | ok | native majority | 6.1068e-06 | 5.472e-07 | 5.6493e-06–6.5643e-06 | 1× (1–1×) | 91.3 | 0.13482 | 0.0065527 | 0.13278 | 0.12795 | 1× (1–1×) |
+| pyperformance.unpickle_list | lucifer | ok | native majority | 9.9449e-06 | 9.71e-08 | 9.8637e-06–1.0026e-05 | 1.63× (1.5–1.77×) | 91.3 | 0.62653 | 0.014451 | 0.62962 | 0.60657 | 4.65× (4.26–5.09×) |
+| pyperformance.unpickle_list | pypy | ok | native majority | 1.6331e-05 | 4.1434e-07 | 1.5984e-05–1.6677e-05 | 2.67× (2.44–2.95×) | 91.3 | 0.19091 | 0.0017664 | 0.19017 | 0.18935 | 1.42× (1.32–1.52×) |
+| pyperformance.unpickle_pure_python | cpython | ok | mixed | 0.00030855 | 1.6335e-05 | 0.0002949–0.00032221 | 1× (1–1×) | 9.8723 | 0.13731 | 0.00085061 | 0.13723 | 0.13648 | 1× (1–1×) |
+| pyperformance.unpickle_pure_python | lucifer | ok | mixed | 0.00052018 | 5.8821e-05 | 0.000471–0.00056936 | 1.69× (1.46–1.93×) | 9.8723 | 0.75745 | 0.029509 | 0.76836 | 0.70482 | 5.52× (5.21–5.83×) |
+| pyperformance.unpickle_pure_python | pypy | ok | mixed | 5.0427e-05 | 7.7304e-06 | 4.3964e-05–5.689e-05 | 0.163× (0.136–0.193×) | 9.8723 | 0.21152 | 0.006152 | 0.2102 | 0.20429 | 1.54× (1.47–1.61×) |
+| pyperformance.xdsl | cpython | ok | mixed | 0.072392 | 0.0060034 | 0.067373–0.077411 | 1× (1–1×) | 5.1632 | 0.44714 | 0.0029684 | 0.44713 | 0.44307 | 1× (1–1×) |
+| pyperformance.xdsl | lucifer | ok | mixed | 0.15876 | 0.017782 | 0.14389–0.17363 | 2.19× (1.86–2.58×) | 5.1632 | 1.7741 | 0.027417 | 1.7848 | 1.7347 | 3.97× (3.86–4.08×) |
+| pyperformance.xdsl | pypy | ok | mixed | 0.011379 | 0.0034886 | 0.0084623–0.014295 | 0.157× (0.109–0.212×) | 5.1632 | 1.1142 | 0.046874 | 1.1094 | 1.0665 | 2.49× (2.34–2.64×) |
+| pyperformance.xml_etree | pypy | pyperf benchmark names differ from oracle | native majority | — | — | — | — | 54.807 | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_generate | cpython | ok | native majority | 0.13858 | 0.0091417 | 0.13094–0.14622 | 1× (1–1×) | 54.807 | 0.31488 | 0.024283 | 0.32451 | 0.27212 | 1× (1–1×) |
+| pyperformance.xml_etree/xml_etree_generate | lucifer | ok | native majority | 0.39836 | 0.0081089 | 0.39158–0.40514 | 2.87× (2.68–3.09×) | 54.807 | 1.2369 | 0.064089 | 1.1972 | 1.1862 | 3.93× (3.35–4.62×) |
+| pyperformance.xml_etree/xml_etree_iterparse | cpython | ok | native majority | 0.12225 | 0.0038781 | 0.11901–0.12549 | 1× (1–1×) | 54.807 | 0.3092 | 0.0026185 | 0.30837 | 0.30695 | 1× (1–1×) |
+| pyperformance.xml_etree/xml_etree_iterparse | lucifer | ok | native majority | 0.24531 | 0.0081143 | 0.23852–0.25209 | 2.01× (1.9–2.12×) | 54.807 | 1.065 | 0.050857 | 1.0741 | 1.0172 | 3.44× (3.21–3.69×) |
+| pyperformance.xml_etree/xml_etree_parse | cpython | ok | native majority | 0.18514 | 0.0047778 | 0.18115–0.18914 | 1× (1–1×) | 54.807 | 0.36555 | 0.019247 | 0.37169 | 0.3384 | 1× (1–1×) |
+| pyperformance.xml_etree/xml_etree_parse | lucifer | ok | native majority | 0.26223 | 0.011465 | 0.25264–0.27181 | 1.42× (1.34–1.5×) | 54.807 | 1.1166 | 0.066072 | 1.1309 | 1.0447 | 3.05× (2.66–3.51×) |
+| pyperformance.xml_etree/xml_etree_process | cpython | ok | native majority | 0.11169 | 0.030936 | 0.085826–0.13755 | 1× (1–1×) | 54.807 | 0.28185 | 0.00075263 | 0.28186 | 0.28113 | 1× (1–1×) |
+| pyperformance.xml_etree/xml_etree_process | lucifer | ok | native majority | 0.21327 | 0.0046527 | 0.20938–0.21716 | 1.91× (1.52–2.53×) | 54.807 | 1.0538 | 0.0075817 | 1.0554 | 1.0452 | 3.74× (3.69–3.78×) |
 
-The last five values define the final median. The suffix must contain at least five values, all within 5% of that median. A batch reports its first operation. An unsettled row fails this card. Unit-event replays measure Lucifer churn. PyPy loop and bridge counters are in the CSV.
+## 5. Post-warm-up JIT churn
 
-| program | runtime | status | first_steady_op | warmup_s | compile_ms | post_compile_ms | post_rebuilds | post_kills |
-|---|---|---|---|---|---|---|---|---|
-| awfy.Bounce | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.Bounce | go | unsettled | — | — | — | — | — | — |
-| awfy.Bounce | lucifer | ok | 2 | 0.17456 | 11.501 | 1.2 | 1 | 1 |
-| awfy.Bounce | pypy | ok | 4 | 0.18102 | 13.05 | 0 | — | — |
-| awfy.CD | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.CD | go | unsettled | — | — | — | — | — | — |
-| awfy.CD | lucifer | unsettled | — | — | 166.1 | — | — | — |
-| awfy.CD | pypy | unsettled | — | — | 682.93 | — | — | — |
-| awfy.DeltaBlue | cpython | unsettled | — | — | — | — | — | — |
-| awfy.DeltaBlue | go | unsettled | — | — | — | — | — | — |
-| awfy.DeltaBlue | lucifer | unsettled | — | — | 193.48 | — | — | — |
-| awfy.DeltaBlue | pypy | unsettled | — | — | 239.22 | — | — | — |
-| awfy.Havlak | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.Havlak | go | ok | 6 | 1.1729 | — | — | — | — |
-| awfy.Havlak | lucifer | ok | 1 | 0 | 448.3 | 444.77 | 133 | 132 |
-| awfy.Havlak | pypy | ok | 6 | 3.3033 | 218.15 | 4.8778 | — | — |
-| awfy.Json | cpython | unsettled | — | — | — | — | — | — |
-| awfy.Json | go | unsettled | — | — | — | — | — | — |
-| awfy.Json | lucifer | unsettled | — | — | 210.85 | — | — | — |
-| awfy.Json | pypy | unsettled | — | — | 440.62 | — | — | — |
-| awfy.List | cpython | unsettled | — | — | — | — | — | — |
-| awfy.List | go | unsettled | — | — | — | — | — | — |
-| awfy.List | lucifer | ok | 2 | 0.31476 | 6.095 | 0 | 0 | 0 |
-| awfy.List | pypy | unsettled | — | — | 25.826 | — | — | — |
-| awfy.Mandelbrot | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.Mandelbrot | go | ok | 1 | 0 | — | — | — | — |
-| awfy.Mandelbrot | lucifer | ok | 2 | 0.079782 | 7.214 | 0.566 | 1 | 0 |
-| awfy.Mandelbrot | pypy | ok | 2 | 0.064584 | 7.1626 | 0 | — | — |
-| awfy.NBody | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.NBody | go | ok | 1 | 0 | — | — | — | — |
-| awfy.NBody | lucifer | ok | 2 | 0.39972 | 17.799 | 1.563 | 1 | 1 |
-| awfy.NBody | pypy | unsettled | — | — | 7.616 | — | — | — |
-| awfy.Permute | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.Permute | go | ok | 1 | 0 | — | — | — | — |
-| awfy.Permute | lucifer | ok | 2 | 0.99872 | 16.124 | 8.152 | 3 | 3 |
-| awfy.Permute | pypy | unsettled | — | — | 47.173 | — | — | — |
-| awfy.Queens | cpython | unsettled | — | — | — | — | — | — |
-| awfy.Queens | go | unsettled | — | — | — | — | — | — |
-| awfy.Queens | lucifer | unsettled | — | — | 20.959 | — | — | — |
-| awfy.Queens | pypy | ok | 3 | 0.24869 | 16.895 | 0 | — | — |
-| awfy.Richards | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.Richards | go | ok | 3 | 0.16024 | — | — | — | — |
-| awfy.Richards | lucifer | ok | 2 | 1.1945 | 20.332 | 5.019 | 13 | 13 |
-| awfy.Richards | pypy | unsettled | — | — | 61.851 | — | — | — |
-| awfy.Sieve | cpython | ok | 1 | 0 | — | — | — | — |
-| awfy.Sieve | go | unsettled | — | — | — | — | — | — |
-| awfy.Sieve | lucifer | unsettled | — | — | 5.475 | — | — | — |
-| awfy.Sieve | pypy | ok | 6 | 0.71245 | 7.3376 | 0 | — | — |
-| awfy.Storage | cpython | ok | 2 | 1.9401 | — | — | — | — |
-| awfy.Storage | go | unsettled | — | — | — | — | — | — |
-| awfy.Storage | lucifer | unsettled | — | — | 10.221 | — | — | — |
-| awfy.Storage | pypy | unsettled | — | — | 22.527 | — | — | — |
-| awfy.Towers | cpython | ok | 2 | 1.5232 | — | — | — | — |
-| awfy.Towers | go | unsettled | — | — | — | — | — | — |
-| awfy.Towers | lucifer | unsettled | — | — | 7.169 | — | — | — |
-| awfy.Towers | pypy | unsettled | — | — | 8.6625 | — | — | — |
-| flask.1 | cpython | ok | 1 | 0.20192 | — | — | — | — |
-| flask.1 | lucifer | unsettled | — | — | 4817 | — | — | — |
-| flask.1 | pypy | ok | 42380 | 11.092 | 1098.3 | 19.609 | — | — |
-| flask.8 | cpython | ok | 1 | 0.177 | — | — | — | — |
-| flask.8 | lucifer | unsettled | — | — | 5664.3 | — | — | — |
-| flask.8 | pypy | unsettled | — | — | 1992.7 | — | — | — |
-| pyperformance.argparse_subparsers | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.argparse_subparsers | lucifer | unsettled | — | — | 259.88 | — | — | — |
-| pyperformance.argparse_subparsers | pypy | unsettled | — | — | 74.933 | — | — | — |
-| pyperformance.async_generators | cpython | ok | 4 | 1.3415 | — | — | — | — |
-| pyperformance.async_generators | lucifer | unsettled | — | — | 88.143 | — | — | — |
-| pyperformance.async_generators | pypy | unsettled | — | — | 39.334 | — | — | — |
-| pyperformance.base64/ascii85_large | cpython | ok | 3 | 2.934 | — | — | — | — |
-| pyperformance.base64/ascii85_large | lucifer | ok | 4 | 3.7474 | 366.02 | 0 | 0 | 0 |
-| pyperformance.base64/ascii85_large | pypy | unsettled | — | — | 75.137 | — | — | — |
-| pyperformance.base64/ascii85_small | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.base64/ascii85_small | lucifer | unsettled | — | — | 352.8 | — | — | — |
-| pyperformance.base64/ascii85_small | pypy | unsettled | — | — | 75.137 | — | — | — |
-| pyperformance.base64/base16_large | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.base64/base16_large | lucifer | unsettled | — | — | 268.92 | — | — | — |
-| pyperformance.base64/base16_large | pypy | unsettled | — | — | 49.963 | — | — | — |
-| pyperformance.base64/base16_small | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.base64/base16_small | lucifer | unsettled | — | — | 264.44 | — | — | — |
-| pyperformance.base64/base16_small | pypy | unsettled | — | — | 49.778 | — | — | — |
-| pyperformance.base64/base32_large | cpython | ok | 4 | 1.9659 | — | — | — | — |
-| pyperformance.base64/base32_large | lucifer | ok | 1 | 0 | 233.64 | 0 | 0 | 0 |
-| pyperformance.base64/base32_large | pypy | unsettled | — | — | 46.464 | — | — | — |
-| pyperformance.base64/base32_small | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.base64/base32_small | lucifer | unsettled | — | — | 229.97 | — | — | — |
-| pyperformance.base64/base32_small | pypy | unsettled | — | — | 43.857 | — | — | — |
-| pyperformance.base64/base64_large | cpython | ok | 2 | 0.0071154 | — | — | — | — |
-| pyperformance.base64/base64_large | lucifer | unsettled | — | — | 176.82 | — | — | — |
-| pyperformance.base64/base64_large | pypy | unsettled | — | — | 28.912 | — | — | — |
-| pyperformance.base64/base64_small | cpython | ok | 4 | 0.0012844 | — | — | — | — |
-| pyperformance.base64/base64_small | lucifer | unsettled | — | — | 77.692 | — | — | — |
-| pyperformance.base64/base64_small | pypy | unsettled | — | — | 28.29 | — | — | — |
-| pyperformance.base64/base85_large | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.base64/base85_large | lucifer | unsettled | — | — | 399.52 | — | — | — |
-| pyperformance.base64/base85_large | pypy | ok | 2 | 0.14553 | 83.688 | 0 | — | — |
-| pyperformance.base64/base85_small | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.base64/base85_small | lucifer | unsettled | — | — | 394.47 | — | — | — |
-| pyperformance.base64/base85_small | pypy | unsettled | — | — | 83.688 | — | — | — |
-| pyperformance.base64/urlsafe_base64_small | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.base64/urlsafe_base64_small | lucifer | unsettled | — | — | 202.17 | — | — | — |
-| pyperformance.base64/urlsafe_base64_small | pypy | unsettled | — | — | 31.433 | — | — | — |
-| pyperformance.bpe_tokeniser | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.bpe_tokeniser | lucifer | ok | 2 | 4.6073 | 289.52 | 102.68 | 36 | 32 |
-| pyperformance.bpe_tokeniser | pypy | ok | 2 | 2.09 | 77.229 | 5.899 | — | — |
-| pyperformance.chameleon | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.chameleon | lucifer | unsettled | — | — | 413.19 | — | — | — |
-| pyperformance.chameleon | pypy | unsettled | — | — | 104.9 | — | — | — |
-| pyperformance.chaos | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.chaos | lucifer | unsettled | — | — | 118.2 | — | — | — |
-| pyperformance.chaos | pypy | unsettled | — | — | 72.658 | — | — | — |
-| pyperformance.comprehensions | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.comprehensions | lucifer | unsettled | — | — | 106.44 | — | — | — |
-| pyperformance.comprehensions | pypy | ok | 8527 | 0.11634 | 34.396 | 0 | — | — |
-| pyperformance.coroutines | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.coroutines | lucifer | unsettled | — | — | 47.516 | — | — | — |
-| pyperformance.coroutines | pypy | ok | 5 | 0.092694 | 33.225 | 0 | — | — |
-| pyperformance.crypto_pyaes | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.crypto_pyaes | lucifer | unsettled | — | — | 100.48 | — | — | — |
-| pyperformance.crypto_pyaes | pypy | unsettled | — | — | 24.036 | — | — | — |
-| pyperformance.deepcopy/deepcopy | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.deepcopy/deepcopy | lucifer | unsettled | — | — | 142.68 | — | — | — |
-| pyperformance.deepcopy/deepcopy | pypy | unsettled | — | — | 66.489 | — | — | — |
-| pyperformance.deepcopy/deepcopy_memo | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.deepcopy/deepcopy_memo | lucifer | unsettled | — | — | 280.86 | — | — | — |
-| pyperformance.deepcopy/deepcopy_memo | pypy | unsettled | — | — | 136.3 | — | — | — |
-| pyperformance.deepcopy/deepcopy_reduce | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.deepcopy/deepcopy_reduce | lucifer | unsettled | — | — | 254.05 | — | — | — |
-| pyperformance.deepcopy/deepcopy_reduce | pypy | unsettled | — | — | 114.35 | — | — | — |
-| pyperformance.deltablue | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.deltablue | lucifer | unsettled | — | — | 248.39 | — | — | — |
-| pyperformance.deltablue | pypy | unsettled | — | — | 181.42 | — | — | — |
-| pyperformance.django_template | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.django_template | lucifer | unsettled | — | — | 228.73 | — | — | — |
-| pyperformance.django_template | pypy | unsettled | — | — | 51.748 | — | — | — |
-| pyperformance.docutils | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.docutils | lucifer | ok | 3 | 20.824 | 5068.6 | 2142.4 | 635 | 616 |
-| pyperformance.docutils | pypy | unsettled | — | — | 5378.6 | — | — | — |
-| pyperformance.fannkuch | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.fannkuch | lucifer | ok | 3 | 1.1256 | 53.941 | 0 | 0 | 0 |
-| pyperformance.fannkuch | pypy | ok | 2 | 0.094724 | 20.078 | 0 | — | — |
-| pyperformance.fastapi | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.fastapi | lucifer | unsettled | — | — | 2117.4 | — | — | — |
-| pyperformance.fastapi | pypy | pyperf worker exit 1 | — | — | — | — | — | — |
-| pyperformance.generators | cpython | ok | 10 | 0.57286 | — | — | — | — |
-| pyperformance.generators | lucifer | ok | 4 | 0.30201 | 51.749 | 0 | 0 | 0 |
-| pyperformance.generators | pypy | unsettled | — | — | 140.4 | — | — | — |
-| pyperformance.genshi/genshi_text | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_text | lucifer | unsettled | — | — | 154.26 | — | — | — |
-| pyperformance.genshi/genshi_text | pypy | unsettled | — | — | 195.28 | — | — | — |
-| pyperformance.genshi/genshi_xml | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.genshi/genshi_xml | lucifer | unsettled | — | — | 394.68 | — | — | — |
-| pyperformance.genshi/genshi_xml | pypy | unsettled | — | — | 317.99 | — | — | — |
-| pyperformance.go | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.go | lucifer | unsettled | — | — | 159.39 | — | — | — |
-| pyperformance.go | pypy | unsettled | — | — | 632.75 | — | — | — |
-| pyperformance.hexiom | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.hexiom | lucifer | unsettled | — | — | 233.56 | — | — | — |
-| pyperformance.hexiom | pypy | unsettled | — | — | 136.2 | — | — | — |
-| pyperformance.html5lib | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.html5lib | lucifer | unsettled | — | — | 329.71 | — | — | — |
-| pyperformance.html5lib | pypy | unsettled | — | — | 207.14 | — | — | — |
-| pyperformance.mako | cpython | ok | 13 | 0.2535 | — | — | — | — |
-| pyperformance.mako | lucifer | unsettled | — | — | 178.03 | — | — | — |
-| pyperformance.mako | pypy | unsettled | — | — | 47.323 | — | — | — |
-| pyperformance.mdp | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.mdp | lucifer | ok | 2 | 7.5997 | 539.63 | 192.78 | 45 | 44 |
-| pyperformance.mdp | pypy | ok | 2 | 6.0473 | 309.21 | 21.245 | — | — |
-| pyperformance.meteor_contest | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.meteor_contest | lucifer | unsettled | — | — | 96.172 | — | — | — |
-| pyperformance.meteor_contest | pypy | ok | 2 | 0.072324 | 28.198 | 4.0288 | — | — |
-| pyperformance.nbody | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.nbody | lucifer | ok | 2 | 0.12106 | 52.46 | 1.063 | 1 | 0 |
-| pyperformance.nbody | pypy | unsettled | — | — | 13.596 | — | — | — |
-| pyperformance.networkx | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.networkx | lucifer | ok | 3 | 1.4692 | 238.68 | 0 | 0 | 0 |
-| pyperformance.networkx | pypy | unsettled | — | — | 78.645 | — | — | — |
-| pyperformance.networkx_connected_components | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.networkx_connected_components | lucifer | ok | 3 | 1.3282 | 229.32 | 0 | 0 | 0 |
-| pyperformance.networkx_connected_components | pypy | unsettled | — | — | 62.974 | — | — | — |
-| pyperformance.networkx_k_core | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.networkx_k_core | lucifer | ok | 1 | 0 | 398.96 | 175.14 | 132 | 119 |
-| pyperformance.networkx_k_core | pypy | unsettled | — | — | 166.74 | — | — | — |
-| pyperformance.nqueens | cpython | ok | 3 | 0.24573 | — | — | — | — |
-| pyperformance.nqueens | lucifer | unsettled | — | — | 63.645 | — | — | — |
-| pyperformance.nqueens | pypy | ok | 4 | 0.1108 | 35.676 | 1.302 | — | — |
-| pyperformance.pidigits | cpython | ok | 4 | 0.6206 | — | — | — | — |
-| pyperformance.pidigits | lucifer | unsettled | — | — | 84.89 | — | — | — |
-| pyperformance.pidigits | pypy | unsettled | — | — | 21.97 | — | — | — |
-| pyperformance.pprint/pprint_pformat | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.pprint/pprint_pformat | lucifer | ok | 3 | 10.3 | 781.33 | 149.84 | 25 | 25 |
-| pyperformance.pprint/pprint_pformat | pypy | unsettled | — | — | 41.497 | — | — | — |
-| pyperformance.pprint/pprint_safe_repr | cpython | ok | 4 | 3.3581 | — | — | — | — |
-| pyperformance.pprint/pprint_safe_repr | lucifer | unsettled | — | — | 309.47 | — | — | — |
-| pyperformance.pprint/pprint_safe_repr | pypy | unsettled | — | — | 35.302 | — | — | — |
-| pyperformance.pyflate | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.pyflate | lucifer | unsettled | — | — | 260.1 | — | — | — |
-| pyperformance.pyflate | pypy | ok | 3 | 0.41653 | 93.614 | 16.92 | — | — |
-| pyperformance.raytrace | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.raytrace | lucifer | unsettled | — | — | 250.66 | — | — | — |
-| pyperformance.raytrace | pypy | ok | 4 | 0.29285 | 145.57 | 3.3488 | — | — |
-| pyperformance.regex_compile | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.regex_compile | lucifer | unsettled | — | — | 824.89 | — | — | — |
-| pyperformance.regex_compile | pypy | pyperf stderr differs from oracle | — | — | — | — | — | — |
-| pyperformance.richards | cpython | ok | 7 | 0.39507 | — | — | — | — |
-| pyperformance.richards | lucifer | unsettled | — | — | 93.284 | — | — | — |
-| pyperformance.richards | pypy | ok | 7 | 0.086666 | 51.158 | 0 | — | — |
-| pyperformance.richards_super | cpython | ok | 7 | 0.48795 | — | — | — | — |
-| pyperformance.richards_super | lucifer | ok | 7 | 0.16107 | 96.703 | 0 | 0 | 1 |
-| pyperformance.richards_super | pypy | unsettled | — | — | 51.693 | — | — | — |
-| pyperformance.spectral_norm | cpython | ok | 4 | 0.41424 | — | — | — | — |
-| pyperformance.spectral_norm | lucifer | ok | 2 | 0.062136 | 55.768 | 0.536 | 0 | 0 |
-| pyperformance.spectral_norm | pypy | unsettled | — | — | 21.402 | — | — | — |
-| pyperformance.sphinx | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.sphinx | lucifer | ok | 4 | 15.092 | 3575.1 | 1154.3 | 516 | 508 |
-| pyperformance.sphinx | pypy | unsettled | — | — | 5158.4 | — | — | — |
-| pyperformance.sqlglot_v2 | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.sqlglot_v2 | lucifer | unsettled | — | — | 575.78 | — | — | — |
-| pyperformance.sqlglot_v2 | pypy | unsettled | — | — | 550.35 | — | — | — |
-| pyperformance.sqlglot_v2_optimize | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.sqlglot_v2_optimize | lucifer | unsettled | — | — | 740.67 | — | — | — |
-| pyperformance.sqlglot_v2_optimize | pypy | unsettled | — | — | 833.13 | — | — | — |
-| pyperformance.sqlglot_v2_parse | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.sqlglot_v2_parse | lucifer | unsettled | — | — | 280.49 | — | — | — |
-| pyperformance.sqlglot_v2_parse | pypy | unsettled | — | — | 359.58 | — | — | — |
-| pyperformance.sqlglot_v2_transpile | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.sqlglot_v2_transpile | lucifer | unsettled | — | — | 337.79 | — | — | — |
-| pyperformance.sqlglot_v2_transpile | pypy | unsettled | — | — | 430.45 | — | — | — |
-| pyperformance.tomli_loads | cpython | ok | 1 | 0 | — | — | — | — |
-| pyperformance.tomli_loads | lucifer | ok | 3 | 6.0579 | 332.49 | 76.311 | 12 | 13 |
-| pyperformance.tomli_loads | pypy | ok | 2 | 1.6463 | 221.75 | 0 | — | — |
-| pyperformance.tornado_http | cpython | ok | 4 | 0.51875 | — | — | — | — |
-| pyperformance.tornado_http | lucifer | unsettled | — | — | 851.06 | — | — | — |
-| pyperformance.tornado_http | pypy | unsettled | — | — | 660.6 | — | — | — |
-| pyperformance.unpack_sequence | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.unpack_sequence | lucifer | unsettled | — | — | 161.81 | — | — | — |
-| pyperformance.unpack_sequence | pypy | unsettled | — | — | 55.149 | — | — | — |
-| pyperformance.xdsl | cpython | unsettled | — | — | — | — | — | — |
-| pyperformance.xdsl | lucifer | unsettled | — | — | 606.81 | — | — | — |
-| pyperformance.xdsl | pypy | unsettled | — | — | 443.81 | — | — | — |
+Lucifer’s event log counts every build, kill and millisecond spent compiling during the measured iterations. Any measured churn fails the card. PyPy reports available loop and bridge counters.
+
+| program | runtime | status | post_builds | post_kills | post_compile_ms | post_compiled_loops | post_compiled_bridges | post_freed_loops | post_freed_bridges | telemetry |
+|---|---|---|---|---|---|---|---|---|---|---|
+| awfy.Bounce | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Bounce | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Bounce | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| awfy.Bounce | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.CD | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.CD | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.CD | lucifer | churn | 31 | 20 | 73.964 | — | — | — | — | — |
+| awfy.CD | pypy | churn | — | — | 23.584 | 1 | 15 | 0 | 0 | — |
+| awfy.DeltaBlue | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.DeltaBlue | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.DeltaBlue | lucifer | churn | 24 | 22 | 27.768 | — | — | — | — | — |
+| awfy.DeltaBlue | pypy | churn | — | — | 5.1529 | 0 | 6 | 0 | 0 | — |
+| awfy.Havlak | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Havlak | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Havlak | lucifer | churn | 16 | 15 | 77.594 | — | — | — | — | — |
+| awfy.Havlak | pypy | churn | — | — | 29.038 | 1 | 8 | 0 | 0 | — |
+| awfy.Json | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Json | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Json | lucifer | churn | 21 | 13 | 58.4 | — | — | — | — | — |
+| awfy.Json | pypy | churn | — | — | 91.547 | 3 | 36 | 0 | 0 | — |
+| awfy.List | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.List | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.List | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| awfy.List | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.Mandelbrot | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Mandelbrot | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Mandelbrot | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| awfy.Mandelbrot | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.NBody | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.NBody | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.NBody | lucifer | churn | 2 | 1 | 1.517 | — | — | — | — | — |
+| awfy.NBody | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.Permute | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Permute | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Permute | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| awfy.Permute | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.Queens | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Queens | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Queens | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| awfy.Queens | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.Richards | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Richards | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Richards | lucifer | churn | 28 | 10 | 4.921 | — | — | — | — | — |
+| awfy.Richards | pypy | churn | — | — | 6.0577 | 3 | 4 | 0 | 0 | — |
+| awfy.Sieve | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Sieve | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Sieve | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| awfy.Sieve | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.Storage | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Storage | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Storage | lucifer | churn | 1 | 0 | 1.893 | — | — | — | — | — |
+| awfy.Storage | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| awfy.Towers | cpython | not measured | — | — | — | — | — | — | — | — |
+| awfy.Towers | go | not measured | — | — | — | — | — | — | — | — |
+| awfy.Towers | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| awfy.Towers | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| boundary.cmath.isclose | cpython | not measured | — | — | — | — | — | — | — | — |
+| boundary.cmath.isclose | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| boundary.cmath.isclose | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| boundary.cmath.isfinite | cpython | not measured | — | — | — | — | — | — | — | — |
+| boundary.cmath.isfinite | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| boundary.cmath.isfinite | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| flask.1 | cpython | not measured | — | — | — | — | — | — | — | — |
+| flask.1 | lucifer | churn | 328 | 277 | 1476.7 | — | — | — | — | — |
+| flask.1 | pypy | churn | — | — | 40.434 | 7 | 16 | 0 | 0 | — |
+| flask.8 | cpython | insufficient disjoint CPUs | — | — | — | — | — | — | — | — |
+| flask.8 | lucifer | insufficient disjoint CPUs | — | — | — | — | — | — | — | — |
+| flask.8 | pypy | insufficient disjoint CPUs | — | — | — | — | — | — | — | — |
+| flask.8.shared | cpython | not measured | — | — | — | — | — | — | — | — |
+| flask.8.shared | lucifer | churn | 175 | 175 | 1053.6 | — | — | — | — | — |
+| flask.8.shared | pypy | churn | — | — | 187.31 | 26 | 42 | 0 | 0 | — |
+| pyperformance.argparse | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.argparse | lucifer | churn | 172 | 134 | 295.77 | — | — | — | — | — |
+| pyperformance.argparse | pypy | churn | — | — | 283.2 | 45 | 99 | 0 | 0 | — |
+| pyperformance.argparse_subparsers | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.argparse_subparsers | lucifer | churn | 40 | 29 | 76.063 | — | — | — | — | — |
+| pyperformance.argparse_subparsers | pypy | churn | — | — | 13.298 | 3 | 6 | 0 | 0 | — |
+| pyperformance.async_generators | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_generators | lucifer | churn | 1 | 1 | 0.085 | — | — | — | — | — |
+| pyperformance.async_generators | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.async_tree | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree | lucifer | churn | 5 | 4 | 4.76 | — | — | — | — | — |
+| pyperformance.async_tree | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.async_tree_cpu_io_mixed | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_cpu_io_mixed | lucifer | churn | 24 | 18 | 31.931 | — | — | — | — | — |
+| pyperformance.async_tree_cpu_io_mixed | pypy | churn | — | — | 1.1768 | 1 | 1 | 0 | 0 | — |
+| pyperformance.async_tree_cpu_io_mixed_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_cpu_io_mixed_tg | lucifer | churn | 17 | 11 | 12.51 | — | — | — | — | — |
+| pyperformance.async_tree_cpu_io_mixed_tg | pypy | churn | — | — | 2.4378 | 2 | 1 | 0 | 0 | — |
+| pyperformance.async_tree_eager | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager | lucifer | churn | 4 | 4 | 12.931 | — | — | — | — | — |
+| pyperformance.async_tree_eager | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.async_tree_eager_cpu_io_mixed | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager_cpu_io_mixed | lucifer | churn | 11 | 10 | 10.264 | — | — | — | — | — |
+| pyperformance.async_tree_eager_cpu_io_mixed | pypy | churn | — | — | 1.8439 | 1 | 1 | 0 | 0 | — |
+| pyperformance.async_tree_eager_cpu_io_mixed_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager_cpu_io_mixed_tg | lucifer | churn | 21 | 20 | 21.658 | — | — | — | — | — |
+| pyperformance.async_tree_eager_cpu_io_mixed_tg | pypy | churn | — | — | 1.822 | 2 | 1 | 0 | 0 | — |
+| pyperformance.async_tree_eager_io | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager_io | lucifer | churn | 13 | 11 | 16.662 | — | — | — | — | — |
+| pyperformance.async_tree_eager_io | pypy | churn | — | — | 0.46778 | 0 | 1 | 0 | 0 | — |
+| pyperformance.async_tree_eager_io_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager_io_tg | lucifer | churn | 9 | 9 | 6.582 | — | — | — | — | — |
+| pyperformance.async_tree_eager_io_tg | pypy | churn | — | — | 0.86069 | 0 | 2 | 0 | 0 | — |
+| pyperformance.async_tree_eager_memoization | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager_memoization | lucifer | churn | 31 | 29 | 25.363 | — | — | — | — | — |
+| pyperformance.async_tree_eager_memoization | pypy | churn | — | — | 7.8566 | 1 | 6 | 0 | 0 | — |
+| pyperformance.async_tree_eager_memoization_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager_memoization_tg | lucifer | churn | 41 | 41 | 36.724 | — | — | — | — | — |
+| pyperformance.async_tree_eager_memoization_tg | pypy | churn | — | — | 4.7069 | 0 | 5 | 0 | 0 | — |
+| pyperformance.async_tree_eager_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_eager_tg | lucifer | churn | 14 | 13 | 16.008 | — | — | — | — | — |
+| pyperformance.async_tree_eager_tg | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.async_tree_io | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_io | lucifer | churn | 20 | 19 | 24.823 | — | — | — | — | — |
+| pyperformance.async_tree_io | pypy | churn | — | — | 0.43201 | 0 | 1 | 0 | 0 | — |
+| pyperformance.async_tree_io_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_io_tg | lucifer | churn | 11 | 8 | 5.449 | — | — | — | — | — |
+| pyperformance.async_tree_io_tg | pypy | churn | — | — | 0.98395 | 0 | 2 | 0 | 0 | — |
+| pyperformance.async_tree_memoization | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_memoization | lucifer | churn | 21 | 19 | 33.589 | — | — | — | — | — |
+| pyperformance.async_tree_memoization | pypy | churn | — | — | 7.3736 | 0 | 5 | 0 | 0 | — |
+| pyperformance.async_tree_memoization_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_memoization_tg | lucifer | churn | 12 | 7 | 9.399 | — | — | — | — | — |
+| pyperformance.async_tree_memoization_tg | pypy | churn | — | — | 6.3922 | 0 | 5 | 0 | 0 | — |
+| pyperformance.async_tree_tg | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.async_tree_tg | lucifer | churn | 7 | 5 | 4.872 | — | — | — | — | — |
+| pyperformance.async_tree_tg | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.asyncio_tcp | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.asyncio_tcp | lucifer | churn | 74 | 57 | 96.783 | — | — | — | — | — |
+| pyperformance.asyncio_tcp | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.asyncio_tcp_ssl | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.asyncio_tcp_ssl | lucifer | churn | 71 | 45 | 62.238 | — | — | — | — | — |
+| pyperformance.asyncio_tcp_ssl | pypy | churn | — | — | 0.23508 | 1 | 0 | 0 | 0 | — |
+| pyperformance.asyncio_websockets | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.asyncio_websockets | lucifer | churn | 170 | 64 | 74.478 | — | — | — | — | — |
+| pyperformance.asyncio_websockets | pypy | churn | — | — | 94.058 | 19 | 9 | 0 | 0 | — |
+| pyperformance.base64/ascii85_large | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/ascii85_large | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.base64/ascii85_large | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.base64/ascii85_small | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/ascii85_small | lucifer | churn | 21 | 15 | 42.241 | — | — | — | — | — |
+| pyperformance.base64/ascii85_small | pypy | churn | — | — | 1.1311 | 1 | 3 | 0 | 0 | — |
+| pyperformance.base64/base16_large | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base16_large | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.base64/base16_large | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.base64/base16_small | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base16_small | lucifer | churn | 10 | 7 | 18.696 | — | — | — | — | — |
+| pyperformance.base64/base16_small | pypy | churn | — | — | 3.18 | 4 | 0 | 0 | 0 | — |
+| pyperformance.base64/base32_large | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base32_large | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.base64/base32_large | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.base64/base32_small | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base32_small | lucifer | churn | 9 | 8 | 12.246 | — | — | — | — | — |
+| pyperformance.base64/base32_small | pypy | churn | — | — | 3.5822 | 2 | 0 | 0 | 0 | — |
+| pyperformance.base64/base64_large | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base64_large | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.base64/base64_large | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.base64/base64_small | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base64_small | lucifer | churn | 5 | 4 | 8.569 | — | — | — | — | — |
+| pyperformance.base64/base64_small | pypy | churn | — | — | 0.741 | 2 | 0 | 0 | 0 | — |
+| pyperformance.base64/base85_large | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base85_large | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.base64/base85_large | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.base64/base85_small | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/base85_small | lucifer | churn | 3 | 3 | 11.455 | — | — | — | — | — |
+| pyperformance.base64/base85_small | pypy | churn | — | — | 4.0579 | 2 | 0 | 0 | 0 | — |
+| pyperformance.base64/urlsafe_base64_small | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.base64/urlsafe_base64_small | lucifer | churn | 5 | 5 | 8.589 | — | — | — | — | — |
+| pyperformance.base64/urlsafe_base64_small | pypy | churn | — | — | 1.0159 | 2 | 0 | 0 | 0 | — |
+| pyperformance.bpe_tokeniser | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.bpe_tokeniser | lucifer | churn | 14 | 14 | 52.074 | — | — | — | — | — |
+| pyperformance.bpe_tokeniser | pypy | churn | — | — | 3.5555 | 4 | 11 | 0 | 0 | — |
+| pyperformance.chameleon | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.chameleon | lucifer | churn | 4 | 5 | 55.09 | — | — | — | — | — |
+| pyperformance.chameleon | pypy | churn | — | — | 0.65994 | 0 | 2 | 0 | 0 | — |
+| pyperformance.chaos | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.chaos | lucifer | churn | 6 | 3 | 14.548 | — | — | — | — | — |
+| pyperformance.chaos | pypy | churn | — | — | 2.712 | 1 | 3 | 0 | 0 | — |
+| pyperformance.comprehensions | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.comprehensions | lucifer | churn | 1 | 0 | 0.181 | — | — | — | — | — |
+| pyperformance.comprehensions | pypy | churn | — | — | 0.49901 | 1 | 0 | 0 | 0 | — |
+| pyperformance.concurrent_imap/bench_mp_pool | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.concurrent_imap/bench_mp_pool | lucifer | churn | 322 | 115 | 388.35 | — | — | — | — | — |
+| pyperformance.concurrent_imap/bench_mp_pool | pypy | churn | — | — | 70.225 | 20 | 18 | 0 | 0 | — |
+| pyperformance.concurrent_imap/bench_thread_pool | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.concurrent_imap/bench_thread_pool | lucifer | churn | 33 | 18 | 12.211 | — | — | — | — | — |
+| pyperformance.concurrent_imap/bench_thread_pool | pypy | churn | — | — | 15.629 | 7 | 1 | 0 | 0 | — |
+| pyperformance.coroutines | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.coroutines | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.coroutines | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.coverage | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.coverage | lucifer | churn | 600 | 589 | 186.6 | — | — | — | — | — |
+| pyperformance.coverage | pypy | churn | — | — | 120.85 | 4 | 30 | 0 | 0 | — |
+| pyperformance.crypto_pyaes | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.crypto_pyaes | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.crypto_pyaes | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.dask | cpython | not measured | — | — | — | — | — | — | — | excluded by corpus lock or missing oracle check |
+| pyperformance.dask | lucifer | not measured | — | — | — | — | — | — | — | excluded by corpus lock or missing oracle check |
+| pyperformance.dask | pypy | not measured | — | — | — | — | — | — | — | excluded by corpus lock or missing oracle check |
+| pyperformance.deepcopy/deepcopy | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.deepcopy/deepcopy | lucifer | churn | 7 | 6 | 19.742 | — | — | — | — | — |
+| pyperformance.deepcopy/deepcopy | pypy | churn | — | — | 33.043 | 4 | 9 | 0 | 0 | — |
+| pyperformance.deepcopy/deepcopy_memo | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.deepcopy/deepcopy_memo | lucifer | churn | 6 | 5 | 8.706 | — | — | — | — | — |
+| pyperformance.deepcopy/deepcopy_memo | pypy | churn | — | — | 5.0721 | 2 | 0 | 0 | 0 | — |
+| pyperformance.deepcopy/deepcopy_reduce | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.deepcopy/deepcopy_reduce | lucifer | churn | 12 | 8 | 7.421 | — | — | — | — | — |
+| pyperformance.deepcopy/deepcopy_reduce | pypy | churn | — | — | 37.655 | 3 | 6 | 0 | 0 | — |
+| pyperformance.deltablue | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.deltablue | lucifer | churn | 41 | 31 | 48.859 | — | — | — | — | — |
+| pyperformance.deltablue | pypy | churn | — | — | 72.232 | 5 | 34 | 0 | 0 | — |
+| pyperformance.django_template | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.django_template | lucifer | churn | 25 | 17 | 28.764 | — | — | — | — | — |
+| pyperformance.django_template | pypy | churn | — | — | 6.5448 | 1 | 1 | 0 | 0 | — |
+| pyperformance.docutils | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.docutils | lucifer | churn | 886 | 599 | 2235.5 | — | — | — | — | — |
+| pyperformance.docutils | pypy | churn | — | — | 1312 | 85 | 886 | 17 | 12 | — |
+| pyperformance.dulwich_log | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.dulwich_log | lucifer | churn | 41 | 38 | 112.53 | — | — | — | — | — |
+| pyperformance.dulwich_log | pypy | churn | — | — | 18.06 | 2 | 10 | 3 | 1 | — |
+| pyperformance.fannkuch | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.fannkuch | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.fannkuch | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.fastapi | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.fastapi | lucifer | churn | 889 | 411 | 1370.4 | — | — | — | — | — |
+| pyperformance.fastapi | pypy | not measured | — | — | — | — | — | — | — | pyperf worker exit 1 |
+| pyperformance.float | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.float | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.float | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.gc_collect | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.gc_collect | lucifer | churn | 6 | 1 | 0.738 | — | — | — | — | — |
+| pyperformance.gc_collect | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.gc_traversal | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.gc_traversal | lucifer | churn | 6 | 1 | 1.154 | — | — | — | — | — |
+| pyperformance.gc_traversal | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.generators | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.generators | lucifer | churn | 1 | 0 | 0.064 | — | — | — | — | — |
+| pyperformance.generators | pypy | churn | — | — | 5.7542 | 0 | 4 | 1 | 1 | — |
+| pyperformance.genshi/genshi_text | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.genshi/genshi_text | lucifer | churn | 51 | 32 | 50.913 | — | — | — | — | — |
+| pyperformance.genshi/genshi_text | pypy | churn | — | — | 131.95 | 7 | 36 | 0 | 0 | — |
+| pyperformance.genshi/genshi_xml | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.genshi/genshi_xml | lucifer | churn | 30 | 19 | 56.183 | — | — | — | — | — |
+| pyperformance.genshi/genshi_xml | pypy | churn | — | — | 69.462 | 0 | 18 | 0 | 0 | — |
+| pyperformance.go | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.go | lucifer | churn | 29 | 12 | 48.507 | — | — | — | — | — |
+| pyperformance.go | pypy | churn | — | — | 294.51 | 15 | 217 | 1 | 1 | — |
+| pyperformance.hexiom | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.hexiom | lucifer | churn | 30 | 19 | 30.275 | — | — | — | — | — |
+| pyperformance.hexiom | pypy | churn | — | — | 60.05 | 7 | 41 | 0 | 0 | — |
+| pyperformance.html5lib | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.html5lib | lucifer | churn | 79 | 39 | 95.72 | — | — | — | — | — |
+| pyperformance.html5lib | pypy | churn | — | — | 48.956 | 10 | 48 | 4 | 3 | — |
+| pyperformance.json_dumps | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.json_dumps | lucifer | churn | 4 | 5 | 9.935 | — | — | — | — | — |
+| pyperformance.json_dumps | pypy | churn | — | — | 2.8989 | 2 | 0 | 0 | 0 | — |
+| pyperformance.json_loads | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.json_loads | lucifer | churn | 5 | 2 | 7.485 | — | — | — | — | — |
+| pyperformance.json_loads | pypy | churn | — | — | 15.609 | 2 | 1 | 0 | 0 | — |
+| pyperformance.logging/logging_format | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.logging/logging_format | lucifer | churn | 4 | 4 | 7.498 | — | — | — | — | — |
+| pyperformance.logging/logging_format | pypy | churn | — | — | 15.408 | 0 | 1 | 0 | 0 | — |
+| pyperformance.logging/logging_silent | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.logging/logging_silent | lucifer | churn | 2 | 1 | 1.855 | — | — | — | — | — |
+| pyperformance.logging/logging_silent | pypy | churn | — | — | 3.1309 | 1 | 0 | 0 | 0 | — |
+| pyperformance.logging/logging_simple | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.logging/logging_simple | lucifer | churn | 3 | 2 | 6.871 | — | — | — | — | — |
+| pyperformance.logging/logging_simple | pypy | churn | — | — | 12.164 | 0 | 0 | 0 | 0 | — |
+| pyperformance.mako | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.mako | lucifer | churn | 29 | 17 | 20.056 | — | — | — | — | — |
+| pyperformance.mako | pypy | churn | — | — | 20.335 | 3 | 4 | 0 | 0 | — |
+| pyperformance.mdp | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.mdp | lucifer | churn | 22 | 20 | 153.42 | — | — | — | — | — |
+| pyperformance.mdp | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.meteor_contest | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.meteor_contest | lucifer | churn | 7 | 3 | 9.18 | — | — | — | — | — |
+| pyperformance.meteor_contest | pypy | churn | — | — | 4.4436 | 1 | 6 | 0 | 0 | — |
+| pyperformance.nbody | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.nbody | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.nbody | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.networkx | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.networkx | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.networkx | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.networkx_connected_components | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.networkx_connected_components | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.networkx_connected_components | pypy | churn | — | — | 1.2643 | 0 | 2 | 0 | 0 | — |
+| pyperformance.networkx_k_core | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.networkx_k_core | lucifer | churn | 38 | 25 | 55.247 | — | — | — | — | — |
+| pyperformance.networkx_k_core | pypy | churn | — | — | 24.487 | 4 | 8 | 0 | 0 | — |
+| pyperformance.nqueens | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.nqueens | lucifer | churn | 1 | 0 | 2.91 | — | — | — | — | — |
+| pyperformance.nqueens | pypy | churn | — | — | 1.5419 | 0 | 1 | 0 | 0 | — |
+| pyperformance.pathlib | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pathlib | lucifer | churn | 7 | 5 | 12.477 | — | — | — | — | — |
+| pyperformance.pathlib | pypy | churn | — | — | 31.066 | 6 | 1 | 3 | 2 | — |
+| pyperformance.pickle | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pickle | lucifer | churn | 2 | 1 | 2.788 | — | — | — | — | — |
+| pyperformance.pickle | pypy | churn | — | — | 3.094 | 0 | 1 | 1 | 1 | — |
+| pyperformance.pickle_dict | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pickle_dict | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.pickle_dict | pypy | churn | — | — | 0.21577 | 0 | 1 | 0 | 0 | — |
+| pyperformance.pickle_list | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pickle_list | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.pickle_list | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.pickle_pure_python | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pickle_pure_python | lucifer | churn | 52 | 33 | 95.749 | — | — | — | — | — |
+| pyperformance.pickle_pure_python | pypy | churn | — | — | 8.3301 | 3 | 2 | 0 | 0 | — |
+| pyperformance.pidigits | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pidigits | lucifer | churn | 1 | 1 | 2.987 | — | — | — | — | — |
+| pyperformance.pidigits | pypy | churn | — | — | 0.314 | 0 | 1 | 0 | 0 | — |
+| pyperformance.pprint/pprint_pformat | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pprint/pprint_pformat | lucifer | churn | 33 | 33 | 216.47 | — | — | — | — | — |
+| pyperformance.pprint/pprint_pformat | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.pprint/pprint_safe_repr | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pprint/pprint_safe_repr | lucifer | churn | 35 | 35 | 195.19 | — | — | — | — | — |
+| pyperformance.pprint/pprint_safe_repr | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.pyflate | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.pyflate | lucifer | churn | 26 | 19 | 47.252 | — | — | — | — | — |
+| pyperformance.pyflate | pypy | churn | — | — | 16.823 | 5 | 15 | 0 | 0 | — |
+| pyperformance.raytrace | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.raytrace | lucifer | churn | 26 | 25 | 91.742 | — | — | — | — | — |
+| pyperformance.raytrace | pypy | churn | — | — | 4.6301 | 0 | 9 | 0 | 0 | — |
+| pyperformance.regex_compile | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.regex_compile | lucifer | churn | 42 | 29 | 164.44 | — | — | — | — | — |
+| pyperformance.regex_compile | pypy | not measured | — | — | — | — | — | — | — | pyperf stderr differs from oracle |
+| pyperformance.regex_dna | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.regex_dna | lucifer | churn | 16 | 19 | 4.498 | — | — | — | — | — |
+| pyperformance.regex_dna | pypy | churn | — | — | 5.3496 | 0 | 18 | 0 | 0 | — |
+| pyperformance.regex_effbot | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.regex_effbot | lucifer | churn | 39 | 26 | 33.92 | — | — | — | — | — |
+| pyperformance.regex_effbot | pypy | churn | — | — | 8.8449 | 8 | 14 | 0 | 0 | — |
+| pyperformance.regex_v8 | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.regex_v8 | lucifer | churn | 265 | 139 | 253.88 | — | — | — | — | — |
+| pyperformance.regex_v8 | pypy | churn | — | — | 56.045 | 112 | 178 | 0 | 0 | — |
+| pyperformance.richards | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.richards | lucifer | churn | 1 | 1 | 0.127 | — | — | — | — | — |
+| pyperformance.richards | pypy | churn | — | — | 0.87309 | 0 | 3 | 0 | 0 | — |
+| pyperformance.richards_super | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.richards_super | lucifer | churn | 1 | 1 | 0.086 | — | — | — | — | — |
+| pyperformance.richards_super | pypy | churn | — | — | 0.45919 | 0 | 1 | 0 | 0 | — |
+| pyperformance.scimark/scimark_fft | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.scimark/scimark_fft | lucifer | churn | 10 | 7 | 7.705 | — | — | — | — | — |
+| pyperformance.scimark/scimark_fft | pypy | churn | — | — | 3.0785 | 0 | 6 | 0 | 0 | — |
+| pyperformance.scimark/scimark_lu | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.scimark/scimark_lu | lucifer | churn | 29 | 14 | 35.736 | — | — | — | — | — |
+| pyperformance.scimark/scimark_lu | pypy | churn | — | — | 3.8841 | 2 | 2 | 0 | 0 | — |
+| pyperformance.scimark/scimark_monte_carlo | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.scimark/scimark_monte_carlo | lucifer | churn | 1 | 1 | 0.272 | — | — | — | — | — |
+| pyperformance.scimark/scimark_monte_carlo | pypy | churn | — | — | 1.07 | 0 | 4 | 0 | 0 | — |
+| pyperformance.scimark/scimark_sor | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.scimark/scimark_sor | lucifer | churn | 3 | 2 | 1.427 | — | — | — | — | — |
+| pyperformance.scimark/scimark_sor | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.scimark/scimark_sparse_mat_mult | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.scimark/scimark_sparse_mat_mult | lucifer | churn | 1 | 0 | 2.477 | — | — | — | — | — |
+| pyperformance.scimark/scimark_sparse_mat_mult | pypy | churn | — | — | 1.2569 | 0 | 3 | 0 | 0 | — |
+| pyperformance.spectral_norm | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.spectral_norm | lucifer | churn | 3 | 1 | 1.111 | — | — | — | — | — |
+| pyperformance.spectral_norm | pypy | churn | — | — | 1.754 | 1 | 2 | 0 | 0 | — |
+| pyperformance.sphinx | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sphinx | lucifer | churn | 1021 | 736 | 1823.7 | — | — | — | — | — |
+| pyperformance.sphinx | pypy | churn | — | — | 2950.2 | 130 | 1516 | 35 | 158 | — |
+| pyperformance.sqlalchemy_declarative | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sqlalchemy_declarative | lucifer | churn | 553 | 281 | 565.91 | — | — | — | — | — |
+| pyperformance.sqlalchemy_declarative | pypy | not measured | — | — | — | — | — | — | — | pyperf worker exit 1 |
+| pyperformance.sqlalchemy_imperative | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sqlalchemy_imperative | lucifer | churn | 95 | 88 | 165.15 | — | — | — | — | — |
+| pyperformance.sqlalchemy_imperative | pypy | churn | — | — | 35.552 | 11 | 8 | 0 | 0 | — |
+| pyperformance.sqlglot_v2 | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sqlglot_v2 | lucifer | churn | 160 | 128 | 234.67 | — | — | — | — | — |
+| pyperformance.sqlglot_v2 | pypy | churn | — | — | 280.52 | 20 | 147 | 2 | 1 | — |
+| pyperformance.sqlglot_v2_optimize | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sqlglot_v2_optimize | lucifer | churn | 232 | 151 | 315.82 | — | — | — | — | — |
+| pyperformance.sqlglot_v2_optimize | pypy | churn | — | — | 539.29 | 50 | 424 | 2 | 1 | — |
+| pyperformance.sqlglot_v2_parse | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sqlglot_v2_parse | lucifer | churn | 76 | 45 | 66.38 | — | — | — | — | — |
+| pyperformance.sqlglot_v2_parse | pypy | churn | — | — | 199.21 | 15 | 94 | 2 | 1 | — |
+| pyperformance.sqlglot_v2_transpile | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sqlglot_v2_transpile | lucifer | churn | 120 | 63 | 108.28 | — | — | — | — | — |
+| pyperformance.sqlglot_v2_transpile | pypy | churn | — | — | 232.62 | 31 | 154 | 2 | 1 | — |
+| pyperformance.sqlite_synth | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sqlite_synth | lucifer | churn | 8 | 4 | 4.277 | — | — | — | — | — |
+| pyperformance.sqlite_synth | pypy | churn | — | — | 20.979 | 5 | 1 | 0 | 0 | — |
+| pyperformance.sympy/sympy_expand | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sympy/sympy_expand | lucifer | churn | 109 | 90 | 397.97 | — | — | — | — | — |
+| pyperformance.sympy/sympy_expand | pypy | churn | — | — | 223.31 | 20 | 80 | 0 | 0 | — |
+| pyperformance.sympy/sympy_integrate | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sympy/sympy_integrate | lucifer | churn | 105 | 57 | 70.103 | — | — | — | — | — |
+| pyperformance.sympy/sympy_integrate | pypy | churn | — | — | 144.88 | 28 | 95 | 0 | 0 | — |
+| pyperformance.sympy/sympy_str | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sympy/sympy_str | lucifer | churn | 95 | 70 | 337.11 | — | — | — | — | — |
+| pyperformance.sympy/sympy_str | pypy | churn | — | — | 168.01 | 5 | 96 | 0 | 0 | — |
+| pyperformance.sympy/sympy_sum | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.sympy/sympy_sum | lucifer | churn | 232 | 176 | 398.01 | — | — | — | — | — |
+| pyperformance.sympy/sympy_sum | pypy | churn | — | — | 133.74 | 33 | 93 | 0 | 0 | — |
+| pyperformance.telco | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.telco | lucifer | churn | 5 | 5 | 32.394 | — | — | — | — | — |
+| pyperformance.telco | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.tomli_loads | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.tomli_loads | lucifer | churn | 8 | 8 | 50.348 | — | — | — | — | — |
+| pyperformance.tomli_loads | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.tornado_http | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.tornado_http | lucifer | churn | 562 | 255 | 542.09 | — | — | — | — | — |
+| pyperformance.tornado_http | pypy | churn | — | — | 453.75 | 76 | 137 | 0 | 0 | — |
+| pyperformance.typing_runtime_protocols | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.typing_runtime_protocols | lucifer | churn | 19 | 15 | 39.138 | — | — | — | — | — |
+| pyperformance.typing_runtime_protocols | pypy | churn | — | — | 546.63 | 4 | 146 | 1 | 1 | — |
+| pyperformance.unpack_sequence | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.unpack_sequence | lucifer | churn | 2 | 0 | 74.942 | — | — | — | — | — |
+| pyperformance.unpack_sequence | pypy | ok | — | — | 0 | 0 | 0 | 0 | 0 | — |
+| pyperformance.unpickle | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.unpickle | lucifer | churn | 3 | 2 | 4.737 | — | — | — | — | — |
+| pyperformance.unpickle | pypy | churn | — | — | 58.518 | 10 | 44 | 1 | 1 | — |
+| pyperformance.unpickle_list | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.unpickle_list | lucifer | ok | 0 | 0 | 0 | — | — | — | — | — |
+| pyperformance.unpickle_list | pypy | churn | — | — | 3.8989 | 2 | 0 | 0 | 0 | — |
+| pyperformance.unpickle_pure_python | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.unpickle_pure_python | lucifer | churn | 56 | 36 | 41.875 | — | — | — | — | — |
+| pyperformance.unpickle_pure_python | pypy | churn | — | — | 43.074 | 15 | 43 | 0 | 0 | — |
+| pyperformance.xdsl | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.xdsl | lucifer | churn | 67 | 62 | 145.06 | — | — | — | — | — |
+| pyperformance.xdsl | pypy | churn | — | — | 144.38 | 22 | 33 | 4 | 15 | — |
+| pyperformance.xml_etree | pypy | not measured | — | — | — | — | — | — | — | pyperf benchmark names differ from oracle |
+| pyperformance.xml_etree/xml_etree_generate | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_generate | lucifer | churn | 9 | 6 | 1.641 | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_iterparse | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_iterparse | lucifer | churn | 34 | 18 | 39.005 | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_parse | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_parse | lucifer | churn | 60 | 24 | 50.48 | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_process | cpython | not measured | — | — | — | — | — | — | — | — |
+| pyperformance.xml_etree/xml_etree_process | lucifer | churn | 20 | 9 | 5.983 | — | — | — | — | — |
 
 ## Gates
+
+These correctness results retain the dates and measurements published in the November 27 daily record at `83ea62d9`.
 
 | program | status | score | counts | date | detail |
 |---|---|---|---|---|---|
@@ -814,26 +1040,27 @@ The last five values define the final median. The suffix must contain at least f
 
 ## Problems
 
-- Card 1, cpython, unsettled: awfy.DeltaBlue, awfy.Json, awfy.List, awfy.Queens, pyperformance.argparse_subparsers, pyperformance.base64/base16_large, pyperformance.base64/base16_small, pyperformance.base64/base32_small, pyperformance.base64/base85_large, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.chaos, pyperformance.coroutines, pyperformance.crypto_pyaes, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.fannkuch, pyperformance.go, pyperformance.hexiom, pyperformance.meteor_contest, pyperformance.nbody, pyperformance.pprint/pprint_pformat, pyperformance.raytrace, pyperformance.regex_compile, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.unpack_sequence, pyperformance.xdsl
-- Card 1, go, unsettled: awfy.Bounce, awfy.CD, awfy.DeltaBlue, awfy.Json, awfy.List, awfy.Queens, awfy.Sieve, awfy.Storage, awfy.Towers
-- Card 1, lucifer, unsettled: awfy.CD, awfy.DeltaBlue, awfy.Json, awfy.Queens, awfy.Sieve, awfy.Storage, awfy.Towers, pyperformance.argparse_subparsers, pyperformance.async_generators, pyperformance.base64/ascii85_small, pyperformance.base64/base16_large, pyperformance.base64/base16_small, pyperformance.base64/base32_small, pyperformance.base64/base64_large, pyperformance.base64/base64_small, pyperformance.base64/base85_large, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.chaos, pyperformance.comprehensions, pyperformance.coroutines, pyperformance.crypto_pyaes, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_memo, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.go, pyperformance.hexiom, pyperformance.meteor_contest, pyperformance.nqueens, pyperformance.pidigits, pyperformance.pprint/pprint_safe_repr, pyperformance.pyflate, pyperformance.raytrace, pyperformance.regex_compile, pyperformance.richards, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.unpack_sequence, pyperformance.xdsl
 - Card 1, pypy, pyperf stderr differs from oracle: pyperformance.regex_compile
-- Card 1, pypy, unsettled: awfy.CD, awfy.DeltaBlue, awfy.Json, awfy.List, awfy.NBody, awfy.Permute, awfy.Richards, awfy.Storage, awfy.Towers, pyperformance.argparse_subparsers, pyperformance.async_generators, pyperformance.base64/ascii85_large, pyperformance.base64/ascii85_small, pyperformance.base64/base16_large, pyperformance.base64/base16_small, pyperformance.base64/base32_large, pyperformance.base64/base32_small, pyperformance.base64/base64_large, pyperformance.base64/base64_small, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.chaos, pyperformance.crypto_pyaes, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_memo, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.generators, pyperformance.go, pyperformance.hexiom, pyperformance.nbody, pyperformance.networkx, pyperformance.networkx_connected_components, pyperformance.networkx_k_core, pyperformance.pidigits, pyperformance.pprint/pprint_pformat, pyperformance.pprint/pprint_safe_repr, pyperformance.richards_super, pyperformance.spectral_norm, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.unpack_sequence, pyperformance.xdsl
-- Card 2, cpython, unsettled: pyperformance.chameleon, pyperformance.django_template, pyperformance.fastapi, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.html5lib, pyperformance.sphinx
-- Card 2, lucifer, unsettled: pyperformance.chameleon, pyperformance.django_template, pyperformance.fastapi, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.html5lib, pyperformance.mako, pyperformance.tornado_http
-- Card 2, pypy, hardware counts unavailable: flask.8.profile
+- Card 2, cpython, insufficient disjoint CPUs: flask.8, flask.8.profile
+- Card 2, cpython, request errors: flask.1
+- Card 2, lucifer, insufficient disjoint CPUs: flask.8, flask.8.profile
+- Card 2, pypy, insufficient disjoint CPUs: flask.8, flask.8.profile
 - Card 2, pypy, pyperf worker exit 1: pyperformance.fastapi
-- Card 2, pypy, unsettled: pyperformance.chameleon, pyperformance.django_template, pyperformance.docutils, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.html5lib, pyperformance.mako, pyperformance.sphinx, pyperformance.tornado_http
 - Card 4, cpython, excluded by corpus lock or missing oracle check: pyperformance.dask
 - Card 4, lucifer, excluded by corpus lock or missing oracle check: pyperformance.dask
 - Card 4, pypy, excluded by corpus lock or missing oracle check: pyperformance.dask
 - Card 4, pypy, pyperf benchmark names differ from oracle: pyperformance.xml_etree
 - Card 4, pypy, pyperf worker exit 1: pyperformance.sqlalchemy_declarative
-- Card 5, cpython, unsettled: awfy.DeltaBlue, awfy.Json, awfy.List, awfy.Queens, pyperformance.argparse_subparsers, pyperformance.base64/base16_large, pyperformance.base64/base16_small, pyperformance.base64/base32_small, pyperformance.base64/base85_large, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.chameleon, pyperformance.chaos, pyperformance.coroutines, pyperformance.crypto_pyaes, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.django_template, pyperformance.fannkuch, pyperformance.fastapi, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.go, pyperformance.hexiom, pyperformance.html5lib, pyperformance.meteor_contest, pyperformance.nbody, pyperformance.pprint/pprint_pformat, pyperformance.raytrace, pyperformance.regex_compile, pyperformance.sphinx, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.unpack_sequence, pyperformance.xdsl
-- Card 5, go, unsettled: awfy.Bounce, awfy.CD, awfy.DeltaBlue, awfy.Json, awfy.List, awfy.Queens, awfy.Sieve, awfy.Storage, awfy.Towers
-- Card 5, lucifer, unsettled: awfy.CD, awfy.DeltaBlue, awfy.Json, awfy.Queens, awfy.Sieve, awfy.Storage, awfy.Towers, flask.1, flask.8, pyperformance.argparse_subparsers, pyperformance.async_generators, pyperformance.base64/ascii85_small, pyperformance.base64/base16_large, pyperformance.base64/base16_small, pyperformance.base64/base32_small, pyperformance.base64/base64_large, pyperformance.base64/base64_small, pyperformance.base64/base85_large, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.chameleon, pyperformance.chaos, pyperformance.comprehensions, pyperformance.coroutines, pyperformance.crypto_pyaes, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_memo, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.django_template, pyperformance.fastapi, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.go, pyperformance.hexiom, pyperformance.html5lib, pyperformance.mako, pyperformance.meteor_contest, pyperformance.nqueens, pyperformance.pidigits, pyperformance.pprint/pprint_safe_repr, pyperformance.pyflate, pyperformance.raytrace, pyperformance.regex_compile, pyperformance.richards, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.tornado_http, pyperformance.unpack_sequence, pyperformance.xdsl
+- Card 5, cpython, excluded by corpus lock or missing oracle check: pyperformance.dask
+- Card 5, cpython, insufficient disjoint CPUs: flask.8
+- Card 5, lucifer, churn: awfy.CD, awfy.DeltaBlue, awfy.Havlak, awfy.Json, awfy.NBody, awfy.Richards, awfy.Storage, flask.1, flask.8.shared, pyperformance.argparse, pyperformance.argparse_subparsers, pyperformance.async_generators, pyperformance.async_tree, pyperformance.async_tree_cpu_io_mixed, pyperformance.async_tree_cpu_io_mixed_tg, pyperformance.async_tree_eager, pyperformance.async_tree_eager_cpu_io_mixed, pyperformance.async_tree_eager_cpu_io_mixed_tg, pyperformance.async_tree_eager_io, pyperformance.async_tree_eager_io_tg, pyperformance.async_tree_eager_memoization, pyperformance.async_tree_eager_memoization_tg, pyperformance.async_tree_eager_tg, pyperformance.async_tree_io, pyperformance.async_tree_io_tg, pyperformance.async_tree_memoization, pyperformance.async_tree_memoization_tg, pyperformance.async_tree_tg, pyperformance.asyncio_tcp, pyperformance.asyncio_tcp_ssl, pyperformance.asyncio_websockets, pyperformance.base64/ascii85_small, pyperformance.base64/base16_small, pyperformance.base64/base32_small, pyperformance.base64/base64_small, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.bpe_tokeniser, pyperformance.chameleon, pyperformance.chaos, pyperformance.comprehensions, pyperformance.concurrent_imap/bench_mp_pool, pyperformance.concurrent_imap/bench_thread_pool, pyperformance.coverage, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_memo, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.django_template, pyperformance.docutils, pyperformance.dulwich_log, pyperformance.fastapi, pyperformance.gc_collect, pyperformance.gc_traversal, pyperformance.generators, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.go, pyperformance.hexiom, pyperformance.html5lib, pyperformance.json_dumps, pyperformance.json_loads, pyperformance.logging/logging_format, pyperformance.logging/logging_silent, pyperformance.logging/logging_simple, pyperformance.mako, pyperformance.mdp, pyperformance.meteor_contest, pyperformance.networkx_k_core, pyperformance.nqueens, pyperformance.pathlib, pyperformance.pickle, pyperformance.pickle_pure_python, pyperformance.pidigits, pyperformance.pprint/pprint_pformat, pyperformance.pprint/pprint_safe_repr, pyperformance.pyflate, pyperformance.raytrace, pyperformance.regex_compile, pyperformance.regex_dna, pyperformance.regex_effbot, pyperformance.regex_v8, pyperformance.richards, pyperformance.richards_super, pyperformance.scimark/scimark_fft, pyperformance.scimark/scimark_lu, pyperformance.scimark/scimark_monte_carlo, pyperformance.scimark/scimark_sor, pyperformance.scimark/scimark_sparse_mat_mult, pyperformance.spectral_norm, pyperformance.sphinx, pyperformance.sqlalchemy_declarative, pyperformance.sqlalchemy_imperative, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.sqlite_synth, pyperformance.sympy/sympy_expand, pyperformance.sympy/sympy_integrate, pyperformance.sympy/sympy_str, pyperformance.sympy/sympy_sum, pyperformance.telco, pyperformance.tomli_loads, pyperformance.tornado_http, pyperformance.typing_runtime_protocols, pyperformance.unpack_sequence, pyperformance.unpickle, pyperformance.unpickle_pure_python, pyperformance.xdsl, pyperformance.xml_etree/xml_etree_generate, pyperformance.xml_etree/xml_etree_iterparse, pyperformance.xml_etree/xml_etree_parse, pyperformance.xml_etree/xml_etree_process
+- Card 5, lucifer, excluded by corpus lock or missing oracle check: pyperformance.dask
+- Card 5, lucifer, insufficient disjoint CPUs: flask.8
+- Card 5, pypy, churn: awfy.CD, awfy.DeltaBlue, awfy.Havlak, awfy.Json, awfy.Richards, flask.1, flask.8.shared, pyperformance.argparse, pyperformance.argparse_subparsers, pyperformance.async_tree_cpu_io_mixed, pyperformance.async_tree_cpu_io_mixed_tg, pyperformance.async_tree_eager_cpu_io_mixed, pyperformance.async_tree_eager_cpu_io_mixed_tg, pyperformance.async_tree_eager_io, pyperformance.async_tree_eager_io_tg, pyperformance.async_tree_eager_memoization, pyperformance.async_tree_eager_memoization_tg, pyperformance.async_tree_io, pyperformance.async_tree_io_tg, pyperformance.async_tree_memoization, pyperformance.async_tree_memoization_tg, pyperformance.asyncio_tcp_ssl, pyperformance.asyncio_websockets, pyperformance.base64/ascii85_small, pyperformance.base64/base16_small, pyperformance.base64/base32_small, pyperformance.base64/base64_small, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.bpe_tokeniser, pyperformance.chameleon, pyperformance.chaos, pyperformance.comprehensions, pyperformance.concurrent_imap/bench_mp_pool, pyperformance.concurrent_imap/bench_thread_pool, pyperformance.coverage, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_memo, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.django_template, pyperformance.docutils, pyperformance.dulwich_log, pyperformance.generators, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.go, pyperformance.hexiom, pyperformance.html5lib, pyperformance.json_dumps, pyperformance.json_loads, pyperformance.logging/logging_format, pyperformance.logging/logging_silent, pyperformance.logging/logging_simple, pyperformance.mako, pyperformance.meteor_contest, pyperformance.networkx_connected_components, pyperformance.networkx_k_core, pyperformance.nqueens, pyperformance.pathlib, pyperformance.pickle, pyperformance.pickle_dict, pyperformance.pickle_pure_python, pyperformance.pidigits, pyperformance.pyflate, pyperformance.raytrace, pyperformance.regex_dna, pyperformance.regex_effbot, pyperformance.regex_v8, pyperformance.richards, pyperformance.richards_super, pyperformance.scimark/scimark_fft, pyperformance.scimark/scimark_lu, pyperformance.scimark/scimark_monte_carlo, pyperformance.scimark/scimark_sparse_mat_mult, pyperformance.spectral_norm, pyperformance.sphinx, pyperformance.sqlalchemy_imperative, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.sqlite_synth, pyperformance.sympy/sympy_expand, pyperformance.sympy/sympy_integrate, pyperformance.sympy/sympy_str, pyperformance.sympy/sympy_sum, pyperformance.tornado_http, pyperformance.typing_runtime_protocols, pyperformance.unpickle, pyperformance.unpickle_list, pyperformance.unpickle_pure_python, pyperformance.xdsl
+- Card 5, pypy, excluded by corpus lock or missing oracle check: pyperformance.dask
+- Card 5, pypy, insufficient disjoint CPUs: flask.8
+- Card 5, pypy, pyperf benchmark names differ from oracle: pyperformance.xml_etree
 - Card 5, pypy, pyperf stderr differs from oracle: pyperformance.regex_compile
-- Card 5, pypy, pyperf worker exit 1: pyperformance.fastapi
-- Card 5, pypy, unsettled: awfy.CD, awfy.DeltaBlue, awfy.Json, awfy.List, awfy.NBody, awfy.Permute, awfy.Richards, awfy.Storage, awfy.Towers, flask.8, pyperformance.argparse_subparsers, pyperformance.async_generators, pyperformance.base64/ascii85_large, pyperformance.base64/ascii85_small, pyperformance.base64/base16_large, pyperformance.base64/base16_small, pyperformance.base64/base32_large, pyperformance.base64/base32_small, pyperformance.base64/base64_large, pyperformance.base64/base64_small, pyperformance.base64/base85_small, pyperformance.base64/urlsafe_base64_small, pyperformance.chameleon, pyperformance.chaos, pyperformance.crypto_pyaes, pyperformance.deepcopy/deepcopy, pyperformance.deepcopy/deepcopy_memo, pyperformance.deepcopy/deepcopy_reduce, pyperformance.deltablue, pyperformance.django_template, pyperformance.docutils, pyperformance.generators, pyperformance.genshi/genshi_text, pyperformance.genshi/genshi_xml, pyperformance.go, pyperformance.hexiom, pyperformance.html5lib, pyperformance.mako, pyperformance.nbody, pyperformance.networkx, pyperformance.networkx_connected_components, pyperformance.networkx_k_core, pyperformance.pidigits, pyperformance.pprint/pprint_pformat, pyperformance.pprint/pprint_safe_repr, pyperformance.richards_super, pyperformance.spectral_norm, pyperformance.sphinx, pyperformance.sqlglot_v2, pyperformance.sqlglot_v2_optimize, pyperformance.sqlglot_v2_parse, pyperformance.sqlglot_v2_transpile, pyperformance.tornado_http, pyperformance.unpack_sequence, pyperformance.xdsl
+- Card 5, pypy, pyperf worker exit 1: pyperformance.fastapi, pyperformance.sqlalchemy_declarative
 
-The 9 measurement arms took 71.9 minutes including queue waits.
+The 11 measurement arms took 162.8 minutes including queue waits.

@@ -1,6 +1,6 @@
 ---
 id: luc-scorecard-stats
-status: in_progress
+status: closed
 deps: []
 links: []
 created: 2026-11-27T06:52:33Z
