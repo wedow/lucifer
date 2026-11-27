@@ -1191,7 +1191,7 @@ HEADLINES = {
     "held-out": (1, "Held-out real Python programs", "Warm-suite bar ≤0.35× stock and ≤0.72× PyPy"),
     "web": (2, "Application paths vs stock", "Flask ≥1.5× stock at both counts, ≥4× scaling, zero errors, p99 ≤stock"),
     "short": (3, "Short programs vs stock", "Each CLI and startup program ≤1× stock time"),
-    "native": (4, "Native-heavy programs vs stock", "≥10% gain on a second wheel and no bulk regression"),
+    "native": (4, "Native-heavy programs vs stock", "≥10% gain on a second wheel, no bulk regression, warm-suite bar ≤0.35× stock"),
     "churn": (5, "Post-warm-up JIT churn", "Zero builds, kills and compile time after warm-up"),
 }
 
@@ -1385,17 +1385,21 @@ def arm(section, runtime, site, scratch):
     corpus = bench_tool("corpus")
     names = sorted((corpus.pyperformance(site).keys() | corpus.EXCLUDED.keys()) - set(corpus.STARTUP))
     mid = len(names) // 2
-    # Lucifer spends longer replaying the async programs at the start of the
-    # manifest. Move the next group to its shorter AWFY arm.
+    # Lucifer's async replays dominate the first part of the manifest. Time
+    # its first fifth with the cold programs, and its next fifth with AWFY.
+    # Split the remaining manifests between the two corpus-only arms.
     split = len(names) // 5 if runtime == "lucifer" else mid
+    tail = 4 * len(names) // 5 if runtime == "lucifer" else len(names)
     if section == "corpus":
         yield from cold_rows(runtime, command, site, scratch)
         yield from boundary_rows(runtime, target, site, scratch)
         names = names[:split]
     elif section == "awfy":
-        names = names[split:mid]
+        names = names[split:2 * split]
+    elif section == "corpus-rest":
+        names = names[mid:tail]
     else:
-        names = names[mid:]
+        names = names[2 * split:mid] + names[tail:]
     yield from corpus_rows(runtime, target, site, scratch, names)
 
 
@@ -1626,7 +1630,7 @@ def main():
                    help="measure five paired repeats on representative rows of a previous run, then render it")
     p.add_argument("--gates", type=Path, metavar="CSV", help="include the daily correctness gate results")
     p.add_argument("--summarize", type=Path, metavar="RUN", help="render a completed scratch run again")
-    p.add_argument("--section", choices=["awfy", "corpus", "corpus-rest", "web", "repeat"], help=argparse.SUPPRESS)
+    p.add_argument("--section", choices=["awfy", "corpus", "corpus-rest", "corpus-tail", "web", "repeat"], help=argparse.SUPPRESS)
     p.add_argument("--receipt", type=Path, help=argparse.SUPPRESS)
     args = p.parse_args()
     if args.repeatability:
@@ -1687,7 +1691,13 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     python = sorted((r for r in runtimes if r != "go"), key=lambda r: r != "cpython")
     jobs = [(section, [runtime]) for runtime in python for section in ("corpus", "corpus-rest")]
-    jobs += [("awfy", [runtime]) for runtime in runtimes]
+    # PyPy and Go's short AWFY runs fit on one core in succession.
+    jobs += [("awfy", [r]) for r in runtimes if r not in ("pypy", "go")]
+    short_awfy = [r for r in runtimes if r in ("pypy", "go")]
+    if short_awfy:
+        jobs.append(("awfy", short_awfy))
+    if "lucifer" in python:
+        jobs.append(("corpus-tail", ["lucifer"]))
     if python:
         jobs.append(("web", python))
     source = revision()
