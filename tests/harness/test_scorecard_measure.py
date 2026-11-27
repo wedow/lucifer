@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import runpy
 import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -49,6 +50,19 @@ class ScorecardMeasurements(unittest.TestCase):
                          (1., .05, .99, .95))
         self.assertLess(row['whole_low_s'], 1.)
         self.assertGreater(row['whole_high_s'], 1.)
+
+    def test_flask_controller_ignores_candidate_python_settings(self):
+        measure = SCORECARD['flask_whole']
+        def probe(runtime, argv, directory):
+            script = argv.index(str(Path(__file__).resolve().parents[2] / 'tools/scorecard'))
+            return subprocess.check_output(argv[:script] + ['-c',
+                'import os, sys; print(sys.flags.ignore_environment, os.environ["PYTHONHOME"])'],
+                env={**os.environ, 'PYTHONHOME': 'candidate-only'}, text=True).strip()
+
+        web = SCORECARD['bench_tool']('web/bench')
+        with patch.dict(measure.__globals__, hyperfine=probe):
+            output = measure(web, 'cpython', ['candidate'], Path('site'), Path('scratch'), [0], [1], 'digest')
+        self.assertEqual(output, '1 candidate-only')
 
     def test_churn_counts_first_build_during_measurement(self):
         events = ['jit-ev 1.1 build cold ms 13.0 : first',

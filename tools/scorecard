@@ -639,6 +639,16 @@ def flask_transcript(command, cpus, client, reference):
         raise ValueError("response mismatch")
 
 
+def flask_whole(web, runtime, command, site, out, cpus, client, reference):
+    prefix = shlex.split(os.environ.get('LUCIFER_PREFIX', '')) if runtime == 'lucifer' else []
+    single = flask_command(command[len(prefix):], site, out / 'transcript.log')
+    # The controller uses the host Python. Preserve candidate settings such as
+    # PYTHON_GIL=0 in the server environment without applying them to the controller.
+    argv = prefix + [sys.executable, '-E', __file__, '--flask-transcript', single,
+                     web.cpu_list(cpus), web.cpu_list(client), reference]
+    return hyperfine(runtime, argv, out)
+
+
 def flask_churn(runtime, web, args, command, site, out, cpus, client):
     if runtime not in ("lucifer", "pypy"):
         return dict(status="not measured")
@@ -697,13 +707,7 @@ def flask_rows(runtime, command, site, scratch):
                 status = 'server exited'
             mean, stdev = statistics.mean(rates), statistics.stdev(rates)
             low, high = mean_interval(mean, stdev, len(rates))
-            # Hyperfine calibrates the launch prefix. The transcript controller
-            # and its single server then execute within that invocation.
-            prefix = shlex.split(os.environ.get('LUCIFER_PREFIX', '')) if runtime == 'lucifer' else []
-            single = flask_command(command[len(prefix):], site, out / 'transcript.log')
-            argv = prefix + [sys.executable, __file__, '--flask-transcript', single,
-                             web.cpu_list(cpus), web.cpu_list(client), reference.read_text()]
-            whole = hyperfine(runtime, argv, out)
+            whole = flask_whole(web, runtime, command, site, out, cpus, client, reference.read_text())
             yield dict(base, card=2, status='request errors' if errors else status, response_check=check,
                        rps=mean, rps_stdev=stdev, rps_low=low, rps_high=high, errors=errors,
                        concurrent_check='ok' if not problems else ', '.join(problems), **whole,
