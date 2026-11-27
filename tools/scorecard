@@ -932,7 +932,8 @@ def corpus_process(command, argv, site, runtime, directory, loops, observer="", 
     worker = directory / "worker.py"
     pypy_stats = jit and runtime == "pypy"
     worker.write_text((PYPY_SNAPSHOT if pypy_stats else "") + CORPUS_WORKER)
-    deadline = time.monotonic() + 110
+    # Budget for all three warmups as well as the measured values.
+    deadline = time.monotonic() + 180
     stderr = directory / "stderr.log"
     tasks = {}
     with contextlib.ExitStack() as stack:
@@ -1372,25 +1373,30 @@ def arm(section, runtime, site, scratch):
     command = runtime_command(runtime)
     prefix = shlex.split(os.environ.get("LUCIFER_PREFIX", "")) if runtime == "lucifer" else []
     target = prefix + command
-    if section == "awfy":
-        yield from awfy_rows(runtime, target, scratch, sorted(bench_tool("awfy").INNER))
-    elif section in ("corpus", "corpus-rest"):
-        corpus = bench_tool("corpus")
-        names = sorted((corpus.pyperformance(site).keys() | corpus.EXCLUDED.keys()) - set(corpus.STARTUP))
-        # Fresh processes and event replays add work to each corpus measurement.
-        # Split each runtime at the same manifest so each arm stays short.
-        mid = len(names) // 2
-        if section == "corpus":
-            yield from cold_rows(runtime, command, site, scratch)
-            yield from boundary_rows(runtime, target, site, scratch)
-            names = names[:mid]
-        else:
-            names = names[mid:]
-        yield from corpus_rows(runtime, target, site, scratch, names)
-    elif section == "web":
+    if section == "web":
         web_site = Path(os.environ.get("WEB_SITE", site))
         yield from flask_rows(runtime, target, web_site, scratch)
         yield from flask_profile_rows(runtime, target, web_site, scratch)
+        return
+    if section == "awfy":
+        yield from awfy_rows(runtime, target, scratch, sorted(bench_tool("awfy").INNER))
+        if runtime != "lucifer":
+            return
+    corpus = bench_tool("corpus")
+    names = sorted((corpus.pyperformance(site).keys() | corpus.EXCLUDED.keys()) - set(corpus.STARTUP))
+    mid = len(names) // 2
+    # Lucifer spends longer replaying the async programs at the start of the
+    # manifest. Move the next group to its shorter AWFY arm.
+    split = len(names) // 5 if runtime == "lucifer" else mid
+    if section == "corpus":
+        yield from cold_rows(runtime, command, site, scratch)
+        yield from boundary_rows(runtime, target, site, scratch)
+        names = names[:split]
+    elif section == "awfy":
+        names = names[split:mid]
+    else:
+        names = names[mid:]
+    yield from corpus_rows(runtime, target, site, scratch, names)
 
 
 def worker(args):
