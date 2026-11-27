@@ -10,10 +10,16 @@ BEGIN, END = '<!-- stats:begin -->', '<!-- stats:end -->'
 HEADLINES = {
     'compute': 'Pure-Python compute vs Go / PyPy',
     'held-out': 'Held-out real Python programs vs CPython 3.14t',
-    'web': 'Web (Flask, 1 and 8 CPUs) vs CPython 3.14t',
+    'web': 'Flask throughput and application time vs CPython 3.14t',
     'short': 'Short programs (CLI, startup) vs CPython 3.14t',
     'native': 'Native-heavy programs vs CPython 3.14t',
-    'steady': 'Programs that reach steady state',
+    'churn': 'JIT churn after warm-up',
+}
+CARD_TOTALS = {
+    'card-1': 'All compute programs (time)',
+    'card-2': 'All application paths (time per operation or request)',
+    'card-3': 'All short programs (time)',
+    'card-4': 'All native and mixed programs (time)',
 }
 CORRECTNESS = {
     'capi': 'C-API functions implemented',
@@ -31,11 +37,16 @@ def table(results):
     date = path.parent.name.removeprefix('scorecard-')
     with path.open(newline='') as source:
         records = {(r['kind'], r['program']): r for r in csv.DictReader(source)
-                   if r['kind'] in ('headline', 'gate')}
+                   if r['kind'] in ('headline', 'aggregate', 'gate')}
     lines = ['| Metric | Score | Counts | Date |', '|---|---|---|---|']
-    for kind, labels in [('headline', HEADLINES), ('gate', CORRECTNESS)]:
+    for kind, labels in [('headline', HEADLINES), ('aggregate', CARD_TOTALS), ('gate', CORRECTNESS)]:
         for program, label in labels.items():
             record = records.get((kind, program))
+            if kind == 'aggregate' and record is None and ('headline', 'steady') in records:
+                continue
+            if program == 'churn' and record is None and ('headline', 'steady') in records:
+                # The earlier scorecards inferred warm-up from timings and did not measure this card.
+                record = {'score': 'not measured', 'counts': '—', 'date': date}
             if record is None:
                 raise ValueError(f'{path} is missing {kind} {program}')
             cells = [label, record['score'], record['counts'], record['date'] or date]

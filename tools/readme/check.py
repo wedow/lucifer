@@ -9,13 +9,14 @@ import unittest
 STATS = Path(__file__).resolve().parent / 'stats'
 README = '# Title\n\n<!-- stats:begin -->\nold\n<!-- stats:end -->\n\nLicense.\n'
 SCORES = [
-    ('compute', '1.9× Go time / 1.2× PyPy time', '2/14 Go, 4/14 PyPy'),
-    ('held-out', '0.82× stock time', '4/37 paired'),
-    ('web', '1 CPU 0.27× / 8 CPUs —', '1/2 layouts'),
-    ('short', 'CLI 3.9× / startup 2.2× time', '6/6 CLI, 3/3 startup'),
-    ('native', 'majority 2.3× / mixed 1.9× time', '20/20 majority, 27/27 mixed'),
-    ('steady', '4/11 settled', '6 unsettled, 1 unavailable'),
+    ('compute', '1.9× Go (1.6–2.2×), 14/14', '0 failed'),
+    ('held-out', 'stock 0.82× (0.7–0.95×), 37/37', 'stock 0 failed'),
+    ('web', '1 CPU 0.27× (0.23–0.31×), 1/1<br>8 CPUs —, 0/1', '1 CPU 0 failed<br>8 CPUs 1 failed'),
+    ('short', 'CLI 3.9× (3.4–4.4×), 6/6', 'CLI 0 failed'),
+    ('native', 'majority 2.3× (1.9–2.9×), 20/20', 'majority 0 failed'),
+    ('churn', 'FAIL: 4/11 with churn', '0 failed'),
 ]
+TOTALS = [(f'card-{i}', 'stock 0.8× (0.7–0.9×), 14/14', 'stock 0 failed') for i in range(1, 5)]
 GATES = [
     ('capi', '70.8%', '1,153 of 1,628', '2026-01-02'),
     ('numpy', '90.0%', '45 of 50 collected', '2025-12-28'),
@@ -42,6 +43,8 @@ class StatsCheck(unittest.TestCase):
             writer.writerow(['kind', 'program', 'score', 'counts', 'date', 'status'])
             for program, score, counts in reversed(SCORES):
                 writer.writerow(['headline', program, score, counts, '', ''])
+            for program, score, counts in TOTALS:
+                writer.writerow(['aggregate', program, score, counts, '', ''])
             for program, score, counts, date in GATES:
                 writer.writerow(['gate', program, score, counts, date, 'ok'])
             # Raw programs and command-level gates also live in this file.
@@ -55,12 +58,14 @@ class StatsCheck(unittest.TestCase):
     def test_latest_record_supplies_each_card_and_gate(self):
         result = self.update()
         rows = [line.split(' | ') for line in result.splitlines() if line.startswith('| ')]
-        self.assertEqual(len(rows), 12)  # header, six score rows and five correctness rows
+        self.assertEqual(len(rows), 16)  # header, six score rows, four card totals and five correctness rows
         for row, (_, score, counts) in zip(rows[1:7], SCORES):
             self.assertEqual(row[1:], [score, counts, '2026-01-02 |'])
-        for row, (_, score, counts, date) in zip(rows[7:], GATES):
+        for row, (_, score, counts) in zip(rows[7:11], TOTALS):
+            self.assertEqual(row[1:], [score, counts, '2026-01-02 |'])
+        for row, (_, score, counts, date) in zip(rows[11:], GATES):
             self.assertEqual(row[1:], [score, counts, date + ' |'])
-        for index, label in enumerate(['Go / PyPy', 'Held-out', 'Flask', 'Short programs', 'Native', 'steady state'], 1):
+        for index, label in enumerate(['Go / PyPy', 'Held-out', 'Flask', 'Short programs', 'Native', 'JIT churn'], 1):
             self.assertIn(label, rows[index][0])
         self.assertTrue(result.startswith('# Title\n\n<!-- stats:begin -->\n'))
         self.assertTrue(result.endswith('\n<!-- stats:end -->\n\nLicense.\n'))

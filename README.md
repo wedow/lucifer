@@ -8,7 +8,7 @@ The bar:
 - The standard library, built-in types included, is mostly Python compiled by the JIT over a small set of native primitives.
 - Every speed claim is measured against CPython, PyPy and free-threaded CPython, across a broad corpus, never one benchmark.
 
-The daily scorecards compare Lucifer with the named reference runtimes. Lower time ratios are faster. The Flask row measures requests per second, where higher is faster.
+The daily scorecards compare Lucifer with the named reference runtimes. Lower time ratios are faster. Higher throughput ratios are faster for the Flask CPU layouts. Each timing score reports its propagated interval and program coverage.
 
 <!-- stats:begin -->
 | Metric | Score | Counts | Date |
