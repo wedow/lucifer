@@ -129,15 +129,17 @@ def add_ratios(rows):
             row["ops_per_s"] = 1 / row["seconds"]
         if row.get("rps") and row.get("layout") == "disjoint":
             one = indexed.get((2, "flask.1", row["runtime"]), {})
-            if row["status"] == one.get("status") == "ok" and one.get("rps"):
+            if row["status"] in ("ok", "request errors") and one.get("status") in ("ok", "request errors") and one.get("rps"):
                 row["scaling"] = row["rps"] / one["rps"]
         for label in ("cpython", "pypy", "go"):
             ref = indexed.get((row["card"], row["program"], label), {})
             for prefix, keys in (("over_", ("seconds", "seconds_low", "seconds_high")),
                                  ("whole_over_", ("whole_mean_s", "whole_low_s", "whole_high_s")),
                                  ("rps_over_", ("rps", "rps_low", "rps_high"))):
-                if prefix != "whole_over_" and (row["status"] != "ok" or ref.get("status") != "ok"):
-                    continue
+                if prefix != "whole_over_":
+                    completed = ("ok", "request errors") if prefix == "rps_over_" else ("ok",)
+                    if row["status"] not in completed or ref.get("status") not in completed:
+                        continue
                 left, right = interval(row, *keys), interval(ref, *keys)
                 if left and right:
                     name = prefix + label
@@ -708,7 +710,7 @@ def flask_rows(runtime, command, site, scratch):
             mean, stdev = statistics.mean(rates), statistics.stdev(rates)
             low, high = mean_interval(mean, stdev, len(rates))
             whole = flask_whole(web, runtime, command, site, out, cpus, client, reference.read_text())
-            yield dict(base, card=2, status='request errors' if errors else status, response_check=check,
+            yield dict(base, card=2, status='request errors' if errors and status == 'ok' else status, response_check=check,
                        rps=mean, rps_stdev=stdev, rps_low=low, rps_high=high, errors=errors,
                        concurrent_check='ok' if not problems else ', '.join(problems), **whole,
                        cpus=len(cpus), repeats=len(rates), p99_ms=statistics.median(p['p99_ms'] for p in points))

@@ -64,6 +64,14 @@ class ScorecardMeasurements(unittest.TestCase):
             output = measure(web, 'cpython', ['candidate'], Path('site'), Path('scratch'), [0], [1], 'digest')
         self.assertEqual(output, '1 candidate-only')
 
+    def test_web_ratio_keeps_completed_run_with_request_errors(self):
+        stock = dict(card=2, program='flask.1', runtime='cpython', status='request errors',
+                     rps=100., rps_low=90., rps_high=110.)
+        candidate = dict(stock, runtime='lucifer', status='ok', rps=50., rps_low=45., rps_high=55.)
+        SCORECARD['add_ratios']([stock, candidate])
+        self.assertEqual(candidate['rps_over_cpython'], .5)
+        self.assertEqual(stock['status'], 'request errors')
+
     def test_churn_counts_first_build_during_measurement(self):
         events = ['jit-ev 1.1 build cold ms 13.0 : first',
                   'jit-ev 2.1 build late ms 1.5 : first',
