@@ -13,21 +13,21 @@ The daily scorecards compare Lucifer with the named reference runtimes. Lower ti
 <!-- stats:begin -->
 | Metric | Score | Counts | Date |
 |---|---|---|---|
-| Pure-Python compute vs Go / PyPy | Go 10.7× (10–11.3×), 14/14<br>PyPy 3.3× (3.06–3.44×), 14/14 | Go 0 failed<br>PyPy 0 failed | 2026-11-27 |
-| Held-out real Python programs vs CPython 3.14t | stock 1.03× (0.937–1.13×), 36/36 | stock 0 failed | 2026-11-27 |
-| Flask throughput and application time vs CPython 3.14t | 1 CPU 0.266× (0.246–0.285×), 1/1<br>8 CPUs —, 0/1<br>applications (time) 2.12× (1.94–2.32×), 9/9 | 1 CPU 0 failed<br>8 CPUs 1 failed<br>applications (time) 0 failed | 2026-11-27 |
-| Short programs (CLI, startup) vs CPython 3.14t | CLI 4.38× (4.1–4.67×), 6/6<br>startup 2.26× (2.01–2.54×), 3/3<br>fresh process 5.5× (4.23–7.22×), 1/1 | CLI 0 failed<br>startup 0 failed<br>fresh process 0 failed | 2026-11-27 |
-| Native-heavy programs vs CPython 3.14t | majority 2.25× (2.07–2.44×), 20/20<br>mixed 2× (1.82–2.19×), 28/28<br>boundary 3.49× (3.19–3.82×), 2/2<br>unclassified —, 0/1 | majority 0 failed<br>mixed 0 failed<br>boundary 0 failed<br>unclassified 1 failed | 2026-11-27 |
-| JIT churn after warm-up | Lucifer FAIL 92/111 with churn<br>PyPy FAIL 76/107 with churn | Lucifer 2 unmeasured<br>PyPy 6 unmeasured | 2026-11-27 |
-| All compute programs (time) | stock 0.694× (0.639–0.754×), 50/50<br>PyPy 3.87× (3.42–4.39×), 49/50<br>Go 10.7× (10–11.3×), 14/14 | stock 0 failed<br>PyPy 1 failed<br>Go 0 failed | 2026-11-27 |
-| All application paths (time per operation or request) | stock 2.25× (2.05–2.45×), 10/11<br>PyPy 4.11× (3.44–4.98×), 9/11 | stock 1 failed<br>PyPy 2 failed | 2026-11-27 |
-| All short programs (time) | stock 3.67× (3.32–4.06×), 10/10<br>PyPy 1.56× (1.42–1.7×), 10/10 | stock 0 failed<br>PyPy 0 failed | 2026-11-27 |
-| All native and mixed programs (time) | stock 2.14× (1.96–2.34×), 50/51<br>PyPy 2.39× (2.05–inf×), 48/51 | stock 1 failed<br>PyPy 3 failed | 2026-11-27 |
-| C-API functions implemented | 70.8% | 1,153 of 1,628 | 2026-11-27 |
+| Pure-Python compute vs Go / PyPy | Go 9.92× (9–10.6×), 14/14<br>PyPy 3.21× (2.91–3.4×), 14/14 | Go 0 failed<br>PyPy 0 failed | 2026-11-28 |
+| Held-out real Python programs vs CPython 3.14t | stock 1.03× (0.925–1.15×), 35/35 | stock 0 failed | 2026-11-28 |
+| Flask throughput and application time vs CPython 3.14t | 1 CPU 0.268× (0.249–0.288×), 1/1<br>8 CPUs 0.399× (0.39–0.408×), 1/1<br>applications (time) 2.21× (1.98–2.48×), 9/9 | 1 CPU 0 failed<br>8 CPUs 0 failed<br>applications (time) 0 failed | 2026-11-28 |
+| Short programs (CLI, startup) vs CPython 3.14t | CLI 3.87× (3.56–4.22×), 6/6<br>startup 2.47× (2.07–2.96×), 3/3<br>fresh process 5.13× (4.68–5.64×), 1/1 | CLI 0 failed<br>startup 0 failed<br>fresh process 0 failed | 2026-11-28 |
+| Native-heavy programs vs CPython 3.14t | majority 2.41× (2.16–2.68×), 21/21<br>mixed 1.96× (1.76–2.18×), 28/28<br>boundary 3.21× (2.96–3.49×), 2/2<br>unclassified —, 0/1 | majority 0 failed<br>mixed 0 failed<br>boundary 0 failed<br>unclassified 1 failed | 2026-11-28 |
+| JIT churn after warm-up | Lucifer FAIL 92/111 with churn<br>PyPy FAIL 76/107 with churn | Lucifer 1 unmeasured<br>PyPy 5 unmeasured | 2026-11-28 |
+| All compute programs (time) | stock 0.687× (0.622–0.753×), 49/49<br>PyPy 3.66× (3.17–4.21×), 48/49<br>Go 9.92× (9–10.6×), 14/14 | stock 0 failed<br>PyPy 1 failed<br>Go 0 failed | 2026-11-28 |
+| All application paths (time per operation or request) | stock 2.35× (2.12–2.6×), 11/11<br>PyPy 3.52× (3.02–4.13×), 10/11 | stock 0 failed<br>PyPy 1 failed | 2026-11-28 |
+| All short programs (time) | stock 3.48× (3.11–3.9×), 10/10<br>PyPy 1.6× (1.47–1.73×), 10/10 | stock 0 failed<br>PyPy 0 failed | 2026-11-28 |
+| All native and mixed programs (time) | stock 2.17× (1.95–2.42×), 51/52<br>PyPy 2.42× (2.04–inf×), 49/52 | stock 1 failed<br>PyPy 3 failed | 2026-11-28 |
+| C-API functions implemented | 70.8% | 1,153 of 1,628 | 2026-11-28 |
 | numpy test suite passing | 97.1% | 50,745 of 52,273 collected | 2026-11-15 |
-| `Lib/test` passing, relative to CPython | 79.8% | 40,528 of CPython's 50,816 | 2026-11-21 |
-| Kernel programs passing (worst measured mode) | 100.0% | 972 of 972, 3 modes (worst lane) | 2026-11-27 |
-| Differential programs matching CPython (worst measured JIT mode) | 100.0% | 193 of 193, 2 modes (worst lane) | 2026-11-27 |
+| `Lib/test` passing, relative to CPython | 76.9% | 39,092 of CPython's 50,816 | 2026-11-28 |
+| Kernel programs passing (worst measured mode) | 100.0% | 972 of 972, 3 modes (worst lane) | 2026-11-28 |
+| Differential programs matching CPython (worst measured JIT mode) | 100.0% | 193 of 193, 2 modes (worst lane) | 2026-11-28 |
 <!-- stats:end -->
 
 License: MIT (see LICENSE). Vendored third-party code under `third_party/` keeps its own license.
